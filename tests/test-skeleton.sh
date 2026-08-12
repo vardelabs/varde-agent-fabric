@@ -10,6 +10,29 @@ fi
 
 "$root/scripts/validate-skeleton.sh"
 
+expect_ignored() {
+  local path=$1
+  git -C "$root" check-ignore --no-index -q -- "$path" || {
+    printf 'expected ignored path is trackable: %s\n' "$path" >&2
+    exit 1
+  }
+}
+
+expect_trackable() {
+  local path=$1
+  if git -C "$root" check-ignore --no-index -q -- "$path"; then
+    printf 'expected trackable path is ignored: %s\n' "$path" >&2
+    exit 1
+  fi
+}
+
+expect_ignored 'inference/audit/state.jsonl'
+expect_ignored 'dispatch/runtime/state.json'
+expect_ignored 'inference/sockets/broker.sock'
+expect_ignored 'eval/private-overlay/deploy.yaml'
+expect_ignored 'inference/logs/broker.log'
+expect_trackable 'docs/logs/design.md'
+
 archive=$(mktemp)
 probe=$(mktemp -d)
 trap 'rm -f "$archive"; rm -rf "$probe"' EXIT
@@ -40,14 +63,18 @@ make_probe
 (cd "$probe" && ./scripts/validate-skeleton.sh)
 
 for required in \
-  README.md CONTRIBUTING.md .gitignore \
-  dispatch/README.md contracts/README.md inference/README.md \
-  inference/grammars/README.md inference/systemd/README.md \
+  README.md CONTRIBUTING.md .gitignore .github/README.md \
+  .github/workflows/skeleton.yml dispatch/README.md contracts/README.md \
+  inference/README.md inference/grammars/README.md inference/systemd/README.md \
   eval/README.md docs/README.md scripts/README.md tests/README.md; do
   make_probe
   rm "$probe/$required"
   expect_rejection "missing or empty required skeleton file: $required"
 done
+
+make_probe
+: > "$probe/CONTRIBUTING.md"
+expect_rejection 'missing or empty required skeleton file: CONTRIBUTING.md'
 
 make_probe
 rm "$probe/docs/README.md"
@@ -80,5 +107,14 @@ expect_rejection 'scripts index is missing entry: unindexed.py'
 make_probe
 ln -s /bin/echo "$probe/scripts/unindexed.sh"
 expect_rejection 'scripts index is missing entry: unindexed.sh'
+
+make_probe
+mkdir "$probe/scripts/lib"
+printf '#!/usr/bin/env bash\n' > "$probe/scripts/lib/helper.sh"
+expect_rejection 'scripts directory must remain flat'
+
+make_probe
+printf 'name: unindexed\n' > "$probe/.github/workflows/unindexed.yml"
+expect_rejection 'CI index is missing entry: unindexed.yml'
 
 printf 'skeleton layout rejection: ok\n'

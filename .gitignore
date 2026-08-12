@@ -18,10 +18,10 @@
 /models/
 /weights/
 /logs/
-/audit/
-/runtime/
-/sockets/
-/private-overlay/
+audit/
+runtime/
+sockets/
+private-overlay
 /private-overlay.*
 *.sock
 *.log

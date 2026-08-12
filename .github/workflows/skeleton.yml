@@ -19,9 +19,15 @@ jobs:
       - run: bash -n tests/test-skeleton.sh
       - run: ./tests/test-skeleton.sh
       - name: Check changed whitespace
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            git diff --check "$PR_BASE_SHA" HEAD
+          elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            git diff --check "$EVENT_BEFORE" HEAD
           else
-            git diff --check HEAD^ HEAD
+            git diff --check --root HEAD
           fi
