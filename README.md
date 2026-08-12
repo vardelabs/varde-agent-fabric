@@ -30,6 +30,7 @@ validation, and any outward action.
 | `inference/` | Local inference broker, client, grammars, and service templates. |
 | `eval/` | Replay evaluation interfaces and synthetic fixtures. |
 | `docs/` | Architecture, threat model, and operational design. |
+| `scripts/` | Documented repository-maintenance scripts. |
 | `tests/` | Cross-component safety and compatibility tests. |
 
 Each root has its own README with filing and use rules.
