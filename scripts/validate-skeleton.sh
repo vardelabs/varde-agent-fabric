@@ -28,19 +28,18 @@ grep -Fq '## Public-ready rule' README.md || {
   exit 1
 }
 
-grep -Fq 'repository-write, shell, GitHub, or posting authority' \
+grep -Eq 'does not receive[[:space:]]+repository-write,[[:space:]]+shell,[[:space:]]+GitHub,[[:space:]]+or posting authority' \
   inference/README.md || {
   printf 'inference boundary is missing\n' >&2
   exit 1
 }
 
-for script in scripts/*.sh; do
-  [[ -f "$script" ]] || continue
+while IFS= read -r -d '' script; do
   basename=${script##*/}
   grep -Fq "\`$basename\`" scripts/README.md || {
     printf 'scripts index is missing entry: %s\n' "$basename" >&2
     exit 1
   }
-done
+done < <(find scripts -maxdepth 1 -type f ! -name README.md -print0)
 
 printf 'skeleton layout and documented boundaries: ok\n'

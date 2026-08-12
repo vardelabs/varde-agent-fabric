@@ -2,20 +2,26 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  printf 'skeleton test requires a Git worktree\n' >&2
+  exit 1
+fi
+
 "$root/scripts/validate-skeleton.sh"
 
 archive=$(mktemp)
 probe=$(mktemp -d)
 trap 'rm -f "$archive"; rm -rf "$probe"' EXIT
-git -C "$root" archive --format=tar HEAD > "$archive"
+(
+  cd "$root"
+  git ls-files -z | tar --null -T - -cf "$archive"
+)
 
 make_probe() {
   rm -rf "$probe"
   mkdir -p "$probe"
   tar -xf "$archive" -C "$probe"
-  cp "$root/scripts/validate-skeleton.sh" "$probe/scripts/validate-skeleton.sh"
-  cp "$root/tests/test-skeleton.sh" "$probe/tests/test-skeleton.sh"
-  cp "$root/README.md" "$probe/README.md"
 }
 
 expect_rejection() {
@@ -41,6 +47,11 @@ for required in \
 done
 
 make_probe
+rm "$probe/docs/README.md"
+mkdir "$probe/docs/README.md"
+expect_rejection 'missing or empty required skeleton file: docs/README.md'
+
+make_probe
 python3 - "$probe/README.md" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
@@ -52,13 +63,15 @@ make_probe
 python3 - "$probe/inference/README.md" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
-p.write_text(p.read_text().replace('repository-write, shell, GitHub, or posting authority', 'repository write authority'))
+p.write_text(p.read_text().replace(
+    'does not receive repository-write, shell, GitHub, or posting authority',
+    'receives repository-write, shell, GitHub, or posting authority',
+))
 PY
 expect_rejection 'inference boundary is missing'
 
 make_probe
-printf '#!/usr/bin/env bash\n' > "$probe/scripts/unindexed.sh"
-chmod +x "$probe/scripts/unindexed.sh"
-expect_rejection 'scripts index is missing entry: unindexed.sh'
+printf '#!/usr/bin/env python3\n' > "$probe/scripts/unindexed.py"
+expect_rejection 'scripts index is missing entry: unindexed.py'
 
 printf 'skeleton layout rejection: ok\n'

@@ -1,5 +1,8 @@
 name: Skeleton validation
 
+permissions:
+  contents: read
+
 on:
   pull_request:
   push:
@@ -10,4 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: bash -n scripts/validate-skeleton.sh tests/test-skeleton.sh
       - run: ./tests/test-skeleton.sh
+      - run: git diff --check
