@@ -12,9 +12,13 @@ cp -a "$root/." "$probe/"
 # separate human security gate, because a heuristic scanner cannot prove every
 # reachable Git object is free of secrets or internal material.
 rm "$probe/dispatch/README.md"
-if (cd "$probe" && ./scripts/validate-skeleton.sh); then
+if output=$(cd "$probe" && ./scripts/validate-skeleton.sh 2>&1); then
   printf 'validator accepted a malformed skeleton\n' >&2
   exit 1
 fi
+case "$output" in
+  *'missing or empty required skeleton file: dispatch/README.md'*) ;;
+  *) printf 'validator rejected probe for the wrong reason\n' >&2; exit 1 ;;
+esac
 
 printf 'skeleton layout rejection: ok\n'

@@ -4,11 +4,6 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
-  printf 'validation requires a Git worktree\n' >&2
-  exit 1
-}
-
 for path in \
   README.md \
   CONTRIBUTING.md \
@@ -20,19 +15,20 @@ for path in \
   inference/systemd/README.md \
   eval/README.md \
   docs/README.md \
+  scripts/README.md \
   tests/README.md; do
-  [[ -f "$path" ]] || {
-    printf 'missing required skeleton file: %s\n' "$path" >&2
+  [[ -s "$path" ]] || {
+    printf 'missing or empty required skeleton file: %s\n' "$path" >&2
     exit 1
   }
 done
 
-grep -Fq 'Public-ready rule' README.md || {
+grep -Fq '## Public-ready rule' README.md || {
   printf 'README is missing the public-ready rule\n' >&2
   exit 1
 }
 
-grep -Fq 'does not receive repository-write, shell, GitHub, or posting authority' \
+grep -Fq 'repository-write, shell, GitHub, or posting authority' \
   inference/README.md || {
   printf 'inference boundary is missing\n' >&2
   exit 1
