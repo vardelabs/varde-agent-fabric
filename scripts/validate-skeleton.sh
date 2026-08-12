@@ -17,7 +17,7 @@ for path in \
   docs/README.md \
   scripts/README.md \
   tests/README.md; do
-  [[ -s "$path" ]] || {
+  [[ -f "$path" && -s "$path" ]] || {
     printf 'missing or empty required skeleton file: %s\n' "$path" >&2
     exit 1
   }
@@ -33,5 +33,14 @@ grep -Fq 'repository-write, shell, GitHub, or posting authority' \
   printf 'inference boundary is missing\n' >&2
   exit 1
 }
+
+for script in scripts/*.sh; do
+  [[ -f "$script" ]] || continue
+  basename=${script##*/}
+  grep -Fq "\`$basename\`" scripts/README.md || {
+    printf 'scripts index is missing entry: %s\n' "$basename" >&2
+    exit 1
+  }
+done
 
 printf 'skeleton layout and documented boundaries: ok\n'
