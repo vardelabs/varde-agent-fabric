@@ -40,6 +40,6 @@ while IFS= read -r -d '' script; do
     printf 'scripts index is missing entry: %s\n' "$basename" >&2
     exit 1
   }
-done < <(find scripts -maxdepth 1 -type f ! -name README.md -print0)
+done < <(find scripts -maxdepth 1 \( -type f -o -type l \) ! -name README.md -print0)
 
 printf 'skeleton layout and documented boundaries: ok\n'

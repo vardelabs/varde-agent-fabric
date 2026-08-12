@@ -12,7 +12,16 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: bash -n scripts/validate-skeleton.sh tests/test-skeleton.sh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - run: bash -n scripts/validate-skeleton.sh
+      - run: bash -n tests/test-skeleton.sh
       - run: ./tests/test-skeleton.sh
-      - run: git diff --check
+      - name: Check changed whitespace
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
+          else
+            git diff --check HEAD^ HEAD
+          fi
