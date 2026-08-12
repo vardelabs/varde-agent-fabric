@@ -36,6 +36,9 @@ expect_rejection() {
   esac
 }
 
+make_probe
+(cd "$probe" && ./scripts/validate-skeleton.sh)
+
 for required in \
   README.md CONTRIBUTING.md .gitignore \
   dispatch/README.md contracts/README.md inference/README.md \
@@ -73,5 +76,9 @@ expect_rejection 'inference boundary is missing'
 make_probe
 printf '#!/usr/bin/env python3\n' > "$probe/scripts/unindexed.py"
 expect_rejection 'scripts index is missing entry: unindexed.py'
+
+make_probe
+ln -s /bin/echo "$probe/scripts/unindexed.sh"
+expect_rejection 'scripts index is missing entry: unindexed.sh'
 
 printf 'skeleton layout rejection: ok\n'
