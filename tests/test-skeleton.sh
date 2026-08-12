@@ -26,16 +26,70 @@ expect_trackable() {
   fi
 }
 
-expect_ignored 'inference/audit/state.jsonl'
-expect_ignored 'dispatch/runtime/state.json'
-expect_ignored 'inference/sockets/broker.sock'
+expect_ignored 'logs/keep.txt'
+expect_ignored 'audit/keep.txt'
+expect_ignored 'runtime/keep.txt'
+expect_ignored 'sockets/keep.txt'
+expect_ignored 'weights/keep.txt'
+expect_ignored 'private-overlay/keep.yaml'
+expect_ignored 'private-overlay.example'
+expect_ignored 'dispatch/private-overlay'
+expect_ignored 'dispatch/audit/keep.txt'
+expect_ignored 'dispatch/runtime/keep.txt'
+expect_ignored 'dispatch/sockets/keep.txt'
+expect_ignored 'dispatch/private-overlay/keep.txt'
+expect_ignored 'inference/audit/keep.txt'
+expect_ignored 'inference/runtime/keep.txt'
+expect_ignored 'inference/sockets/keep.txt'
+expect_ignored 'inference/private-overlay/keep.txt'
+expect_ignored 'inference/private-overlay'
 expect_ignored 'eval/private-overlay/deploy.yaml'
-expect_ignored 'inference/logs/broker.log'
-expect_trackable 'docs/logs/design.md'
+expect_ignored 'inference/logs/broker.log.1'
+expect_ignored 'inference/weights/config.json'
+expect_ignored 'eval/fixtures/broker.sock'
+expect_ignored 'eval/fixtures/broker.log'
+expect_trackable 'docs/audit/threat-model.md'
+expect_trackable 'eval/fixtures/runtime/case.json'
+expect_trackable 'eval/fixtures/models/config.json'
+
+workflow=$root/.github/workflows/skeleton.yml
+grep -Fq 'empty_tree=$(git hash-object -t tree /dev/null)' "$workflow" || {
+  printf 'workflow fallback does not compute the empty tree\n' >&2
+  exit 1
+}
+grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
+  printf 'workflow fallback does not check against the empty tree\n' >&2
+  exit 1
+}
+if grep -Fq 'git diff --check --root HEAD' "$workflow"; then
+  printf 'workflow fallback uses the ineffective --root form\n' >&2
+  exit 1
+fi
 
 archive=$(mktemp)
 probe=$(mktemp -d)
-trap 'rm -f "$archive"; rm -rf "$probe"' EXIT
+whitespace_probe=$(mktemp -d)
+trap 'rm -f "$archive"; rm -rf "$probe" "$whitespace_probe"' EXIT
+git -C "$whitespace_probe" init -q
+git -C "$whitespace_probe" config user.name fixture
+git -C "$whitespace_probe" config user.email fixture@example.invalid
+printf 'clean\ntrailing \n<<<<<<< HEAD\n' > "$whitespace_probe/file.txt"
+git -C "$whitespace_probe" add file.txt
+git -C "$whitespace_probe" commit -qm fixture
+empty_tree=$(git -C "$whitespace_probe" hash-object -t tree /dev/null)
+if output=$(git -C "$whitespace_probe" diff --check "$empty_tree" HEAD 2>&1); then
+  printf 'empty-tree whitespace check accepted malformed initial commit\n' >&2
+  exit 1
+fi
+[[ "$output" == *'trailing whitespace'* ]] || {
+  printf 'empty-tree whitespace check missed trailing whitespace\n' >&2
+  exit 1
+}
+[[ "$output" == *'leftover conflict marker'* ]] || {
+  printf 'empty-tree whitespace check missed conflict marker\n' >&2
+  exit 1
+}
+
 (
   cd "$root"
   git ls-files -z | tar --null -T - -cf "$archive"
@@ -115,6 +169,10 @@ expect_rejection 'scripts directory must remain flat'
 
 make_probe
 printf 'name: unindexed\n' > "$probe/.github/workflows/unindexed.yml"
+expect_rejection 'CI index is missing entry: unindexed.yml'
+
+make_probe
+ln -s /bin/echo "$probe/.github/workflows/unindexed.yml"
 expect_rejection 'CI index is missing entry: unindexed.yml'
 
 printf 'skeleton layout rejection: ok\n'
