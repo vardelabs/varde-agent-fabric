@@ -25,6 +25,7 @@ validation, and any outward action.
 
 | Path | Purpose |
 | --- | --- |
+| `.github/` | CI workflow definitions and their index. |
 | `dispatch/` | Bounded-work dispatch interfaces and adapters. |
 | `contracts/` | Versioned, transport-neutral artifact contracts. |
 | `inference/` | Local inference broker, client, grammars, and service templates. |

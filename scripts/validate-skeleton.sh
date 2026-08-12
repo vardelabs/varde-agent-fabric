@@ -8,6 +8,8 @@ for path in \
   README.md \
   CONTRIBUTING.md \
   .gitignore \
+  .github/README.md \
+  .github/workflows/skeleton.yml \
   dispatch/README.md \
   contracts/README.md \
   inference/README.md \
@@ -41,5 +43,19 @@ while IFS= read -r -d '' script; do
     exit 1
   }
 done < <(find scripts -maxdepth 1 \( -type f -o -type l \) ! -name README.md -print0)
+
+nested=$(find scripts -mindepth 1 -type d -print -quit)
+if [[ -n "$nested" ]]; then
+  printf 'scripts directory must remain flat\n' >&2
+  exit 1
+fi
+
+while IFS= read -r -d '' workflow; do
+  basename=${workflow##*/}
+  grep -Fq "\`$basename\`" .github/README.md || {
+    printf 'CI index is missing entry: %s\n' "$basename" >&2
+    exit 1
+  }
+done < <(find .github/workflows -maxdepth 1 \( -type f -o -type l \) -print0)
 
 printf 'skeleton layout and documented boundaries: ok\n'
