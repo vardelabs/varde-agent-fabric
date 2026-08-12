@@ -29,5 +29,6 @@ jobs:
           elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
             git diff --check "$EVENT_BEFORE" HEAD
           else
-            git diff --check --root HEAD
+            empty_tree=$(git hash-object -t tree /dev/null)
+            git diff --check "$empty_tree" HEAD
           fi
