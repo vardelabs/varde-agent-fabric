@@ -9,6 +9,6 @@ A broker is compute infrastructure. It accepts bounded structured requests, auth
 ## Rules
 
 - Do not expose an unauthenticated network listener as a tenant boundary.
-- Keep real model paths, model weights, sockets, and logs out of Git. `logs/` and `weights/` directories are ignored at any depth. The operational ignore rules cover root-level state, component state under `dispatch/` and `inference/`, and the declared `eval/private-overlay` boundary; documentation and synthetic fixtures outside those paths remain reviewable.
+- Keep real model paths, model weights, sockets, and logs out of Git. The operational ignore rules cover root-level state plus declared `dispatch/` and `inference/` runtime directories for logs, weights, audits, sockets, and private overlays. The `eval/private-overlay` boundary is also private; neutral documentation and synthetic fixtures outside those operational paths remain reviewable, including files in directories named `logs/`, `weights/`, or `runtime/` under public documentation and fixture roots. Sensitive local-artifact extensions remain ignored wherever they appear.
 - Put versioned output grammars in `grammars/`.
 - Put generic service templates in `systemd/`. Deployment overlays stay private.

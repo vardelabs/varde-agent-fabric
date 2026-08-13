@@ -17,6 +17,7 @@ jobs:
           fetch-depth: 0
       - run: bash -n scripts/validate-skeleton.sh
       - run: bash -n tests/test-skeleton.sh
+      - run: ./scripts/validate-skeleton.sh
       - run: ./tests/test-skeleton.sh
       - name: Check changed whitespace
         env:
@@ -26,7 +27,8 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             git diff --check "$PR_BASE_SHA" HEAD
-          elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+          elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]] && \
+               git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null; then
             git diff --check "$EVENT_BEFORE" HEAD
           else
             empty_tree=$(git hash-object -t tree /dev/null)

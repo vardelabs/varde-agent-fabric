@@ -4,6 +4,7 @@
 !.env.example
 .envrc
 .secrets
+# Sensitive local artifacts are ignored wherever they appear.
 *.gguf
 *.safetensors
 *.onnx
@@ -15,23 +16,34 @@
 *.crt
 *.p12
 *.pfx
+# Root deployment and runtime state. Component state is scoped below.
 /models/
-weights/
-logs/
+/weights/
+/logs/
 /audit/
 /runtime/
 /sockets/
 /private-overlay
 /private-overlay.*
+# Declared dispatch runtime state.
 /dispatch/audit/
 /dispatch/runtime/
 /dispatch/sockets/
+/dispatch/logs/
+/dispatch/weights/
 /dispatch/private-overlay
+/dispatch/private-overlay.*
+# Declared inference runtime state.
 /inference/audit/
 /inference/runtime/
 /inference/sockets/
+/inference/logs/
+/inference/weights/
 /inference/private-overlay
-/eval/private-overlay/
+/inference/private-overlay.*
+# Evaluation deployment overlay. Synthetic fixture directories remain public.
+/eval/private-overlay
+/eval/private-overlay.*
 *.sock
 *.log
 __pycache__/
