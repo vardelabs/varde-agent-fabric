@@ -18,7 +18,8 @@ for path in \
   eval/README.md \
   docs/README.md \
   scripts/README.md \
-  tests/README.md; do
+  tests/README.md \
+  tests/test-skeleton.sh; do
   [[ -f "$path" && -s "$path" ]] || {
     printf 'missing or empty required skeleton file: %s\n' "$path" >&2
     exit 1
@@ -33,6 +34,20 @@ grep -Fq '## Public-ready rule' README.md || {
 grep -Eq 'does not receive[[:space:]]+repository-write,[[:space:]]+shell,[[:space:]]+GitHub,[[:space:]]+or posting authority' \
   inference/README.md || {
   printf 'inference boundary is missing\n' >&2
+  exit 1
+}
+
+workflow=.github/workflows/skeleton.yml
+grep -Fq '      - run: ./scripts/validate-skeleton.sh' "$workflow" || {
+  printf 'workflow does not run the skeleton validator\n' >&2
+  exit 1
+}
+grep -Fq '      - run: ./tests/test-skeleton.sh' "$workflow" || {
+  printf 'workflow does not run the skeleton test suite\n' >&2
+  exit 1
+}
+grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
+  printf 'workflow does not guard missing push bases\n' >&2
   exit 1
 }
 

@@ -10,9 +10,53 @@ fi
 
 "$root/scripts/validate-skeleton.sh"
 
+git_hermetic() {
+  env \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_SYSTEM=/dev/null \
+    GIT_CONFIG_COUNT=0 \
+    git "$@"
+}
+
+archive=$(mktemp)
+probe=$(mktemp -d)
+whitespace_probe=$(mktemp -d)
+ignore_probe=$(mktemp -d)
+cleanup() {
+  rm -f "$archive"
+  rm -rf "$probe" "$whitespace_probe" "$ignore_probe"
+}
+trap cleanup EXIT
+
+git_hermetic -c init.templateDir= init -q "$ignore_probe"
+cp "$root/.gitignore" "$ignore_probe/.gitignore"
+mkdir -p "$ignore_probe/.git/info"
+printf 'docs/audit/info-probe.md\n' > "$ignore_probe/.git/info/exclude"
+if ! git_hermetic -C "$ignore_probe" check-ignore --no-index -q -- docs/audit/info-probe.md; then
+  printf 'local Git info exclude probe did not mask its path\n' >&2
+  exit 1
+fi
+: > "$ignore_probe/.git/info/exclude"
+if git_hermetic -C "$ignore_probe" -c core.excludesFile=/dev/null check-ignore --no-index -q -- docs/audit/info-probe.md; then
+  printf 'local Git info exclude was not cleared before repository probes\n' >&2
+  exit 1
+fi
+
+personal_ignore="$ignore_probe/personal-ignore"
+personal_config="$ignore_probe/personal.gitconfig"
+printf 'docs/personal-global-probe.txt\nlogs/keep.txt\ndocs/audit/threat-model.md\n' > "$personal_ignore"
+printf '[core]\n\texcludesFile = %s\n' "$personal_ignore" > "$personal_config"
+export GIT_CONFIG_GLOBAL="$personal_config"
+if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null \
+   git -C "$ignore_probe" check-ignore --no-index -q -- docs/personal-global-probe.txt; then
+  printf 'global Git excludesFile probe did not mask its path\n' >&2
+  exit 1
+fi
+
 expect_ignored() {
   local path=$1
-  git -C "$root" check-ignore --no-index -q -- "$path" || {
+  git_hermetic -C "$ignore_probe" check-ignore --no-index -q -- "$path" || {
     printf 'expected ignored path is trackable: %s\n' "$path" >&2
     exit 1
   }
@@ -20,13 +64,14 @@ expect_ignored() {
 
 expect_trackable() {
   local path=$1
-  if git -C "$root" check-ignore --no-index -q -- "$path"; then
+  if git_hermetic -C "$ignore_probe" check-ignore --no-index -q -- "$path"; then
     printf 'expected trackable path is ignored: %s\n' "$path" >&2
     exit 1
   fi
 }
 
 expect_ignored 'logs/keep.txt'
+expect_ignored 'models/keep.txt'
 expect_ignored 'audit/keep.txt'
 expect_ignored 'runtime/keep.txt'
 expect_ignored 'sockets/keep.txt'
@@ -34,25 +79,53 @@ expect_ignored 'weights/keep.txt'
 expect_ignored 'private-overlay/keep.yaml'
 expect_ignored 'private-overlay.example'
 expect_ignored 'dispatch/private-overlay'
+expect_ignored 'dispatch/private-overlay.yaml'
 expect_ignored 'dispatch/audit/keep.txt'
 expect_ignored 'dispatch/runtime/keep.txt'
 expect_ignored 'dispatch/sockets/keep.txt'
+expect_ignored 'dispatch/logs/keep.txt'
+expect_ignored 'dispatch/weights/keep.txt'
 expect_ignored 'dispatch/private-overlay/keep.txt'
 expect_ignored 'inference/audit/keep.txt'
 expect_ignored 'inference/runtime/keep.txt'
 expect_ignored 'inference/sockets/keep.txt'
+expect_ignored 'inference/logs/keep.txt'
+expect_ignored 'inference/weights/keep.txt'
 expect_ignored 'inference/private-overlay/keep.txt'
 expect_ignored 'inference/private-overlay'
+expect_ignored 'inference/private-overlay.yaml'
+expect_ignored 'eval/private-overlay'
 expect_ignored 'eval/private-overlay/deploy.yaml'
+expect_ignored 'eval/private-overlay.yaml'
 expect_ignored 'inference/logs/broker.log.1'
 expect_ignored 'inference/weights/config.json'
 expect_ignored 'eval/fixtures/broker.sock'
 expect_ignored 'eval/fixtures/broker.log'
+expect_ignored 'eval/fixtures/synthetic.bin'
+expect_ignored 'eval/fixtures/synthetic.gguf'
+expect_ignored 'eval/fixtures/synthetic.pem'
+expect_ignored 'eval/fixtures/synthetic.key'
 expect_trackable 'docs/audit/threat-model.md'
+expect_trackable 'docs/audit/info-probe.md'
+expect_trackable 'docs/logs/design.md'
+expect_trackable 'docs/weights/rationale.md'
+expect_trackable 'contracts/models/schema.json'
+expect_trackable 'contracts/weights/schema.json'
 expect_trackable 'eval/fixtures/runtime/case.json'
+expect_trackable 'eval/fixtures/logs/case.json'
+expect_trackable 'eval/fixtures/weights/tiny.json'
+expect_trackable 'tests/fixtures/logs/sample.txt'
 expect_trackable 'eval/fixtures/models/config.json'
 
 workflow=$root/.github/workflows/skeleton.yml
+grep -Fq '      - run: ./scripts/validate-skeleton.sh' "$workflow" || {
+  printf 'workflow does not run the skeleton validator\n' >&2
+  exit 1
+}
+grep -Fq '      - run: ./tests/test-skeleton.sh' "$workflow" || {
+  printf 'workflow does not run the skeleton test suite\n' >&2
+  exit 1
+}
 grep -Fq 'empty_tree=$(git hash-object -t tree /dev/null)' "$workflow" || {
   printf 'workflow fallback does not compute the empty tree\n' >&2
   exit 1
@@ -61,23 +134,29 @@ grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
   printf 'workflow fallback does not check against the empty tree\n' >&2
   exit 1
 }
+grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
+  printf 'workflow does not guard missing push bases\n' >&2
+  exit 1
+}
 if grep -Fq 'git diff --check --root HEAD' "$workflow"; then
   printf 'workflow fallback uses the ineffective --root form\n' >&2
   exit 1
 fi
 
-archive=$(mktemp)
-probe=$(mktemp -d)
-whitespace_probe=$(mktemp -d)
-trap 'rm -f "$archive"; rm -rf "$probe" "$whitespace_probe"' EXIT
-git -C "$whitespace_probe" init -q
-git -C "$whitespace_probe" config user.name fixture
-git -C "$whitespace_probe" config user.email fixture@example.invalid
+git_hermetic -c init.templateDir= -C "$whitespace_probe" init -q
+git_hermetic -C "$whitespace_probe" config user.name fixture
+git_hermetic -C "$whitespace_probe" config user.email fixture@example.invalid
+hooks="$whitespace_probe/hooks"
+mkdir -p "$hooks"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$hooks/pre-commit"
+chmod +x "$hooks/pre-commit"
+git_hermetic -C "$whitespace_probe" config commit.gpgsign true
+git_hermetic -C "$whitespace_probe" config core.hooksPath "$hooks"
 printf 'clean\ntrailing \n<<<<<<< HEAD\n' > "$whitespace_probe/file.txt"
-git -C "$whitespace_probe" add file.txt
-git -C "$whitespace_probe" commit -qm fixture
-empty_tree=$(git -C "$whitespace_probe" hash-object -t tree /dev/null)
-if output=$(git -C "$whitespace_probe" diff --check "$empty_tree" HEAD 2>&1); then
+git_hermetic -C "$whitespace_probe" add file.txt
+git_hermetic -C "$whitespace_probe" -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm fixture
+empty_tree=$(git_hermetic -C "$whitespace_probe" hash-object -t tree /dev/null)
+if output=$(git_hermetic -C "$whitespace_probe" diff --check "$empty_tree" HEAD 2>&1); then
   printf 'empty-tree whitespace check accepted malformed initial commit\n' >&2
   exit 1
 fi
@@ -89,6 +168,19 @@ fi
   printf 'empty-tree whitespace check missed conflict marker\n' >&2
   exit 1
 }
+
+missing_before=1111111111111111111111111111111111111111
+if [[ -n "$missing_before" && "$missing_before" != "0000000000000000000000000000000000000000" ]] && \
+   git_hermetic -C "$whitespace_probe" cat-file -e "$missing_before^{commit}" 2>/dev/null; then
+  printf 'missing push base was incorrectly treated as present\n' >&2
+  exit 1
+else
+  empty_tree=$(git_hermetic -C "$whitespace_probe" hash-object -t tree /dev/null)
+  if output=$(git_hermetic -C "$whitespace_probe" diff --check "$empty_tree" HEAD 2>&1); then
+    printf 'missing push base did not fall back to the empty tree\n' >&2
+    exit 1
+  fi
+fi
 
 (
   cd "$root"
@@ -116,11 +208,42 @@ expect_rejection() {
 make_probe
 (cd "$probe" && ./scripts/validate-skeleton.sh)
 
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('      - run: ./scripts/validate-skeleton.sh\n', ''))
+PY
+expect_rejection 'workflow does not run the skeleton validator'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('      - run: ./tests/test-skeleton.sh\n', ''))
+PY
+expect_rejection 'workflow does not run the skeleton test suite'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('git cat-file -e "$EVENT_BEFORE^{commit}"', 'git cat-file -e "$EVENT_BEFORE^{missing}"'))
+PY
+expect_rejection 'workflow does not guard missing push bases'
+
 for required in \
   README.md CONTRIBUTING.md .gitignore .github/README.md \
   .github/workflows/skeleton.yml dispatch/README.md contracts/README.md \
   inference/README.md inference/grammars/README.md inference/systemd/README.md \
-  eval/README.md docs/README.md scripts/README.md tests/README.md; do
+  eval/README.md docs/README.md scripts/README.md tests/README.md \
+  tests/test-skeleton.sh; do
   make_probe
   rm "$probe/$required"
   expect_rejection "missing or empty required skeleton file: $required"
