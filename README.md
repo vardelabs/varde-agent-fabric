@@ -38,9 +38,9 @@ Each root has its own README with filing and use rules.
 
 ## Public-ready rule
 
-Every reachable commit must be safe to publish. Do not add credentials, private
-hostnames, tenant paths, production prompts, real source diffs, model weights,
-or operational logs. Keep deployment-specific values in a private overlay or
+Every reachable commit must be safe to publish.
+Do not add credentials, private hostnames, tenant paths, production prompts, real
+source diffs, model weights, or operational logs. Keep deployment-specific values in a private overlay or
 local configuration outside this repository.
 
 ## Status

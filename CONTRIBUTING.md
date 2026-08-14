@@ -1,6 +1,7 @@
 # Contributing
 
-This repository is private during early development but every reachable commit must be safe to publish.
+This repository is private during early development.
+Every reachable commit must be safe to publish.
 
 ## Before opening a pull request
 
@@ -12,4 +13,5 @@ This repository is private during early development but every reachable commit m
 
 ## Boundaries
 
-Do not grant dispatch adapters or inference services platform-posting, repository-write, or arbitrary shell authority. A named orchestrator remains responsible for policy validation and outward actions.
+Do not grant dispatch adapters or inference services platform-posting, repository-write, or arbitrary shell authority.
+A named orchestrator remains responsible for policy validation and outward actions.

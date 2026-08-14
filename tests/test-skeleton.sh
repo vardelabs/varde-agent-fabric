@@ -2,10 +2,24 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+script_path=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 
 if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   printf 'skeleton test requires a Git worktree\n' >&2
   exit 1
+fi
+
+if [[ ${SKELETON_TEST_CONFIG_INJECTION:-0} != 1 ]]; then
+  if ! injected_output=$(env \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=core.excludesFile \
+    GIT_CONFIG_VALUE_0=/dev/null \
+    SKELETON_TEST_CONFIG_INJECTION=1 \
+    "$script_path" 2>&1); then
+    printf '%s\n' "$injected_output" >&2
+    printf 'skeleton test is not isolated from injected Git config\n' >&2
+    exit 1
+  fi
 fi
 
 "$root/scripts/validate-skeleton.sh"
@@ -47,7 +61,7 @@ personal_ignore="$ignore_probe/personal-ignore"
 personal_config="$ignore_probe/personal.gitconfig"
 printf 'docs/personal-global-probe.txt\nlogs/keep.txt\ndocs/audit/threat-model.md\n' > "$personal_ignore"
 printf '[core]\n\texcludesFile = %s\n' "$personal_ignore" > "$personal_config"
-if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL="$personal_config" \
+if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL="$personal_config" GIT_CONFIG_COUNT=0 \
    git -C "$ignore_probe" check-ignore --no-index -q -- docs/personal-global-probe.txt; then
   printf 'global Git excludesFile probe did not mask its path\n' >&2
   exit 1
@@ -285,7 +299,7 @@ import sys
 p = Path(sys.argv[1])
 p.write_text(p.read_text().replace('  pull_request:\n', ''))
 PY
-expect_rejection 'workflow is missing pull_request trigger'
+expect_rejection 'workflow does not declare pull_request under on'
 
 make_probe
 python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
@@ -295,7 +309,7 @@ import sys
 p = Path(sys.argv[1])
 p.write_text(p.read_text().replace('  push:\n', ''))
 PY
-expect_rejection 'workflow is missing push trigger'
+expect_rejection 'workflow does not declare push under on'
 
 make_probe
 python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
@@ -306,6 +320,46 @@ p = Path(sys.argv[1])
 p.write_text(p.read_text().replace('  contents: read\n', ''))
 PY
 expect_rejection 'workflow permissions are not read-only'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+old = 'on:\n  pull_request:\n  push:\n    branches: [main]\n'
+new = 'on:\n  issues:\nunrelated:\n  pull_request:\n  push:\n    branches: [main]\n'
+if old not in text:
+    raise SystemExit('workflow trigger fixture did not match')
+p.write_text(text.replace(old, new, 1))
+PY
+expect_rejection 'workflow does not declare pull_request under on'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+old = 'permissions:\n  contents: read\n\non:'
+new = 'permissions:\n  actions: write\nunrelated:\n  contents: read\n\non:'
+if old not in text:
+    raise SystemExit('workflow permissions fixture did not match')
+p.write_text(text.replace(old, new, 1))
+PY
+expect_rejection 'workflow permissions are not read-only'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('    steps:\n', '    env:\n', 1))
+PY
+expect_rejection 'workflow validate job is missing its steps'
 
 make_probe
 python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
@@ -508,6 +562,19 @@ PY
 expect_rejection 'dispatch boundary is missing'
 
 make_probe
+python3 - "$probe/eval/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    '- `eval/audit/`, `eval/runtime/`, `eval/sockets/`, `eval/logs/`, `eval/weights/`, and `eval/private-overlay` are private operational paths. Public fixture directories such as `eval/fixtures/runtime/`, `eval/fixtures/logs/`, and `eval/fixtures/weights/` remain reviewable when they contain neutral, synthetic files.\n',
+    '- Evaluation runtime paths are private.\n',
+))
+PY
+expect_rejection 'evaluation runtime boundary is missing'
+
+make_probe
 printf '#!/usr/bin/env python3\n' > "$probe/scripts/unindexed.py"
 expect_rejection 'scripts index is missing entry: unindexed.py'
 
@@ -518,6 +585,21 @@ expect_rejection 'scripts index is missing entry: unindexed.sh'
 make_probe
 printf '\n- `removed.sh`: stale index entry.\n' >> "$probe/scripts/README.md"
 expect_rejection 'scripts index lists missing file: removed.sh'
+
+make_probe
+python3 - "$probe/scripts/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+old = '- `validate-skeleton.sh`: verifies the required skeleton files, boundary markers, required ignore rules, workflow safety invariants, and script indexes. It exits zero only when the checked layout and policy markers are present. It is not a content, secret, or history scanner.\n'
+new = 'The validator is `validate-skeleton.sh`, but it is not indexed.\n'
+if old not in text:
+    raise SystemExit('script index fixture did not match')
+p.write_text(text.replace(old, new, 1))
+PY
+expect_rejection 'scripts index is missing entry: validate-skeleton.sh'
 
 make_probe
 mkdir "$probe/scripts/lib"
