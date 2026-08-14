@@ -47,8 +47,7 @@ personal_ignore="$ignore_probe/personal-ignore"
 personal_config="$ignore_probe/personal.gitconfig"
 printf 'docs/personal-global-probe.txt\nlogs/keep.txt\ndocs/audit/threat-model.md\n' > "$personal_ignore"
 printf '[core]\n\texcludesFile = %s\n' "$personal_ignore" > "$personal_config"
-export GIT_CONFIG_GLOBAL="$personal_config"
-if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null \
+if ! GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL="$personal_config" \
    git -C "$ignore_probe" check-ignore --no-index -q -- docs/personal-global-probe.txt; then
   printf 'global Git excludesFile probe did not mask its path\n' >&2
   exit 1
@@ -78,6 +77,21 @@ expect_ignored 'sockets/keep.txt'
 expect_ignored 'weights/keep.txt'
 expect_ignored 'private-overlay/keep.yaml'
 expect_ignored 'private-overlay.example'
+expect_ignored '.env'
+expect_ignored '.env.local'
+expect_ignored 'inference/.env'
+expect_ignored '.envrc'
+expect_ignored '.secrets'
+expect_ignored 'id_rsa'
+expect_ignored 'dispatch/id_ecdsa'
+expect_ignored 'inference/deploy.p8'
+expect_ignored 'inference/server.jks'
+expect_ignored 'inference/models/model.pth'
+expect_ignored 'inference/models/model.h5'
+expect_ignored 'inference/models/model.npz'
+expect_ignored 'inference/models/model.tflite'
+expect_trackable '.env.example'
+expect_trackable 'docs/.env.example'
 expect_ignored 'dispatch/private-overlay'
 expect_ignored 'dispatch/private-overlay.yaml'
 expect_ignored 'dispatch/audit/keep.txt'
@@ -97,6 +111,11 @@ expect_ignored 'inference/private-overlay.yaml'
 expect_ignored 'eval/private-overlay'
 expect_ignored 'eval/private-overlay/deploy.yaml'
 expect_ignored 'eval/private-overlay.yaml'
+expect_ignored 'eval/audit/run.json'
+expect_ignored 'eval/runtime/state.json'
+expect_ignored 'eval/sockets/broker.sock'
+expect_ignored 'eval/logs/run.log'
+expect_ignored 'eval/weights/model.pth'
 expect_ignored 'inference/logs/broker.log.1'
 expect_ignored 'inference/weights/config.json'
 expect_ignored 'eval/fixtures/broker.sock'
@@ -136,6 +155,10 @@ grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
 }
 grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
   printf 'workflow does not guard missing push bases\n' >&2
+  exit 1
+}
+grep -Fq 'git cat-file -e "$PR_BASE_SHA^{commit}"' "$workflow" || {
+  printf 'workflow does not guard missing pull request bases\n' >&2
   exit 1
 }
 if grep -Fq 'git diff --check --root HEAD' "$workflow"; then
@@ -205,6 +228,22 @@ expect_rejection() {
   esac
 }
 
+expect_gitignore_rule_rejection() {
+  local rule=$1
+  make_probe
+  python3 - "$probe/.gitignore" "$rule" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+rule = sys.argv[2]
+lines = p.read_text().splitlines()
+lines.remove(rule)
+p.write_text('\n'.join(lines) + '\n')
+PY
+  expect_rejection "gitignore is missing required rule: $rule"
+}
+
 make_probe
 (cd "$probe" && ./scripts/validate-skeleton.sh)
 
@@ -238,6 +277,145 @@ p.write_text(p.read_text().replace('git cat-file -e "$EVENT_BEFORE^{commit}"', '
 PY
 expect_rejection 'workflow does not guard missing push bases'
 
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  pull_request:\n', ''))
+PY
+expect_rejection 'workflow is missing pull_request trigger'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  push:\n', ''))
+PY
+expect_rejection 'workflow is missing push trigger'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  contents: read\n', ''))
+PY
+expect_rejection 'workflow permissions are not read-only'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  pull_request:\n', '  pull_request_target:\n'))
+PY
+expect_rejection 'workflow must not use pull_request_target'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  validate:\n', '  validate:\n    if: false\n'))
+PY
+expect_rejection 'workflow gate contains a conditional'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    '      - run: ./tests/test-skeleton.sh\n',
+    '      - run: ./tests/test-skeleton.sh\n        continue-on-error: true\n',
+))
+PY
+expect_rejection 'workflow gate allows continue-on-error'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('  validate:\n', '  other:\n'))
+PY
+expect_rejection 'workflow validate job is missing'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('git cat-file -e "$EVENT_BEFORE^{commit}"', 'git cat-file -e "$EVENT_BEFORE^{missing}"'))
+PY
+expect_rejection 'workflow does not guard missing push bases'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('git cat-file -e "$PR_BASE_SHA^{commit}"', 'git cat-file -e "$PR_BASE_SHA^{missing}"'))
+PY
+expect_rejection 'workflow does not guard missing pull request bases'
+
+make_probe
+python3 - "$probe/.github/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'Keep workflows read-only by default and pin third-party actions to reviewed commit SHAs.',
+    'Workflows may request broad permissions.',
+))
+PY
+expect_rejection 'workflow documentation is missing read-only rule'
+
+make_probe
+python3 - "$probe/.github/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'Do not use `pull_request_target` for untrusted pull-request code.',
+    'Use any pull request trigger.',
+))
+PY
+expect_rejection 'workflow documentation is missing pull_request_target rule'
+
+for rule in \
+  '.env' '.env.*' '!.env.example' '.envrc' '.secrets' \
+  'id_rsa' 'id_dsa' 'id_ecdsa' 'id_ed25519' '*.p8' '*.jks' \
+  '*.pth' '*.h5' '*.npz' '*.tflite' \
+  '/eval/audit/' '/eval/runtime/' '/eval/sockets/' '/eval/logs/' '/eval/weights/'; do
+  expect_gitignore_rule_rejection "$rule"
+done
+
+make_probe
+python3 - "$probe/.gitignore" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    '.env\n.env.*\n!.env.example\n',
+    '.env\n!.env.example\n.env.*\n',
+))
+PY
+expect_rejection 'gitignore .env.example exception must follow .env.*'
 for required in \
   README.md CONTRIBUTING.md .gitignore .github/README.md \
   .github/workflows/skeleton.yml dispatch/README.md contracts/README.md \
@@ -267,6 +445,19 @@ PY
 expect_rejection 'README is missing the public-ready rule'
 
 make_probe
+python3 - "$probe/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'Every reachable commit must be safe to publish.',
+    'Every commit may contain private material.',
+))
+PY
+expect_rejection 'README is missing the public-ready rule'
+
+make_probe
 python3 - "$probe/inference/README.md" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
@@ -278,12 +469,55 @@ PY
 expect_rejection 'inference boundary is missing'
 
 make_probe
+python3 - "$probe/CONTRIBUTING.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'Do not grant dispatch adapters or inference services platform-posting, repository-write, or arbitrary shell authority.',
+    'Adapters may hold platform authority.',
+))
+PY
+expect_rejection 'contributor boundary is missing'
+
+make_probe
+python3 - "$probe/CONTRIBUTING.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'If you add a component root, document its runtime-state boundary and add matching ignore and regression coverage.',
+    'New roots need no runtime policy.',
+))
+PY
+expect_rejection 'contributor component-root rule is missing'
+
+make_probe
+python3 - "$probe/dispatch/README.md" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    'Adapters do not post, approve, merge, push, or receive platform credentials.',
+    'Adapters may post and push.',
+))
+PY
+expect_rejection 'dispatch boundary is missing'
+
+make_probe
 printf '#!/usr/bin/env python3\n' > "$probe/scripts/unindexed.py"
 expect_rejection 'scripts index is missing entry: unindexed.py'
 
 make_probe
 ln -s /bin/echo "$probe/scripts/unindexed.sh"
 expect_rejection 'scripts index is missing entry: unindexed.sh'
+
+make_probe
+printf '\n- `removed.sh`: stale index entry.\n' >> "$probe/scripts/README.md"
+expect_rejection 'scripts index lists missing file: removed.sh'
 
 make_probe
 mkdir "$probe/scripts/lib"

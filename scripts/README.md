@@ -11,4 +11,4 @@ Small repository-maintenance scripts live here.
 
 ## Current scripts
 
-- `validate-skeleton.sh`: verifies the required skeleton files and documented boundary markers. It exits zero only when the checked layout is present. It is not a content, secret, or history scanner.
+- `validate-skeleton.sh`: verifies the required skeleton files, boundary markers, required ignore rules, workflow safety invariants, and script indexes. It exits zero only when the checked layout and policy markers are present. It is not a content, secret, or history scanner.
