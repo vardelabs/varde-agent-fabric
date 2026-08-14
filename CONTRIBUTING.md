@@ -8,6 +8,7 @@ This repository is private during early development but every reachable commit m
 2. Confirm the diff contains no secrets, private hostnames, tenant paths, real source diffs, customer material, model weights, or operational logs.
 3. Keep deployment-specific configuration in a private overlay or local environment.
 4. Add a regression test for any security or lifecycle defect.
+5. If you add a component root, document its runtime-state boundary and add matching ignore and regression coverage.
 
 ## Boundaries
 

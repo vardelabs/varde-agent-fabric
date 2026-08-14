@@ -16,6 +16,16 @@
 *.crt
 *.p12
 *.pfx
+*.p8
+*.jks
+*.pth
+*.h5
+*.npz
+*.tflite
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
 # Root deployment and runtime state. Component state is scoped below.
 /models/
 /weights/
@@ -41,7 +51,13 @@
 /inference/weights/
 /inference/private-overlay
 /inference/private-overlay.*
-# Evaluation deployment overlay. Synthetic fixture directories remain public.
+# Declared evaluation runtime state. Synthetic fixture directories remain public.
+/eval/audit/
+/eval/runtime/
+/eval/sockets/
+/eval/logs/
+/eval/weights/
+# Evaluation deployment overlay.
 /eval/private-overlay
 /eval/private-overlay.*
 *.sock

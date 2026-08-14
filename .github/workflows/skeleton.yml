@@ -25,7 +25,9 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" ]] && \
+             [[ -n "$PR_BASE_SHA" ]] && \
+             git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null; then
             git diff --check "$PR_BASE_SHA" HEAD
           elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]] && \
                git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null; then
