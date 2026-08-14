@@ -4,7 +4,8 @@ Local inference adapters, a broker protocol, reviewed output grammars, and servi
 
 ## Safety boundary
 
-A broker is compute infrastructure. It accepts bounded structured requests, authenticates the local caller, schedules a fixed runtime, and returns a strictly validated artifact. It does not receive repository-write, shell, GitHub, or posting authority.
+A broker is compute infrastructure. It accepts bounded structured requests, authenticates the local caller, schedules a fixed runtime, and returns a strictly validated artifact.
+A broker does not receive repository-write, shell, GitHub, or posting authority.
 
 ## Rules
 
