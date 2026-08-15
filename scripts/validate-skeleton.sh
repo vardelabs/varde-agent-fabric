@@ -8,7 +8,7 @@ for path in \
   README.md \
   CONTRIBUTING.md \
   .gitignore \
-  .github/README.md \
+  .github/WORKFLOWS.md \
   .github/workflows/skeleton.yml \
   dispatch/README.md \
   contracts/README.md \
@@ -25,6 +25,11 @@ for path in \
     exit 1
   }
 done
+
+if [[ -e .github/README.md || -L .github/README.md ]]; then
+  printf 'GitHub homepage override is forbidden: use .github/WORKFLOWS.md instead of .github/README.md\n' >&2
+  exit 1
+fi
 
 grep -Fqx -- '## Public-ready rule' README.md || {
   printf 'README is missing the public-ready rule\n' >&2
@@ -66,12 +71,12 @@ grep -Fqx -- '- `eval/audit/`, `eval/runtime/`, `eval/sockets/`, `eval/logs/`, `
   exit 1
 }
 
-grep -Fqx -- '- Keep workflows read-only by default and pin third-party actions to reviewed commit SHAs.' .github/README.md || {
+grep -Fqx -- '- Keep workflows read-only by default and pin third-party actions to reviewed commit SHAs.' .github/WORKFLOWS.md || {
   printf 'workflow documentation is missing read-only rule\n' >&2
   exit 1
 }
 
-grep -Fqx -- '- Do not use `pull_request_target` for untrusted pull-request code.' .github/README.md || {
+grep -Fqx -- '- Do not use `pull_request_target` for untrusted pull-request code.' .github/WORKFLOWS.md || {
   printf 'workflow documentation is missing pull_request_target rule\n' >&2
   exit 1
 }
@@ -244,7 +249,7 @@ done < <(find scripts -maxdepth 1 \( -type f -o -type l \) ! -name README.md -pr
 
 while IFS= read -r -d '' workflow; do
   basename=${workflow##*/}
-  grep -Fq "\`$basename\`" .github/README.md || {
+  grep -Fq "\`$basename\`" .github/WORKFLOWS.md || {
     printf 'CI index is missing entry: %s\n' "$basename" >&2
     exit 1
   }
