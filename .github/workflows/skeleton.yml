@@ -1,0 +1,38 @@
+name: Skeleton validation
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - run: bash -n scripts/validate-skeleton.sh
+      - run: bash -n tests/test-skeleton.sh
+      - run: ./scripts/validate-skeleton.sh
+      - run: ./tests/test-skeleton.sh
+      - name: Check changed whitespace
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]] && \
+             [[ -n "$PR_BASE_SHA" ]] && \
+             git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null; then
+            git diff --check "$PR_BASE_SHA" HEAD
+          elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]] && \
+               git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null; then
+            git diff --check "$EVENT_BEFORE" HEAD
+          else
+            empty_tree=$(git hash-object -t tree /dev/null)
+            git diff --check "$empty_tree" HEAD
+          fi
