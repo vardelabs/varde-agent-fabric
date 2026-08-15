@@ -109,11 +109,15 @@ grep -Fqx -- 'permissions:' "$workflow" || {
   printf 'workflow permissions are not read-only\n' >&2
   exit 1
 }
-if grep -Eq '^[[:space:]]+if:' "$workflow"; then
+if grep -Eq '^[[:space:]]+permissions[[:space:]]*:' "$workflow"; then
+  printf 'workflow contains a job-level permissions block\n' >&2
+  exit 1
+fi
+if grep -Eq '^[[:space:]]+if[[:space:]]*:' "$workflow"; then
   printf 'workflow gate contains a conditional\n' >&2
   exit 1
 fi
-if grep -Eq '^[[:space:]]+continue-on-error:' "$workflow"; then
+if grep -Eq '^[[:space:]]+continue-on-error[[:space:]]*:' "$workflow"; then
   printf 'workflow gate allows continue-on-error\n' >&2
   exit 1
 fi
@@ -152,6 +156,17 @@ workflow_permissions_are_read_only() {
   }
 }
 
+workflow_pull_request_is_unfiltered() {
+  awk '
+    $0 == "on:" { in_on=1; next }
+    in_on && $0 ~ /^[^[:space:]][^:]*:/ { in_on=0 }
+    in_on && $0 == "  pull_request:" { in_pull_request=1; next }
+    in_pull_request && $0 ~ /^  [^[:space:]][^:]*:/ { in_pull_request=0 }
+    in_pull_request && $0 ~ /^    / { invalid=1 }
+    END { exit invalid ? 1 : 0 }
+  ' "$workflow"
+}
+
 workflow_steps_have_line() {
   local expected=$1
   local message=$2
@@ -170,6 +185,10 @@ workflow_steps_have_line() {
 
 workflow_section_has_line 'on:' '  pull_request:' 'workflow does not declare pull_request under on'
 workflow_section_has_line 'on:' '  push:' 'workflow does not declare push under on'
+if ! workflow_pull_request_is_unfiltered; then
+  printf 'workflow pull_request trigger must not have filters\n' >&2
+  exit 1
+fi
 workflow_permissions_are_read_only
 workflow_section_has_line 'jobs:' '  validate:' 'workflow validate job is missing'
 workflow_section_has_line '  validate:' '    runs-on: ubuntu-latest' 'workflow validate job is missing its runner'
@@ -182,6 +201,18 @@ grep -Fq 'git cat-file -e "$PR_BASE_SHA^{commit}"' "$workflow" || {
 }
 grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
   printf 'workflow does not guard missing push bases\n' >&2
+  exit 1
+}
+grep -Fq 'git diff --check "$PR_BASE_SHA" HEAD' "$workflow" || {
+  printf 'workflow does not check pull request changes\n' >&2
+  exit 1
+}
+grep -Fq 'git diff --check "$EVENT_BEFORE" HEAD' "$workflow" || {
+  printf 'workflow does not check push changes\n' >&2
+  exit 1
+}
+grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
+  printf 'workflow fallback does not check against the empty tree\n' >&2
   exit 1
 }
 if grep -Fq 'git diff --check --root HEAD' "$workflow"; then

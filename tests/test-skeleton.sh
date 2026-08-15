@@ -167,6 +167,14 @@ grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
   printf 'workflow fallback does not check against the empty tree\n' >&2
   exit 1
 }
+grep -Fq 'git diff --check "$PR_BASE_SHA" HEAD' "$workflow" || {
+  printf 'workflow does not check pull request changes\n' >&2
+  exit 1
+}
+grep -Fq 'git diff --check "$EVENT_BEFORE" HEAD' "$workflow" || {
+  printf 'workflow does not check push changes\n' >&2
+  exit 1
+}
 grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
   printf 'workflow does not guard missing push bases\n' >&2
   exit 1
@@ -327,14 +335,43 @@ from pathlib import Path
 import sys
 
 p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    '    runs-on: ubuntu-latest\n',
+    '    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      actions: write\n',
+    1,
+))
+PY
+expect_rejection 'workflow contains a job-level permissions block'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
 text = p.read_text()
-old = 'on:\n  pull_request:\n  push:\n    branches: [main]\n'
-new = 'on:\n  issues:\nunrelated:\n  pull_request:\n  push:\n    branches: [main]\n'
-if old not in text:
+if 'on:\n' not in text or '  pull_request:\n' not in text:
     raise SystemExit('workflow trigger fixture did not match')
-p.write_text(text.replace(old, new, 1))
+text = text.replace('on:\n', 'on:\n  issues:\n', 1)
+text = text.replace('  pull_request:\n', 'unrelated:\n  pull_request:\n', 1)
+p.write_text(text)
 PY
 expect_rejection 'workflow does not declare pull_request under on'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+old = '  pull_request:\n'
+new = "  pull_request:\n    paths:\n      - '**/never-match'\n"
+if old not in text:
+    raise SystemExit('workflow filter fixture did not match')
+p.write_text(text.replace(old, new, 1))
+PY
+expect_rejection 'workflow pull_request trigger must not have filters'
 
 make_probe
 python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
@@ -388,8 +425,36 @@ import sys
 
 p = Path(sys.argv[1])
 p.write_text(p.read_text().replace(
+    '  validate:\n',
+    '  validate:\n    if : false\n',
+    1,
+))
+PY
+expect_rejection 'workflow gate contains a conditional'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
     '      - run: ./tests/test-skeleton.sh\n',
     '      - run: ./tests/test-skeleton.sh\n        continue-on-error: true\n',
+))
+PY
+expect_rejection 'workflow gate allows continue-on-error'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(
+    '      - run: ./tests/test-skeleton.sh\n',
+    '      - run: ./tests/test-skeleton.sh\n        continue-on-error : true\n',
+    1,
 ))
 PY
 expect_rejection 'workflow gate allows continue-on-error'
@@ -423,6 +488,26 @@ p = Path(sys.argv[1])
 p.write_text(p.read_text().replace('git cat-file -e "$PR_BASE_SHA^{commit}"', 'git cat-file -e "$PR_BASE_SHA^{missing}"'))
 PY
 expect_rejection 'workflow does not guard missing pull request bases'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('git diff --check "$PR_BASE_SHA" HEAD', 'git diff --check', 1))
+PY
+expect_rejection 'workflow does not check pull request changes'
+
+make_probe
+python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace('git diff --check "$EVENT_BEFORE" HEAD', 'git diff --check', 1))
+PY
+expect_rejection 'workflow does not check push changes'
 
 make_probe
 python3 - "$probe/.github/README.md" <<'PY'
