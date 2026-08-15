@@ -270,6 +270,10 @@ make_probe
 (cd "$probe" && ./scripts/validate-skeleton.sh)
 
 make_probe
+printf '# accidental homepage override\n' > "$probe/.github/README.md"
+expect_rejection 'GitHub homepage override is forbidden: use .github/WORKFLOWS.md instead of .github/README.md'
+
+make_probe
 python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
 from pathlib import Path
 import sys
@@ -510,7 +514,7 @@ PY
 expect_rejection 'workflow does not check push changes'
 
 make_probe
-python3 - "$probe/.github/README.md" <<'PY'
+python3 - "$probe/.github/WORKFLOWS.md" <<'PY'
 from pathlib import Path
 import sys
 
@@ -523,7 +527,7 @@ PY
 expect_rejection 'workflow documentation is missing read-only rule'
 
 make_probe
-python3 - "$probe/.github/README.md" <<'PY'
+python3 - "$probe/.github/WORKFLOWS.md" <<'PY'
 from pathlib import Path
 import sys
 
@@ -556,7 +560,7 @@ p.write_text(p.read_text().replace(
 PY
 expect_rejection 'gitignore .env.example exception must follow .env.*'
 for required in \
-  README.md CONTRIBUTING.md .gitignore .github/README.md \
+  README.md CONTRIBUTING.md .gitignore .github/WORKFLOWS.md \
   .github/workflows/skeleton.yml dispatch/README.md contracts/README.md \
   inference/README.md inference/grammars/README.md inference/systemd/README.md \
   eval/README.md docs/README.md scripts/README.md tests/README.md \
