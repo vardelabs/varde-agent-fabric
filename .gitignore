@@ -1,0 +1,69 @@
+# This repository is public-ready. Do not commit private deployment state.
+.env
+.env.*
+!.env.example
+.envrc
+.secrets
+# Sensitive local artifacts are ignored wherever they appear.
+*.gguf
+*.safetensors
+*.onnx
+*.pt
+*.ckpt
+*.bin
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.p8
+*.jks
+*.pth
+*.h5
+*.npz
+*.tflite
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+# Root deployment and runtime state. Component state is scoped below.
+/models/
+/weights/
+/logs/
+/audit/
+/runtime/
+/sockets/
+/private-overlay
+/private-overlay.*
+# Declared dispatch runtime state.
+/dispatch/audit/
+/dispatch/runtime/
+/dispatch/sockets/
+/dispatch/logs/
+/dispatch/weights/
+/dispatch/private-overlay
+/dispatch/private-overlay.*
+# Declared inference runtime state.
+/inference/audit/
+/inference/runtime/
+/inference/sockets/
+/inference/logs/
+/inference/weights/
+/inference/private-overlay
+/inference/private-overlay.*
+# Declared evaluation runtime state. Synthetic fixture directories remain public.
+/eval/audit/
+/eval/runtime/
+/eval/sockets/
+/eval/logs/
+/eval/weights/
+# Evaluation deployment overlay.
+/eval/private-overlay
+/eval/private-overlay.*
+*.sock
+*.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
