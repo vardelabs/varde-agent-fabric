@@ -19,6 +19,7 @@ jobs:
       - run: bash -n tests/test-skeleton.sh
       - run: ./scripts/validate-skeleton.sh
       - run: ./tests/test-skeleton.sh
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Check changed whitespace
         env:
           EVENT_NAME: ${{ github.event_name }}
