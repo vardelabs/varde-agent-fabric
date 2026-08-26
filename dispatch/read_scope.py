@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,19 @@ def _absolute_clean_path(value: Any, field: str) -> str:
     return path
 
 
+def _validated_private_root(value: Any) -> str:
+    root = _absolute_clean_path(value, "private_roots entry")
+    try:
+        root_stat = os.stat(root, follow_symlinks=False)
+    except OSError as exc:
+        raise ReadScopeError(f"private root is unavailable: {root}") from exc
+    if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.geteuid():
+        raise ReadScopeError(f"private root must be an owned directory: {root}")
+    if root_stat.st_mode & 0o002:
+        raise ReadScopeError(f"private root must not be world-writable: {root}")
+    return root
+
+
 def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     """Load and validate private roots from a deployment-owned JSON overlay.
 
@@ -38,24 +52,39 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     systemd argv and receipts.
     """
     path = Path(config_path)
+    if not path.is_absolute():
+        raise ReadScopeError(f"read-scope config must be an absolute regular non-symlink file: {path}")
     try:
-        stat = path.stat(follow_symlinks=False)
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError as exc:
         raise ReadScopeError(f"read-scope config is unavailable: {path}") from exc
-    if not path.is_absolute() or not path.is_file() or path.is_symlink():
-        raise ReadScopeError(f"read-scope config must be an absolute regular non-symlink file: {path}")
-    if stat.st_mode & 0o022:
-        raise ReadScopeError(f"read-scope config must not be group/world writable: {path}")
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ReadScopeError(f"read-scope config is not valid UTF-8 JSON: {path}") from exc
+        file_stat = os.fstat(fd)
+        parent_stat = os.stat(path.parent, follow_symlinks=False)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_mode & 0o022:
+            raise ReadScopeError(
+                f"read-scope config must be a private regular file: {path}"
+            )
+        if file_stat.st_uid != os.geteuid() or not stat.S_ISDIR(parent_stat.st_mode):
+            raise ReadScopeError(f"read-scope config is not deployment-owned: {path}")
+        if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
+            raise ReadScopeError(f"read-scope config parent is not private: {path.parent}")
+        try:
+            with os.fdopen(fd, encoding="utf-8") as stream:
+                fd = -1
+                document = json.loads(stream.read())
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ReadScopeError(f"read-scope config is not valid UTF-8 JSON: {path}") from exc
+        fd = -1
+    finally:
+        if fd != -1:
+            os.close(fd)
     if not isinstance(document, dict) or set(document) != {"private_roots"}:
         raise ReadScopeError("read-scope config must contain exactly private_roots")
     roots = document["private_roots"]
     if not isinstance(roots, list) or not roots:
         raise ReadScopeError("private_roots must be a non-empty list")
-    return tuple(sorted({_absolute_clean_path(root, "private_roots entry") for root in roots}))
+    return tuple(sorted({_validated_private_root(root) for root in roots}))
 
 
 def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> tuple[str, ...]:
@@ -66,7 +95,7 @@ def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> 
     inaccessible. The caller must run this before the backend is spawned.
     """
     work = _absolute_clean_path(workdir, "workdir")
-    roots = tuple(sorted(set(private_roots)))
+    roots = tuple(sorted({_validated_private_root(root) for root in private_roots}))
     if not roots:
         raise ReadScopeError("private_roots must not be empty")
     for root in roots:

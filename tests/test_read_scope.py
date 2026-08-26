@@ -15,21 +15,27 @@ class ReadScopeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.config = self.root / "private-overlay.json"
-        self.config.write_text(json.dumps({"private_roots": ["/data/north", "/data/corvus", "/data/north"]}))
+        self.corvus = self.root / "corvus"
+        self.north = self.root / "north"
+        self.corvus.mkdir()
+        self.north.mkdir()
+        self.config.write_text(
+            json.dumps({"private_roots": [str(self.north), str(self.corvus), str(self.north)]})
+        )
         self.config.chmod(0o600)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
     def test_loads_deduplicated_sorted_roots(self) -> None:
-        self.assertEqual(load_private_roots(self.config), ("/data/corvus", "/data/north"))
+        self.assertEqual(load_private_roots(self.config), (str(self.corvus), str(self.north)))
 
     def test_emits_systemd_properties_deterministically(self) -> None:
         self.assertEqual(
-            systemd_inaccessible_paths(("/data/north", "/data/corvus"), "/work/review"),
+            systemd_inaccessible_paths((str(self.corvus), str(self.north)), "/work/review"),
             (
-                "--property=InaccessiblePaths=/data/corvus",
-                "--property=InaccessiblePaths=/data/north",
+                f"--property=InaccessiblePaths={self.corvus}",
+                f"--property=InaccessiblePaths={self.north}",
             ),
         )
 
@@ -44,9 +50,20 @@ class ReadScopeTests(unittest.TestCase):
         with self.assertRaises(ReadScopeError):
             load_private_roots(self.config)
 
+    def test_rejects_invalid_roots_at_property_boundary(self) -> None:
+        for root in ("relative", "/data/../corvus", "/", str(self.root / "missing")):
+            with self.subTest(root=root), self.assertRaises(ReadScopeError):
+                systemd_inaccessible_paths((root,), "/work/review")
+
+    def test_rejects_symlinked_private_root(self) -> None:
+        link = self.root / "link"
+        link.symlink_to(self.corvus, target_is_directory=True)
+        with self.assertRaises(ReadScopeError):
+            systemd_inaccessible_paths((str(link),), "/work/review")
+
     def test_rejects_workdir_inside_private_root(self) -> None:
         with self.assertRaises(ReadScopeError):
-            systemd_inaccessible_paths(("/data/corvus",), "/data/corvus/review")
+            systemd_inaccessible_paths((str(self.corvus),), str(self.corvus / "review"))
 
     def test_rejects_empty_or_malformed_policy(self) -> None:
         for document in ({}, {"private_roots": []}, {"private_roots": "/data/corvus"}):
