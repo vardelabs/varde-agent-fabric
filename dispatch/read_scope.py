@@ -62,6 +62,15 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     path = Path(config_path)
     if not path.is_absolute():
         raise ReadScopeError(f"read-scope config must be an absolute regular non-symlink file: {path}")
+    for component in path.parents:
+        try:
+            component_stat = os.lstat(component)
+        except OSError as exc:
+            raise ReadScopeError(f"read-scope config parent is unavailable: {component}") from exc
+        if stat.S_ISLNK(component_stat.st_mode):
+            raise ReadScopeError(f"read-scope config contains a symlink component: {path}")
+        if component_stat.st_mode & 0o022:
+            raise ReadScopeError(f"read-scope config has a writable parent component: {component}")
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError as exc:

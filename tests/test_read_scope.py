@@ -41,6 +41,17 @@ class ReadScopeTests(unittest.TestCase):
             ),
         )
 
+    def test_config_symlinked_ancestor_is_rejected(self) -> None:
+        target = self.root / "config-target"
+        target.mkdir()
+        target_config = target / "overlay.json"
+        target_config.write_text(json.dumps({"private_roots": [str(self.corvus)]}))
+        target_config.chmod(0o600)
+        link = self.root / "config-link"
+        link.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(ReadScopeError):
+            load_private_roots(link / "overlay.json")
+
     def test_task_cannot_supply_relative_or_non_normalized_root(self) -> None:
         for root in ("relative", "/data/../corvus", "/"):
             self.config.write_text(json.dumps({"private_roots": [root]}))
