@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,13 @@ class ReadScopeTests(unittest.TestCase):
                 f"--property=InaccessiblePaths={self.north}",
             ),
         )
+
+    def test_rejects_fifo_without_blocking(self) -> None:
+        fifo = self.root / "overlay.fifo"
+        fifo_mode = 0o600
+        os.mkfifo(fifo, fifo_mode)
+        with self.assertRaises(ReadScopeError):
+            load_private_roots(fifo)
 
     def test_config_symlinked_ancestor_is_rejected(self) -> None:
         target = self.root / "config-target"

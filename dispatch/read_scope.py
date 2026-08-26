@@ -72,7 +72,9 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
         if component_stat.st_mode & 0o022:
             raise ReadScopeError(f"read-scope config has a writable parent component: {component}")
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        fd = os.open(
+            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
     except OSError as exc:
         raise ReadScopeError(f"read-scope config is unavailable: {path}") from exc
     try:
