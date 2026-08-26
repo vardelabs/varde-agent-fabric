@@ -33,14 +33,22 @@ def _absolute_clean_path(value: Any, field: str) -> str:
 
 def _validated_private_root(value: Any) -> str:
     root = _absolute_clean_path(value, "private_roots entry")
+    path = Path(root)
+    for component in (path, *path.parents):
+        try:
+            component_stat = os.lstat(component)
+        except OSError as exc:
+            raise ReadScopeError(f"private root is unavailable: {root}") from exc
+        if stat.S_ISLNK(component_stat.st_mode):
+            raise ReadScopeError(f"private root contains a symlink component: {root}")
+        if component_stat.st_mode & 0o022:
+            raise ReadScopeError(f"private root has a writable path component: {root}")
     try:
-        root_stat = os.stat(root, follow_symlinks=False)
+        root_stat = os.lstat(root)
     except OSError as exc:
         raise ReadScopeError(f"private root is unavailable: {root}") from exc
     if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.geteuid():
         raise ReadScopeError(f"private root must be an owned directory: {root}")
-    if root_stat.st_mode & 0o002:
-        raise ReadScopeError(f"private root must not be world-writable: {root}")
     return root
 
 
@@ -95,6 +103,8 @@ def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> 
     inaccessible. The caller must run this before the backend is spawned.
     """
     work = _absolute_clean_path(workdir, "workdir")
+    if not os.path.isdir(work) or os.path.realpath(work) != work:
+        raise ReadScopeError("workdir must be an existing directory without symlink components")
     roots = tuple(sorted({_validated_private_root(root) for root in private_roots}))
     if not roots:
         raise ReadScopeError("private_roots must not be empty")

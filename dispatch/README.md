@@ -17,7 +17,7 @@ overlay through a no-follow file descriptor, requires a private file and parent
 owned by the effective user, and requires each root to be an owned, non-world-
 writable directory. `systemd_inaccessible_paths()` repeats root validation at
 the adapter boundary and returns deterministic `InaccessiblePaths` properties
-while refusing to hide the worker's own workdir.
+while refusing to hide the worker's own existing, non-symlinked workdir.
 
 This is an explicit denylist, not an allowlist. It prevents access to configured
 private roots when the host systemd adapter enforces the returned properties. It
