@@ -33,15 +33,15 @@ class ReadScopeError(ValueError):
 
 
 def _absolute_clean_path(value: Any, field: str) -> str:
-    """Normalize and validate an absolute path for systemd compatibility.
+    """Validate an already-normalized absolute path for systemd compatibility.
 
-    Rejects paths with unsafe characters, normalizes to realpath to eliminate
-    aliases like //path, and ensures the path is absolute and not the root.
+    Resolves the path for canonical comparison, rejects aliases such as //path,
+    and requires the caller to provide the canonical spelling.
     """
     if not isinstance(value, str) or not value:
         raise ReadScopeError(f"{field} must be a non-empty absolute path")
-    # Normalize first to handle .. and .
-    path = os.path.normpath(value)
+    # Resolve only for comparison. The caller must supply the canonical spelling.
+    path = value
     # Then resolve to eliminate aliases like //path on POSIX
     # Use realpath to canonicalize, but we don't require it to exist yet
     try:
@@ -50,7 +50,7 @@ def _absolute_clean_path(value: Any, field: str) -> str:
         resolved = path
     if not os.path.isabs(resolved) or resolved == "/" or resolved != value:
         raise ReadScopeError(
-            f"{field} must be normalized, absolute, and must not be filesystem root: {value!r}"
+            f"{field} must be normalized, absolute, not a symlink, and must not be filesystem root: {value!r}"
         )
     if not _SYSTEMD_PATH_RE.fullmatch(resolved):
         raise ReadScopeError(
@@ -186,6 +186,11 @@ def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> 
     if not os.path.isdir(work) or os.path.realpath(work) != work:
         raise ReadScopeError("workdir must be an existing directory without symlink components")
     roots = tuple(sorted(dict.fromkeys(_validated_private_root(root) for root in private_roots)))
+    collapsed: list[str] = []
+    for root in roots:
+        if not collapsed or not root.startswith(collapsed[-1] + os.sep):
+            collapsed.append(root)
+    roots = tuple(collapsed)
     if not roots:
         raise ReadScopeError("private_roots must not be empty")
     for root in roots:

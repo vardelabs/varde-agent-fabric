@@ -6,10 +6,13 @@ import json
 import os
 import shutil
 import signal
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dispatch import read_scope
 from dispatch.read_scope import ReadScopeError, load_private_roots, systemd_inaccessible_paths
@@ -84,6 +87,14 @@ class ReadScopeTests(unittest.TestCase):
                 f"--property=InaccessiblePaths={self.corvus}",
                 f"--property=InaccessiblePaths={self.north}",
             ),
+        )
+
+    def test_emits_one_property_for_nested_roots(self) -> None:
+        nested = self.corvus / "nested"
+        nested.mkdir(mode=0o700)
+        self.assertEqual(
+            systemd_inaccessible_paths((str(nested), str(self.corvus)), str(self.work)),
+            (f"--property=InaccessiblePaths={self.corvus}",),
         )
 
     def test_rejects_fifo_without_blocking(self) -> None:

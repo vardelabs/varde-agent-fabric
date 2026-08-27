@@ -25,9 +25,15 @@ the adapter boundary and returns deterministic `InaccessiblePaths` properties
 while refusing to hide the worker's own existing, non-symlinked workdir.
 
 This is an explicit denylist, not an allowlist. It prevents access to configured
-private roots when the host systemd adapter enforces the returned properties. It
-does not make `--workdir` or a Codex `-C` flag a filesystem boundary. A complete
-allowlist requires a host mount namespace or equivalent kernel boundary. Private roots
+private roots when the host systemd adapter enforces the returned properties. On
+this cluster, the ordinary `systemd --user` manager accepts and records
+`InaccessiblePaths` but does not enforce it. Deployment integration under
+`vardelabs/varde-vault#290` must prove the deny with a positive-control probe, for
+example requiring a worker attempt to list a hidden root to fail, before trusting it.
+It does not make `--workdir` or a Codex `-C` flag a filesystem boundary. A complete
+allowlist requires a host mount namespace or equivalent kernel boundary. Path-based
+denial also does not prevent data copied, bind-mounted, or hardlinked outside a denied
+directory from being read there. Private roots
 and overlays are deployment values and must never be committed here or accepted from
 task text.
 This primitive intentionally supports directory deny targets only. File targets such
