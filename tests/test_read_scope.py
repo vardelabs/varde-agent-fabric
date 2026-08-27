@@ -19,6 +19,16 @@ class FifoOpenBlocked(Exception):
     """Test sentinel that must not be converted into ReadScopeError."""
 
 
+class OsDouble:
+    def __init__(self, **overrides: object) -> None:
+        self._overrides = overrides
+
+    def __getattr__(self, name: str) -> object:
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(os, name)
+
+
 class ReadScopeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -27,7 +37,7 @@ class ReadScopeTests(unittest.TestCase):
         for ancestor in checkout.parents:
             info = os.lstat(ancestor)
             if info.st_uid not in (0, euid) or info.st_mode & 0o022:
-                raise unittest.SkipTest(
+                raise AssertionError(
                     f"checkout is under an untrusted ancestor: {ancestor}; "
                     "use a checkout whose path is not group/world writable"
                 )
@@ -192,9 +202,7 @@ class ReadScopeTests(unittest.TestCase):
             return result
 
         # Replace the module binding, not the process-global os module.
-        patched_os = mock.Mock(wraps=os)
-        patched_os.sep = os.sep
-        patched_os.lstat.side_effect = lstat_with_foreign_leaf
+        patched_os = OsDouble(lstat=lstat_with_foreign_leaf)
         with mock.patch.object(read_scope, "os", patched_os):
             properties = systemd_inaccessible_paths((str(foreign_root),), str(self.work))
         self.assertEqual(properties, (f"--property=InaccessiblePaths={foreign_root}",))
@@ -221,9 +229,7 @@ class ReadScopeTests(unittest.TestCase):
             return result
 
         # Replace the module binding, not the process-global os module.
-        patched_os = mock.Mock(wraps=os)
-        patched_os.sep = os.sep
-        patched_os.lstat.side_effect = lstat_with_foreign_ancestor
+        patched_os = OsDouble(lstat=lstat_with_foreign_ancestor)
         with mock.patch.object(read_scope, "os", patched_os):
             with self.assertRaisesRegex(ReadScopeError, "not owned"):
                 systemd_inaccessible_paths((str(root),), str(self.work))
