@@ -125,8 +125,9 @@ class ReadScopeTests(unittest.TestCase):
 
     def test_rejects_paths_with_unsafe_characters(self) -> None:
         for suffix in ("my secret", 'my"quote', "my'apostrophe", "my\ttab", "my\nnewline", "my-newline\n", "my;semicolon", "my`backtick", "my$dollar", "my\\backslash"):
-            root = str(self.temp_root / suffix)
-            self.config.write_text(json.dumps({"private_roots": [root]}))
+            root = Path(self.temp_root / suffix)
+            root.mkdir(mode=0o700)
+            self.config.write_text(json.dumps({"private_roots": [str(root)]}))
             with self.subTest(root=root), self.assertRaises(ReadScopeError):
                 load_private_roots(self.config)
 

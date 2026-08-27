@@ -5,7 +5,9 @@ prompt. A deployment supplies a local JSON overlay containing private roots. On
 Linux, the systemd adapter can turn those roots into ``InaccessiblePaths``
 properties before the worker starts. The policy is deliberately a denylist,
 not a claim that a worktree is an allowlist: a complete filesystem allowlist
-requires a mount namespace or equivalent host boundary.
+requires a mount namespace or equivalent host boundary. If the worker runs under
+the same uid as the dispatcher, deployment must use root-owned policy files or a
+separate worker uid so the worker cannot rewrite policy for a later spawn.
 """
 from __future__ import annotations
 
@@ -60,13 +62,8 @@ def _absolute_clean_path(value: Any, field: str) -> str:
 def _check_no_symlinks(path: Path) -> None:
     """Verify no component of path is a symlink."""
     for component in (path, *path.parents):
-        if component == Path("/"):
-            continue
-        try:
-            if os.path.islink(component):
-                raise ReadScopeError(f"path contains a symlink component: {path}")
-        except OSError as exc:
-            raise ReadScopeError(f"path component is unavailable: {component}") from exc
+        if os.path.islink(component):
+            raise ReadScopeError(f"path contains a symlink component: {path}")
 
 
 def _check_ancestor_trust(path: Path) -> None:
@@ -128,8 +125,6 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     user, and not group/world writable, establishing a trusted path from root.
     """
     path = _absolute_clean_path(str(config_path), "config_path")
-    if not path:
-        raise ReadScopeError("config_path must be a non-empty absolute path")
     path_obj = Path(path)
     _check_no_symlinks(path_obj)
     _check_ancestor_trust(path_obj)
