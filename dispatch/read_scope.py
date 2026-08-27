@@ -50,7 +50,7 @@ def _absolute_clean_path(value: Any, field: str) -> str:
         raise ReadScopeError(
             f"{field} must be normalized, absolute, and must not be filesystem root: {value!r}"
         )
-    if not _SYSTEMD_PATH_RE.match(resolved):
+    if not _SYSTEMD_PATH_RE.fullmatch(resolved):
         raise ReadScopeError(
             f"{field} contains characters not safe for systemd path properties: {value!r}"
         )
@@ -77,8 +77,6 @@ def _check_ancestor_trust(path: Path) -> None:
     """
     euid = os.geteuid()
     for component in path.parents:
-        if component == Path("/"):
-            continue
         try:
             component_stat = os.lstat(component)
         except OSError as exc:

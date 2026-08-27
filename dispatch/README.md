@@ -11,11 +11,14 @@ Bounded-work launch interfaces and harness adapters belong here.
 
 ## Read-scope policy
 
-`read_scope.py` is the portable policy primitive for deployment adapters. A
-private overlay supplies normalized absolute private roots. The loader reads the
-overlay through a no-follow file descriptor, requires a private file and parent
-owned by the effective user, and requires each root to be an owned, non-world-
-writable directory. `systemd_inaccessible_paths()` repeats root validation at
+`private_overlay.json` supplies normalized absolute private roots. The loader reads the
+overlay through a no-follow file descriptor, requires a regular file whose file and
+ancestors are owned by root or the effective user and are not group/world writable,
+and requires each root to be a non-world-writable directory. Leaf ownership is not
+required, so a deployment can deny another tenant's directory. If the worker runs as
+the same effective user as the dispatcher, the deployment must use root-owned policy
+files or a separate unprivileged worker uid, otherwise that worker can rewrite the
+policy for a later spawn. `systemd_inaccessible_paths()` repeats root validation at
 the adapter boundary and returns deterministic `InaccessiblePaths` properties
 while refusing to hide the worker's own existing, non-symlinked workdir.
 
