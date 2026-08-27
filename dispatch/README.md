@@ -15,7 +15,9 @@ Bounded-work launch interfaces and harness adapters belong here.
 overlay through a no-follow file descriptor, requires a regular file whose file and
 ancestors are owned by root or the effective user and are not group/world writable,
 and requires each root to be a non-world-writable directory. Leaf ownership is not
-required, so a deployment can deny another tenant's directory. If the worker runs as
+required, so a deployment can deny another tenant's directory. Nested paths under a
+foreign-owned tenant directory are rejected because their ancestor chain is not
+trusted; deny the tenant's top-level directory instead. If the worker runs as
 the same effective user as the dispatcher, the deployment must use root-owned policy
 files or a separate unprivileged worker uid, otherwise that worker can rewrite the
 policy for a later spawn. `systemd_inaccessible_paths()` repeats root validation at

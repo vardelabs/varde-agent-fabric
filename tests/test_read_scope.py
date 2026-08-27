@@ -14,6 +14,10 @@ from unittest import mock
 from dispatch.read_scope import ReadScopeError, load_private_roots, systemd_inaccessible_paths
 
 
+class FifoOpenBlocked(Exception):
+    """Test sentinel that must not be converted into ReadScopeError."""
+
+
 class ReadScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         # Keep all fixture ancestors inside the checkout, independent of ambient HOME/TMPDIR.
@@ -64,7 +68,7 @@ class ReadScopeTests(unittest.TestCase):
         os.mkfifo(fifo, 0o600)
 
         def timeout_handler(signum: int, frame: object) -> None:
-            raise TimeoutError("FIFO open blocked")
+            raise FifoOpenBlocked("FIFO open blocked")
 
         previous = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(2)
@@ -168,6 +172,8 @@ class ReadScopeTests(unittest.TestCase):
                 return os.stat_result(values)
             return result
 
+        # The module shares Python's process-global os object; this patch is scoped
+        # to the call and only forges the selected leaf/ancestor uid.
         with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_leaf):
             properties = systemd_inaccessible_paths((str(foreign_root),), str(self.work))
         self.assertEqual(properties, (f"--property=InaccessiblePaths={foreign_root}",))
@@ -193,9 +199,11 @@ class ReadScopeTests(unittest.TestCase):
                 return os.stat_result(values)
             return result
 
+        # Scope the process-global os.lstat patch to this single call.
         with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_ancestor):
             with self.assertRaisesRegex(ReadScopeError, "not owned"):
                 systemd_inaccessible_paths((str(root),), str(self.work))
+
     def test_rejects_group_writable_ancestor(self) -> None:
         """Ancestor trust: all ancestors must not be group/world writable."""
         # Create a world-writable ancestor
