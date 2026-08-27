@@ -172,7 +172,7 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     roots = document["private_roots"]
     if not isinstance(roots, list) or not roots:
         raise ReadScopeError("private_roots must be a non-empty list")
-    return tuple(sorted({_validated_private_root(root) for root in roots}))
+    return tuple(sorted(dict.fromkeys(_validated_private_root(root) for root in roots)))
 
 
 def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> tuple[str, ...]:
@@ -185,7 +185,7 @@ def systemd_inaccessible_paths(private_roots: tuple[str, ...], workdir: str) -> 
     work = _absolute_clean_path(workdir, "workdir")
     if not os.path.isdir(work) or os.path.realpath(work) != work:
         raise ReadScopeError("workdir must be an existing directory without symlink components")
-    roots = tuple(sorted({_validated_private_root(root) for root in private_roots}))
+    roots = tuple(sorted(dict.fromkeys(_validated_private_root(root) for root in private_roots)))
     if not roots:
         raise ReadScopeError("private_roots must not be empty")
     for root in roots:

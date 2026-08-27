@@ -11,7 +11,7 @@ Bounded-work launch interfaces and harness adapters belong here.
 
 ## Read-scope policy
 
-`private_overlay.json` supplies normalized absolute private roots. The loader reads the
+`private-overlay.json` supplies normalized absolute private roots. The loader reads the
 overlay through a no-follow file descriptor, requires a regular file whose file and
 ancestors are owned by root or the effective user and are not group/world writable,
 and requires each root to be a non-world-writable directory. Leaf ownership is not
