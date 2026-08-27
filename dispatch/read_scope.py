@@ -31,18 +31,30 @@ class ReadScopeError(ValueError):
 
 
 def _absolute_clean_path(value: Any, field: str) -> str:
+    """Normalize and validate an absolute path for systemd compatibility.
+    
+    Rejects paths with unsafe characters, normalizes to realpath to eliminate
+    aliases like //path, and ensures the path is absolute and not the root.
+    """
     if not isinstance(value, str) or not value:
         raise ReadScopeError(f"{field} must be a non-empty absolute path")
+    # Normalize first to handle .. and .
     path = os.path.normpath(value)
-    if not os.path.isabs(path) or path == "/" or path != value:
+    # Then resolve to eliminate aliases like //path on POSIX
+    # Use realpath to canonicalize, but we don't require it to exist yet
+    try:
+        resolved = os.path.realpath(path)
+    except (OSError, ValueError):
+        resolved = path
+    if not os.path.isabs(resolved) or resolved == "/" or resolved != value:
         raise ReadScopeError(
             f"{field} must be normalized, absolute, and must not be filesystem root: {value!r}"
         )
-    if not _SYSTEMD_PATH_RE.match(path):
+    if not _SYSTEMD_PATH_RE.match(resolved):
         raise ReadScopeError(
             f"{field} contains characters not safe for systemd path properties: {value!r}"
         )
-    return path
+    return resolved
 
 
 def _check_no_symlinks(path: Path) -> None:
@@ -57,10 +69,45 @@ def _check_no_symlinks(path: Path) -> None:
             raise ReadScopeError(f"path component is unavailable: {component}") from exc
 
 
+def _check_ancestor_trust(path: Path) -> None:
+    """Verify all ancestors are owned by root or euid and not group/world writable.
+    
+    This establishes a trusted path from root to the leaf, preventing substitution
+    attacks by untrusted users who control intermediate directories.
+    """
+    euid = os.geteuid()
+    for component in path.parents:
+        if component == Path("/"):
+            continue
+        try:
+            component_stat = os.lstat(component)
+        except OSError as exc:
+            raise ReadScopeError(f"ancestor is unavailable: {component}") from exc
+        if not stat.S_ISDIR(component_stat.st_mode):
+            raise ReadScopeError(f"ancestor is not a directory: {component}")
+        if component_stat.st_uid not in (0, euid):
+            raise ReadScopeError(f"ancestor is not owned by root or euid: {component}")
+        if component_stat.st_mode & 0o022:
+            raise ReadScopeError(f"ancestor is group/world writable: {component}")
+
+
 def _validated_private_root(value: Any) -> str:
+    """Validate a private root path for systemd InaccessiblePaths.
+    
+    The root must be:
+    - A normalized, absolute path safe for systemd properties
+    - A real directory (not a symlink)
+    - Not world-writable (so it cannot be swapped by untrusted users)
+    - Reachable only through trusted ancestors (root or euid owned, not writable)
+    
+    Note: leaf ownership is not required to support tenant isolation (hiding
+    directories owned by other users), but the leaf must not be world-writable
+    so that untrusted users cannot substitute it.
+    """
     root = _absolute_clean_path(value, "private_roots entry")
     path = Path(root)
     _check_no_symlinks(path)
+    _check_ancestor_trust(path)
     try:
         root_stat = os.lstat(root)
     except OSError as exc:
@@ -78,18 +125,24 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     The file must be a regular, non-symlink file. Its contents are configuration,
     never task input. Roots are sorted and de-duplicated for deterministic
     systemd argv and receipts.
+    
+    The config file and all its ancestors must be owned by root or the effective
+    user, and not group/world writable, establishing a trusted path from root.
     """
     path = _absolute_clean_path(str(config_path), "config_path")
     if not path:
         raise ReadScopeError("config_path must be a non-empty absolute path")
     path_obj = Path(path)
     _check_no_symlinks(path_obj)
+    _check_ancestor_trust(path_obj)
     try:
         fd = os.open(
             path_obj, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
         )
     except OSError as exc:
         raise ReadScopeError(f"read-scope config is unavailable: {path}") from exc
+    # Transfer ownership immediately to prevent double-close on exception paths
+    fd_transferred = False
     try:
         file_stat = os.fstat(fd)
         if not stat.S_ISREG(file_stat.st_mode):
@@ -100,21 +153,29 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
             raise ReadScopeError(f"read-scope config must not be group/world writable: {path}")
         if file_stat.st_uid not in (0, os.geteuid()):
             raise ReadScopeError(f"read-scope config is not owned by euid or root: {path}")
+        stream = os.fdopen(fd, encoding="utf-8")
+        fd_transferred = True  # fd is now owned by stream
         try:
-            with os.fdopen(fd, encoding="utf-8") as stream:
-                fd = -1
-                document = json.loads(stream.read(_MAX_CONFIG_BYTES + 1))
+            document = json.loads(stream.read(_MAX_CONFIG_BYTES + 1))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ReadScopeError(f"read-scope config is not valid UTF-8 JSON: {path}") from exc
-        fd = -1
+        finally:
+            stream.close()
     finally:
-        if fd != -1:
+        if not fd_transferred:
             os.close(fd)
     if not isinstance(document, dict):
         raise ReadScopeError("read-scope config must be a JSON object")
     allowed_keys = {"private_roots", "version"}
     if not set(document).issubset(allowed_keys) or "private_roots" not in document:
         raise ReadScopeError("read-scope config must contain private_roots and optionally version")
+    
+    # Validate version field if present
+    if "version" in document:
+        version = document["version"]
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ReadScopeError("version must be a positive integer")
+    
     roots = document["private_roots"]
     if not isinstance(roots, list) or not roots:
         raise ReadScopeError("private_roots must be a non-empty list")
