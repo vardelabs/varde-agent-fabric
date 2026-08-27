@@ -32,7 +32,7 @@ class ReadScopeError(ValueError):
 
 def _absolute_clean_path(value: Any, field: str) -> str:
     """Normalize and validate an absolute path for systemd compatibility.
-    
+
     Rejects paths with unsafe characters, normalizes to realpath to eliminate
     aliases like //path, and ensures the path is absolute and not the root.
     """
@@ -71,7 +71,7 @@ def _check_no_symlinks(path: Path) -> None:
 
 def _check_ancestor_trust(path: Path) -> None:
     """Verify all ancestors are owned by root or euid and not group/world writable.
-    
+
     This establishes a trusted path from root to the leaf, preventing substitution
     attacks by untrusted users who control intermediate directories.
     """
@@ -93,13 +93,13 @@ def _check_ancestor_trust(path: Path) -> None:
 
 def _validated_private_root(value: Any) -> str:
     """Validate a private root path for systemd InaccessiblePaths.
-    
+
     The root must be:
     - A normalized, absolute path safe for systemd properties
     - A real directory (not a symlink)
     - Not world-writable (so it cannot be swapped by untrusted users)
     - Reachable only through trusted ancestors (root or euid owned, not writable)
-    
+
     Note: leaf ownership is not required to support tenant isolation (hiding
     directories owned by other users), but the leaf must not be world-writable
     so that untrusted users cannot substitute it.
@@ -125,7 +125,7 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     The file must be a regular, non-symlink file. Its contents are configuration,
     never task input. Roots are sorted and de-duplicated for deterministic
     systemd argv and receipts.
-    
+
     The config file and all its ancestors must be owned by root or the effective
     user, and not group/world writable, establishing a trusted path from root.
     """
@@ -169,13 +169,13 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     allowed_keys = {"private_roots", "version"}
     if not set(document).issubset(allowed_keys) or "private_roots" not in document:
         raise ReadScopeError("read-scope config must contain private_roots and optionally version")
-    
+
     # Validate version field if present
     if "version" in document:
         version = document["version"]
-        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
-            raise ReadScopeError("version must be a positive integer")
-    
+        if not isinstance(version, int) or isinstance(version, bool) or version != 1:
+            raise ReadScopeError("version must be the supported version 1")
+
     roots = document["private_roots"]
     if not isinstance(roots, list) or not roots:
         raise ReadScopeError("private_roots must be a non-empty list")

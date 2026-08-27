@@ -8,40 +8,43 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from dispatch.read_scope import ReadScopeError, load_private_roots, systemd_inaccessible_paths
 
 
 class ReadScopeTests(unittest.TestCase):
     def setUp(self) -> None:
-        # Create a control root in the user's home directory to ensure trusted ancestors
-        # (home and all parents are owned by the user or root, not world-writable)
-        self.control_base = Path.home() / ".fabric-test"
+        # Keep all fixture ancestors inside the checkout, independent of ambient HOME/TMPDIR.
+        self.control_base = Path(__file__).resolve().parent / ".fabric-test"
         self.control_base.mkdir(mode=0o700, parents=True, exist_ok=True)
-        
-        # Create a unique temp directory inside the control base
+
         self.temp_root = Path(tempfile.mkdtemp(dir=self.control_base, prefix="test-"))
         self.temp_root.chmod(0o700)
-        
+
         # Set up test fixtures
         self.config = self.temp_root / "private-overlay.json"
         self.corvus = self.temp_root / "corvus"
         self.north = self.temp_root / "north"
         self.work = self.temp_root / "work"
-        
+
         self.corvus.mkdir(mode=0o700)
         self.north.mkdir(mode=0o700)
         self.work.mkdir(mode=0o700)
-        
+
         self.config.write_text(
             json.dumps({"private_roots": [str(self.north), str(self.corvus), str(self.north)]})
         )
         self.config.chmod(0o600)
 
     def tearDown(self) -> None:
-        # Clean up the temp directory but preserve the control base
-        if hasattr(self, 'temp_root') and self.temp_root.exists():
+        if hasattr(self, "temp_root") and self.temp_root.exists():
             shutil.rmtree(self.temp_root, ignore_errors=True)
+        if hasattr(self, "control_base"):
+            try:
+                self.control_base.rmdir()
+            except OSError:
+                pass
 
     def test_loads_deduplicated_sorted_roots(self) -> None:
         self.assertEqual(load_private_roots(self.config), (str(self.corvus), str(self.north)))
@@ -121,36 +124,47 @@ class ReadScopeTests(unittest.TestCase):
             load_private_roots(self.config)
 
     def test_rejects_paths_with_unsafe_characters(self) -> None:
-        """Character validation: systemd properties must not contain whitespace or control chars."""
-        for root in (
-            "/tmp/path with space",
-            "/tmp/path\"quote",
-            "/tmp/path'apostrophe",
-            "/tmp/path\ttab",
-            "/tmp/path\nnewline",
-            "/tmp/path;semicolon",
-            "/tmp/path`backtick",
-            "/tmp/path$dollar",
-            "/tmp/path\\backslash",
-        ):
+        for suffix in ("my secret", 'my"quote', "my'apostrophe", "my\ttab", "my\nnewline", "my;semicolon", "my`backtick", "my$dollar", "my\\backslash"):
+            root = str(self.temp_root / suffix)
             self.config.write_text(json.dumps({"private_roots": [root]}))
             with self.subTest(root=root), self.assertRaises(ReadScopeError):
                 load_private_roots(self.config)
 
     def test_rejects_double_leading_slash(self) -> None:
-        """POSIX allows //path as an alias; we must canonicalize to prevent bypass."""
-        # realpath("//path") should resolve to "/path" on POSIX
-        # If the user supplies "//path" but realpath gives "/path", they don't match
         self.config.write_text(json.dumps({"private_roots": ["//tmp"]}))
         with self.assertRaises(ReadScopeError):
             load_private_roots(self.config)
 
-    def test_rejects_oversized_config(self) -> None:
-        """Size limit: config files must not exceed 64KB."""
-        # Write a config that exceeds the limit
-        self.config.write_text("x" * (64 * 1024 + 1))
+    def test_rejects_oversized_valid_config(self) -> None:
+        document = {"private_roots": [str(self.corvus)], "padding": "x" * (64 * 1024)}
+        self.config.write_text(json.dumps(document))
         with self.assertRaises(ReadScopeError):
             load_private_roots(self.config)
+
+    def test_allows_private_root_owned_by_another_tenant(self) -> None:
+        foreign_root = self.temp_root / "foreign-tenant"
+        foreign_root.mkdir(mode=0o700)
+        real_lstat = os.lstat
+        foreign_uid = os.geteuid() + 1
+
+        def lstat_with_foreign_leaf(path: str | os.PathLike[str]) -> os.stat_result:
+            result = real_lstat(path)
+            if Path(path) == foreign_root:
+                values = list(result)
+                values[4] = foreign_uid
+                return os.stat_result(values)
+            return result
+
+        with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_leaf):
+            properties = systemd_inaccessible_paths((str(foreign_root),), str(self.work))
+        self.assertEqual(properties, (f"--property=InaccessiblePaths={foreign_root}",))
+
+    def test_rejects_world_writable_private_root(self) -> None:
+        root = self.temp_root / "world-writable"
+        root.mkdir(mode=0o700)
+        root.chmod(0o777)
+        with self.assertRaises(ReadScopeError):
+            systemd_inaccessible_paths((str(root),), str(self.work))
 
     def test_rejects_group_writable_ancestor(self) -> None:
         """Ancestor trust: all ancestors must not be group/world writable."""
@@ -158,10 +172,10 @@ class ReadScopeTests(unittest.TestCase):
         untrusted = self.temp_root / "untrusted"
         untrusted.mkdir(mode=0o755)
         untrusted.chmod(0o777)  # Make it world-writable
-        
+
         root = untrusted / "root"
         root.mkdir(mode=0o700)
-        
+
         self.config.write_text(json.dumps({"private_roots": [str(root)]}))
         with self.assertRaises(ReadScopeError):
             load_private_roots(self.config)
@@ -177,8 +191,8 @@ class ReadScopeTests(unittest.TestCase):
         self.assertEqual(result, (str(self.corvus),))
 
     def test_rejects_invalid_version_type(self) -> None:
-        """Version must be a positive integer if present."""
-        for version in (0, -1, "1", 1.5, None, True):
+        """Version must be the supported version 1 if present."""
+        for version in (0, -1, 2, 99, "1", 1.5, None, True):
             self.config.write_text(json.dumps({
                 "private_roots": [str(self.corvus)],
                 "version": version
