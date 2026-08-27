@@ -13,19 +13,26 @@ from dispatch.read_scope import ReadScopeError, load_private_roots, systemd_inac
 
 class ReadScopeTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
+        # Create a controlled private root for fixtures, not relying on tempfile's parent
+        self.control_root = Path("/data/vega/.tmp/fabric-test-control")
+        self.control_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.control_root.chmod(0o700)
+
+        self.temp = tempfile.TemporaryDirectory(dir=self.control_root)
         self.root = Path(self.temp.name)
+        self.root.chmod(0o700)
+
         self.config = self.root / "private-overlay.json"
         self.corvus = self.root / "corvus"
         self.north = self.root / "north"
-        self.corvus.mkdir()
-        self.north.mkdir()
+        self.corvus.mkdir(mode=0o700)
+        self.north.mkdir(mode=0o700)
         self.config.write_text(
             json.dumps({"private_roots": [str(self.north), str(self.corvus), str(self.north)]})
         )
         self.config.chmod(0o600)
         self.work = self.root / "work"
-        self.work.mkdir()
+        self.work.mkdir(mode=0o700)
 
     def tearDown(self) -> None:
         self.temp.cleanup()

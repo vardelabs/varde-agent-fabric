@@ -11,9 +11,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any
+
+
+# systemd InaccessiblePaths is a space-separated list property; paths must not
+# contain whitespace, control characters, quotes, or backslash to avoid silent
+# fragment drops or directive injection.
+_SYSTEMD_PATH_RE = re.compile(r'^[A-Za-z0-9._+/:-]+$')
+
+# Bounded config read to prevent unbounded memory consumption.
+_MAX_CONFIG_BYTES = 64 * 1024
 
 
 class ReadScopeError(ValueError):
@@ -28,27 +38,37 @@ def _absolute_clean_path(value: Any, field: str) -> str:
         raise ReadScopeError(
             f"{field} must be normalized, absolute, and must not be filesystem root: {value!r}"
         )
+    if not _SYSTEMD_PATH_RE.match(path):
+        raise ReadScopeError(
+            f"{field} contains characters not safe for systemd path properties: {value!r}"
+        )
     return path
+
+
+def _check_no_symlinks(path: Path) -> None:
+    """Verify no component of path is a symlink."""
+    for component in (path, *path.parents):
+        if component == Path("/"):
+            continue
+        try:
+            if os.path.islink(component):
+                raise ReadScopeError(f"path contains a symlink component: {path}")
+        except OSError as exc:
+            raise ReadScopeError(f"path component is unavailable: {component}") from exc
 
 
 def _validated_private_root(value: Any) -> str:
     root = _absolute_clean_path(value, "private_roots entry")
     path = Path(root)
-    for component in (path, *path.parents):
-        try:
-            component_stat = os.lstat(component)
-        except OSError as exc:
-            raise ReadScopeError(f"private root is unavailable: {root}") from exc
-        if stat.S_ISLNK(component_stat.st_mode):
-            raise ReadScopeError(f"private root contains a symlink component: {root}")
-        if component_stat.st_mode & 0o022:
-            raise ReadScopeError(f"private root has a writable path component: {root}")
+    _check_no_symlinks(path)
     try:
         root_stat = os.lstat(root)
     except OSError as exc:
         raise ReadScopeError(f"private root is unavailable: {root}") from exc
-    if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.geteuid():
-        raise ReadScopeError(f"private root must be an owned directory: {root}")
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise ReadScopeError(f"private root must be a directory: {root}")
+    if root_stat.st_mode & 0o002:
+        raise ReadScopeError(f"private root must not be world writable: {root}")
     return root
 
 
@@ -59,47 +79,42 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
     never task input. Roots are sorted and de-duplicated for deterministic
     systemd argv and receipts.
     """
-    path = Path(config_path)
-    if not path.is_absolute():
-        raise ReadScopeError(f"read-scope config must be an absolute regular non-symlink file: {path}")
-    for component in path.parents:
-        try:
-            component_stat = os.lstat(component)
-        except OSError as exc:
-            raise ReadScopeError(f"read-scope config parent is unavailable: {component}") from exc
-        if stat.S_ISLNK(component_stat.st_mode):
-            raise ReadScopeError(f"read-scope config contains a symlink component: {path}")
-        if component_stat.st_mode & 0o022:
-            raise ReadScopeError(f"read-scope config has a writable parent component: {component}")
+    path = _absolute_clean_path(str(config_path), "config_path")
+    if not path:
+        raise ReadScopeError("config_path must be a non-empty absolute path")
+    path_obj = Path(path)
+    _check_no_symlinks(path_obj)
     try:
         fd = os.open(
-            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+            path_obj, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
         )
     except OSError as exc:
         raise ReadScopeError(f"read-scope config is unavailable: {path}") from exc
     try:
         file_stat = os.fstat(fd)
-        parent_stat = os.stat(path.parent, follow_symlinks=False)
-        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_mode & 0o022:
-            raise ReadScopeError(
-                f"read-scope config must be a private regular file: {path}"
-            )
-        if file_stat.st_uid != os.geteuid() or not stat.S_ISDIR(parent_stat.st_mode):
-            raise ReadScopeError(f"read-scope config is not deployment-owned: {path}")
-        if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
-            raise ReadScopeError(f"read-scope config parent is not private: {path.parent}")
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ReadScopeError(f"read-scope config must be a regular file: {path}")
+        if file_stat.st_size > _MAX_CONFIG_BYTES:
+            raise ReadScopeError(f"read-scope config exceeds {_MAX_CONFIG_BYTES} bytes: {path}")
+        if file_stat.st_mode & 0o022:
+            raise ReadScopeError(f"read-scope config must not be group/world writable: {path}")
+        if file_stat.st_uid not in (0, os.geteuid()):
+            raise ReadScopeError(f"read-scope config is not owned by euid or root: {path}")
         try:
             with os.fdopen(fd, encoding="utf-8") as stream:
                 fd = -1
-                document = json.loads(stream.read())
+                document = json.loads(stream.read(_MAX_CONFIG_BYTES + 1))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ReadScopeError(f"read-scope config is not valid UTF-8 JSON: {path}") from exc
         fd = -1
     finally:
         if fd != -1:
             os.close(fd)
-    if not isinstance(document, dict) or set(document) != {"private_roots"}:
-        raise ReadScopeError("read-scope config must contain exactly private_roots")
+    if not isinstance(document, dict):
+        raise ReadScopeError("read-scope config must be a JSON object")
+    allowed_keys = {"private_roots", "version"}
+    if not set(document).issubset(allowed_keys) or "private_roots" not in document:
+        raise ReadScopeError("read-scope config must contain private_roots and optionally version")
     roots = document["private_roots"]
     if not isinstance(roots, list) or not roots:
         raise ReadScopeError("private_roots must be a non-empty list")
