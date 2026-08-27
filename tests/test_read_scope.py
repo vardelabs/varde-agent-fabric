@@ -6,12 +6,12 @@ import json
 import os
 import shutil
 import signal
-import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from dispatch import read_scope
 from dispatch.read_scope import ReadScopeError, load_private_roots, systemd_inaccessible_paths
 
 
@@ -191,9 +191,11 @@ class ReadScopeTests(unittest.TestCase):
                 return os.stat_result(values)
             return result
 
-        # The module shares Python's process-global os object; this patch is scoped
-        # to the call and only forges the selected leaf/ancestor uid.
-        with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_leaf):
+        # Replace the module binding, not the process-global os module.
+        patched_os = mock.Mock(wraps=os)
+        patched_os.sep = os.sep
+        patched_os.lstat.side_effect = lstat_with_foreign_leaf
+        with mock.patch.object(read_scope, "os", patched_os):
             properties = systemd_inaccessible_paths((str(foreign_root),), str(self.work))
         self.assertEqual(properties, (f"--property=InaccessiblePaths={foreign_root}",))
 
@@ -218,8 +220,11 @@ class ReadScopeTests(unittest.TestCase):
                 return os.stat_result(values)
             return result
 
-        # Scope the process-global os.lstat patch to this single call.
-        with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_ancestor):
+        # Replace the module binding, not the process-global os module.
+        patched_os = mock.Mock(wraps=os)
+        patched_os.sep = os.sep
+        patched_os.lstat.side_effect = lstat_with_foreign_ancestor
+        with mock.patch.object(read_scope, "os", patched_os):
             with self.assertRaisesRegex(ReadScopeError, "not owned"):
                 systemd_inaccessible_paths((str(root),), str(self.work))
 
