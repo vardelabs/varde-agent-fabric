@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,18 @@ class FifoOpenBlocked(Exception):
 
 
 class ReadScopeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        euid = os.geteuid()
+        checkout = Path(__file__).resolve()
+        for ancestor in checkout.parents:
+            info = os.lstat(ancestor)
+            if info.st_uid not in (0, euid) or info.st_mode & 0o022:
+                raise unittest.SkipTest(
+                    f"checkout is under an untrusted ancestor: {ancestor}; "
+                    "use a checkout whose path is not group/world writable"
+                )
+
     def setUp(self) -> None:
         # Keep all fixture ancestors inside the checkout, independent of ambient HOME/TMPDIR.
         self.control_base = Path(__file__).resolve().parent / ".fabric-test"
@@ -123,6 +136,12 @@ class ReadScopeTests(unittest.TestCase):
         nested_workdir.mkdir(mode=0o700)
         with self.assertRaisesRegex(ReadScopeError, "would hide"):
             systemd_inaccessible_paths((str(self.corvus),), str(nested_workdir))
+
+    def test_rejects_deeply_nested_json_with_read_scope_error(self) -> None:
+        document = "[" * 20000 + "]" * 20000
+        self.config.write_text(document)
+        with self.assertRaisesRegex(ReadScopeError, "valid UTF-8 JSON"):
+            load_private_roots(self.config)
 
     def test_rejects_empty_or_malformed_policy(self) -> None:
         for document in ({}, {"private_roots": []}, {"private_roots": "/data/corvus"}):

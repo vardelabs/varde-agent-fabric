@@ -150,7 +150,7 @@ def load_private_roots(config_path: str | os.PathLike[str]) -> tuple[str, ...]:
         fd_transferred = True  # fd is now owned by stream
         try:
             document = json.loads(stream.read(_MAX_CONFIG_BYTES + 1))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
             raise ReadScopeError(f"read-scope config is not valid UTF-8 JSON: {path}") from exc
         finally:
             stream.close()
