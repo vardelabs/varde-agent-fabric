@@ -62,6 +62,8 @@ id_ed25519
 /eval/private-overlay.*
 *.sock
 *.log
+# Test fixtures are created and removed at runtime, but ignore interrupted-run leftovers.
+/tests/.fabric-test/
 __pycache__/
 *.py[cod]
 .pytest_cache/
