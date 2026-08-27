@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,7 +52,7 @@ class ReadScopeTests(unittest.TestCase):
 
     def test_emits_systemd_properties_deterministically(self) -> None:
         self.assertEqual(
-            systemd_inaccessible_paths((str(self.corvus), str(self.north)), str(self.work)),
+            systemd_inaccessible_paths((str(self.north), str(self.corvus)), str(self.work)),
             (
                 f"--property=InaccessiblePaths={self.corvus}",
                 f"--property=InaccessiblePaths={self.north}",
@@ -60,10 +61,19 @@ class ReadScopeTests(unittest.TestCase):
 
     def test_rejects_fifo_without_blocking(self) -> None:
         fifo = self.temp_root / "overlay.fifo"
-        fifo_mode = 0o600
-        os.mkfifo(fifo, fifo_mode)
-        with self.assertRaises(ReadScopeError):
-            load_private_roots(fifo)
+        os.mkfifo(fifo, 0o600)
+
+        def timeout_handler(signum: int, frame: object) -> None:
+            raise TimeoutError("FIFO open blocked")
+
+        previous = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(2)
+        try:
+            with self.assertRaises(ReadScopeError):
+                load_private_roots(fifo)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
 
     def test_config_symlinked_ancestor_is_rejected(self) -> None:
         target = self.temp_root / "config-target"
@@ -105,8 +115,10 @@ class ReadScopeTests(unittest.TestCase):
             systemd_inaccessible_paths((str(self.corvus),), str(link))
 
     def test_rejects_workdir_inside_private_root(self) -> None:
-        with self.assertRaises(ReadScopeError):
-            systemd_inaccessible_paths((str(self.corvus),), str(self.corvus / "review"))
+        nested_workdir = self.corvus / "review"
+        nested_workdir.mkdir(mode=0o700)
+        with self.assertRaisesRegex(ReadScopeError, "would hide"):
+            systemd_inaccessible_paths((str(self.corvus),), str(nested_workdir))
 
     def test_rejects_empty_or_malformed_policy(self) -> None:
         for document in ({}, {"private_roots": []}, {"private_roots": "/data/corvus"}):
@@ -139,7 +151,7 @@ class ReadScopeTests(unittest.TestCase):
     def test_rejects_oversized_valid_config(self) -> None:
         document = {"private_roots": [str(self.corvus)], "padding": "x" * (64 * 1024)}
         self.config.write_text(json.dumps(document))
-        with self.assertRaises(ReadScopeError):
+        with self.assertRaisesRegex(ReadScopeError, "exceeds"):
             load_private_roots(self.config)
 
     def test_allows_private_root_owned_by_another_tenant(self) -> None:
@@ -167,6 +179,23 @@ class ReadScopeTests(unittest.TestCase):
         with self.assertRaises(ReadScopeError):
             systemd_inaccessible_paths((str(root),), str(self.work))
 
+    def test_rejects_foreign_owned_ancestor(self) -> None:
+        root = self.temp_root / "foreign-ancestor" / "root"
+        root.mkdir(mode=0o700, parents=True)
+        ancestor = root.parent
+        real_lstat = os.lstat
+
+        def lstat_with_foreign_ancestor(path: str | os.PathLike[str]) -> os.stat_result:
+            result = real_lstat(path)
+            if Path(path) == ancestor:
+                values = list(result)
+                values[4] = os.geteuid() + 1
+                return os.stat_result(values)
+            return result
+
+        with mock.patch("dispatch.read_scope.os.lstat", side_effect=lstat_with_foreign_ancestor):
+            with self.assertRaisesRegex(ReadScopeError, "not owned"):
+                systemd_inaccessible_paths((str(root),), str(self.work))
     def test_rejects_group_writable_ancestor(self) -> None:
         """Ancestor trust: all ancestors must not be group/world writable."""
         # Create a world-writable ancestor

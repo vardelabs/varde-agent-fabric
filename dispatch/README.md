@@ -30,6 +30,7 @@ and overlays are deployment values and must never be committed here or accepted 
 task text.
 This primitive intentionally supports directory deny targets only. File targets such
 as credentials are outside this slice and require the deployment integration to
-choose a broader directory or add a separate policy primitive.
+choose a broader directory or add a separate policy primitive. Paths use a
+conservative ASCII allowlist because systemd parses them as a space-separated list.
 
 No production dispatch implementation is included in the skeleton yet.
