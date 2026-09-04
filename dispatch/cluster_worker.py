@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
 
-from contracts.review_contracts import ReviewArtifact, ReviewRequest
+from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class ClusterReviewWorker:
         started = monotonic()
         findings = self.model(request.packet)
         if not isinstance(findings, list) or any(not isinstance(item, dict) for item in findings):
-            raise ValueError("model returned findings outside the bounded shape")
+            raise ContractError("model returned findings outside the bounded shape")
         artifact = ReviewArtifact(
             repository=request.repository,
             pull_request=request.pull_request,

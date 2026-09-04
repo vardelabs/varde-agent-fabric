@@ -10,11 +10,14 @@ class ContractError(ValueError):
 
 
 _MAX_TEXT = 256
-_MAX_PACKET_BYTES = 256 * 1024
+MAX_PACKET_BYTES = 256 * 1024
 _MAX_FINDINGS = 50
+_MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
 _ALLOWED_WORKERS = {"local-gemma", "codex"}
 _ALLOWED_FINISH = {"completed", "unavailable", "malformed", "timeout", "truncated"}
+_ALLOWED_SEVERITIES = {"red", "yellow", "green"}
+_ALLOWED_FINDING_KEYS = {"severity", "file", "line", "message", "confidence", "category", "reproduction"}
 
 
 def _text(value: Any, field: str, *, max_length: int = _MAX_TEXT) -> str:
@@ -35,6 +38,23 @@ def _keys(data: Mapping[str, Any], expected: set[str], field: str) -> None:
     missing = expected - set(data)
     if unknown or missing:
         raise ContractError(f"{field} keys invalid, missing={sorted(missing)}, unknown={sorted(unknown)}")
+
+
+def _finding(value: Any, index: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ContractError(f"findings[{index}] must be an object")
+    unknown = set(value) - _ALLOWED_FINDING_KEYS
+    if unknown:
+        raise ContractError(f"findings[{index}] has unknown keys: {sorted(unknown)}")
+    severity = value.get("severity")
+    if severity not in _ALLOWED_SEVERITIES:
+        raise ContractError(f"findings[{index}].severity must be red, yellow, or green")
+    for key in ("file", "message", "confidence", "category", "reproduction"):
+        if key in value and (not isinstance(value[key], str) or not value[key] or len(value[key]) > _MAX_FINDING_TEXT):
+            raise ContractError(f"findings[{index}].{key} must be a bounded non-empty string")
+    if "line" in value and (not isinstance(value["line"], int) or isinstance(value["line"], bool) or value["line"] < 1):
+        raise ContractError(f"findings[{index}].line must be a positive integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -63,7 +83,7 @@ class ReviewRequest:
         if self.worker_kind not in _ALLOWED_WORKERS:
             raise ContractError("worker_kind is not approved")
         _text(self.correlation_id, "correlation_id", max_length=128)
-        if not isinstance(self.packet, str) or not self.packet or len(self.packet.encode()) > _MAX_PACKET_BYTES:
+        if not isinstance(self.packet, str) or not self.packet or len(self.packet.encode()) > MAX_PACKET_BYTES:
             raise ContractError("packet must be non-empty and at most 262144 UTF-8 bytes")
         if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 900:
             raise ContractError("timeout_seconds must be an integer from 1 to 900")
@@ -119,8 +139,10 @@ class ReviewArtifact:
         _text(self.execution_location, "execution_location")
         _text(self.provider, "provider")
         _text(self.correlation_id, "correlation_id", max_length=128)
-        if not isinstance(self.findings, tuple) or len(self.findings) > _MAX_FINDINGS or any(not isinstance(f, dict) for f in self.findings):
+        if not isinstance(self.findings, tuple) or len(self.findings) > _MAX_FINDINGS:
             raise ContractError("findings must contain at most 50 objects")
+        for index, finding in enumerate(self.findings):
+            _finding(finding, index)
         if self.finish_reason not in _ALLOWED_FINISH:
             raise ContractError("finish_reason is not supported")
         if self.fallback is not None:

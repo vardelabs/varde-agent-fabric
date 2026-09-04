@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 
-from contracts.review_contracts import ReviewRequest
+from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayClient, GatewayError
 from dispatch.cluster_worker import WorkerResult
 
@@ -14,7 +14,7 @@ class ReviewSupervisor:
         self.gateway = gateway
         self.local_codex = local_codex
 
-    def run(self, request: ReviewRequest):
+    def run(self, request: ReviewRequest) -> ReviewArtifact:
         try:
             return self.gateway.submit(request)
         except GatewayError:

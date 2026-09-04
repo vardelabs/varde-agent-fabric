@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import http.client
 import sys
 import unittest
 from pathlib import Path
+from typing import Callable, cast
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -62,6 +64,49 @@ class RemoteReviewTests(unittest.TestCase):
         client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req, head_sha="c" * 40)))
         with self.assertRaisesRegex(GatewayError, "does not match"):
             client.submit(req)
+
+    def test_all_request_identity_fields_are_bound(self):
+        req = request()
+        for changes in ({"repository": "other/repo"}, {"pull_request": 99}, {"base_sha": "c" * 40}, {"correlation_id": "other"}, {"worker_kind": "codex"}):
+            with self.subTest(changes=changes):
+                client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req, **changes)))
+                with self.assertRaises(GatewayError): client.submit(req)
+
+    def test_http_and_malformed_responses_fail_closed(self):
+        req = request()
+        class ErrorResponse(Response): status = 503
+        client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: ErrorResponse(b""))
+        with self.assertRaises(GatewayError): client.submit(req)
+        client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(b"not-json"))
+        with self.assertRaisesRegex(GatewayError, "malformed"): client.submit(req)
+
+    def test_incomplete_read_is_unavailable(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=http.client.IncompleteRead(b"partial", 10)))
+        with self.assertRaises(GatewayError): client.submit(req)
+
+    def test_codex_without_fallback_fails_closed(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        with self.assertRaises(GatewayError): ReviewSupervisor(client).run(req)
+
+    def test_transport_configuration_is_validated(self):
+        with self.assertRaises(ValueError): GatewayClient("http://gateway.example", "secret")
+        with self.assertRaises(ValueError): GatewayClient("https://gateway.example", "")
+
+    def test_finding_shape_and_worker_error_are_strict(self):
+        req = request()
+        with self.assertRaises(ContractError): ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"x": 1},), "completed")
+        bad_model = cast(Callable[[str], list[dict]], lambda packet: ["bad"])
+        with self.assertRaises(ContractError): ClusterReviewWorker(bad_model, provider="gemma").execute(req)
+
+    def test_oversized_request_is_rejected_before_network(self):
+        req = request()
+        oversized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, "x" * (256 * 1024), req.timeout_seconds)
+        network = mock.Mock()
+        client = GatewayClient("https://gateway.example", "secret", opener=network)
+        with self.assertRaises(GatewayError): client.submit(oversized)
+        network.assert_not_called()
 
     def test_oversized_response_is_rejected(self):
         req = request()
