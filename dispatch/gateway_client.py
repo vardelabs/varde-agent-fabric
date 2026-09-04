@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
-from contracts.review_contracts import ContractError, MAX_PACKET_BYTES, ReviewArtifact, ReviewRequest
+from contracts.review_contracts import ContractError, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
 
 
 class GatewayError(RuntimeError):
@@ -26,8 +26,8 @@ class GatewayClient:
         self.max_response_bytes = max_response_bytes
 
     def submit(self, request: ReviewRequest) -> ReviewArtifact:
-        body = json.dumps(request.to_dict(), separators=(",", ":")).encode("utf-8")
-        if len(body) > MAX_PACKET_BYTES:
+        body = json.dumps(request.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(body) > MAX_TRANSPORT_BYTES:
             raise GatewayError("request exceeds transport limit")
         http_request = urllib.request.Request(
             self.base_url + "/v1/reviews",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import http.client
 import sys
+import time
 import unittest
 from pathlib import Path
 from typing import Callable, cast
@@ -12,7 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
+from contracts.review_contracts import ContractError, MAX_PACKET_BYTES, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
 from dispatch.cluster_worker import ClusterReviewWorker
 from dispatch.gateway_client import GatewayClient, GatewayError
 from dispatch.review_supervisor import ReviewSupervisor
@@ -54,6 +55,16 @@ class RemoteReviewTests(unittest.TestCase):
         payload["unexpected"] = True
         with self.assertRaises(ContractError): ReviewRequest.from_dict(payload)
 
+    def test_contract_rejects_non_integer_pull_request_numbers(self):
+        for value in ("7", None, 7.5, True):
+            with self.subTest(value=value):
+                with self.assertRaises(ContractError):
+                    ReviewArtifact.from_dict(artifact(request(), pull_request=value))
+
+    def test_contract_normalizes_sha_case(self):
+        value = ReviewRequest("vardelabs/example", 7, BASE.upper(), HEAD.upper(), ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet")
+        self.assertEqual((value.base_sha, value.head_sha), (BASE, HEAD))
+
     def test_fake_gateway_returns_validated_artifact(self):
         req = request()
         client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req)))
@@ -76,7 +87,7 @@ class RemoteReviewTests(unittest.TestCase):
         req = request()
         class ErrorResponse(Response): status = 503
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: ErrorResponse(b""))
-        with self.assertRaises(GatewayError): client.submit(req)
+        with self.assertRaisesRegex(GatewayError, "HTTP 503"): client.submit(req)
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(b"not-json"))
         with self.assertRaisesRegex(GatewayError, "malformed"): client.submit(req)
 
@@ -100,13 +111,31 @@ class RemoteReviewTests(unittest.TestCase):
         bad_model = cast(Callable[[str], list[dict]], lambda packet: ["bad"])
         with self.assertRaises(ContractError): ClusterReviewWorker(bad_model, provider="gemma").execute(req)
 
-    def test_oversized_request_is_rejected_before_network(self):
+    def test_transport_limit_is_checked_before_network(self):
         req = request()
-        oversized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, "x" * (256 * 1024), req.timeout_seconds)
+        oversized = req
         network = mock.Mock()
         client = GatewayClient("https://gateway.example", "secret", opener=network)
-        with self.assertRaises(GatewayError): client.submit(oversized)
+        with mock.patch("dispatch.gateway_client.MAX_TRANSPORT_BYTES", 1):
+            with self.assertRaisesRegex(GatewayError, "transport limit"): client.submit(oversized)
         network.assert_not_called()
+
+    def test_packet_at_contract_limit_is_sendable_with_transport_allowance(self):
+        req = request()
+        packet = "x" * (MAX_PACKET_BYTES - 500)
+        sized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, packet, req.timeout_seconds)
+        network = mock.Mock(return_value=Response(json.dumps(artifact(sized)).encode()))
+        result = GatewayClient("https://gateway.example", "secret", opener=network).submit(sized)
+        self.assertEqual(result.repository, req.repository)
+        self.assertLessEqual(len(network.call_args.args[0].data), MAX_TRANSPORT_BYTES)
+
+    def test_multibyte_packet_uses_utf8_transport_size(self):
+        req = request()
+        packet = "漢字" * 32768
+        sized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, packet, req.timeout_seconds)
+        network = mock.Mock(return_value=Response(json.dumps(artifact(sized), ensure_ascii=False).encode()))
+        result = GatewayClient("https://gateway.example", "secret", opener=network).submit(sized)
+        self.assertEqual(result.repository, req.repository)
 
     def test_oversized_response_is_rejected(self):
         req = request()
@@ -127,6 +156,22 @@ class RemoteReviewTests(unittest.TestCase):
         result = ReviewSupervisor(client, local_codex=local.execute).run(req)
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
         self.assertEqual(result.execution_location, "requester")
+
+    def test_codex_fallback_rejects_stale_artifact(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        local = mock.Mock(return_value=type("Result", (), {"artifact": ReviewArtifact("other/repo", 99, "c" * 40, "d" * 40, "codex", "requester", "codex-local", "other-corr", (), "completed")})())
+        with self.assertRaisesRegex(GatewayError, "does not match"):
+            ReviewSupervisor(client, local_codex=local).run(req)
+
+    def test_codex_fallback_honors_timeout(self):
+        req = ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        def hung(_request):
+            time.sleep(2)
+            raise AssertionError("must not finish before timeout")
+        with self.assertRaisesRegex(GatewayError, "timed out"):
+            ReviewSupervisor(client, local_codex=hung).run(req)
 
     def test_worker_emits_cluster_provenance(self):
         result = ClusterReviewWorker(lambda packet: [{"severity": "green"}], provider="gemma-private").execute(request()).artifact

@@ -11,6 +11,7 @@ class ContractError(ValueError):
 
 _MAX_TEXT = 256
 MAX_PACKET_BYTES = 256 * 1024
+MAX_TRANSPORT_BYTES = MAX_PACKET_BYTES + 4096
 _MAX_FINDINGS = 50
 _MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
@@ -31,6 +32,11 @@ def _sha(value: Any, field: str) -> str:
     if len(value) != 40 or any(c not in "0123456789abcdef" for c in value.lower()):
         raise ContractError(f"{field} must be a 40-character hexadecimal SHA")
     return value.lower()
+
+
+def _positive_int(value: Any, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ContractError(f"{field} must be a positive integer")
 
 
 def _keys(data: Mapping[str, Any], expected: set[str], field: str) -> None:
@@ -72,10 +78,9 @@ class ReviewRequest:
 
     def __post_init__(self) -> None:
         _text(self.repository, "repository")
-        if self.pull_request < 1:
-            raise ContractError("pull_request must be positive")
-        _sha(self.base_sha, "base_sha")
-        _sha(self.head_sha, "head_sha")
+        _positive_int(self.pull_request, "pull_request")
+        object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
+        object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
         if not self.paths or len(self.paths) > 100 or any(not isinstance(p, str) or not p for p in self.paths):
             raise ContractError("paths must contain between 1 and 100 non-empty strings")
         if self.kind not in _ALLOWED_KINDS:
@@ -130,10 +135,9 @@ class ReviewArtifact:
 
     def __post_init__(self) -> None:
         _text(self.repository, "repository")
-        if self.pull_request < 1:
-            raise ContractError("pull_request must be positive")
-        _sha(self.base_sha, "base_sha")
-        _sha(self.head_sha, "head_sha")
+        _positive_int(self.pull_request, "pull_request")
+        object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
+        object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
         if self.worker_kind not in _ALLOWED_WORKERS:
             raise ContractError("worker_kind is not approved")
         _text(self.execution_location, "execution_location")
