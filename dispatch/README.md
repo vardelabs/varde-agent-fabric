@@ -41,4 +41,14 @@ as credentials are outside this slice and require the deployment integration to
 choose a broader directory or add a separate policy primitive. Paths use a
 conservative ASCII allowlist because systemd parses them as a space-separated list.
 
-No production dispatch implementation is included in the skeleton yet.
+## Remote review slice
+
+`gateway_client.py` is the requester-side HTTPS boundary. It sends only a
+validated `ReviewRequest`, requires a bearer token, bounds the response, and
+returns only a validated `ReviewArtifact`. It has no GitHub or shell methods.
+
+`review_supervisor.py` applies the routing rule: `local-gemma` fails closed when
+the cluster gateway is unavailable; `codex` may use an explicitly supplied local
+fallback and records that fallback in the artifact. `cluster_worker.py` adapts
+a private model callable and emits cluster execution provenance. These modules
+are transport and worker primitives, not a GitHub handler.
