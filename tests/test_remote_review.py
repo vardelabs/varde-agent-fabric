@@ -190,8 +190,24 @@ class RemoteReviewTests(unittest.TestCase):
         for failure in (ContractError("bad findings"), OSError("codex binary missing"), AttributeError("bad result")):
             with self.subTest(failure=type(failure).__name__):
                 local = mock.Mock(side_effect=failure)
-                with self.assertRaisesRegex(GatewayError, "local Codex fallback failed"):
+                with self.assertRaisesRegex(GatewayError, f"local Codex fallback failed: {type(failure).__name__}"):
                     ReviewSupervisor(client, local_codex=local).run(req)
+
+    def test_codex_fallback_rejects_wrong_return_types(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        for value in (object(), WorkerResult(cast(ReviewArtifact, "nope"))):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaisesRegex(GatewayError, "invalid worker result"):
+                    ReviewSupervisor(client, local_codex=mock.Mock(return_value=value)).run(req)
+
+    def test_codex_fallback_drains_large_worker_results(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        findings = tuple({"severity": "yellow", "file": "src/app.py", "message": "m" * 1024, "confidence": "c" * 1024, "category": "k" * 1024, "reproduction": "r" * 1024, "line": 1} for _ in range(50))
+        large = WorkerResult(ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, "codex", "requester", "codex-local", req.correlation_id, findings, "completed"))
+        result = ReviewSupervisor(client, local_codex=mock.Mock(return_value=large)).run(req)
+        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
 
     def test_codex_fallback_honors_timeout(self):
         req = ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
