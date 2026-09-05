@@ -30,6 +30,8 @@ class ClusterReviewWorker:
         findings = self.model(request.packet)
         if not isinstance(findings, list) or any(not isinstance(item, dict) for item in findings):
             raise ContractError("model returned findings outside the bounded shape")
+        if len(findings) > 50:
+            raise ContractError("model returned more than 50 findings")
         artifact = ReviewArtifact(
             repository=request.repository,
             pull_request=request.pull_request,

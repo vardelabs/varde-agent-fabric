@@ -8,6 +8,8 @@ import multiprocessing
 import sys
 import time
 import unittest
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from typing import Callable, cast
 from unittest import mock
@@ -99,6 +101,16 @@ class RemoteReviewTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"message": "missing severity"},), "completed")
 
+    def test_finding_text_limit_is_strict(self):
+        req = request()
+        with self.assertRaises(ContractError):
+            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"severity": "yellow", "message": "x" * 1025},), "completed")
+
+    def test_multibyte_packet_byte_limit_is_strict(self):
+        req = request()
+        with self.assertRaises(ContractError):
+            ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, "漢" * 100000, req.timeout_seconds)
+
     def test_fake_gateway_returns_validated_artifact(self):
         req = request()
         client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req)))
@@ -124,6 +136,10 @@ class RemoteReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(GatewayError, "HTTP 503"): client.submit(req)
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(b"not-json"))
         with self.assertRaisesRegex(GatewayError, "malformed"): client.submit(req)
+
+        error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 401, "unauthorized", Message(), None)
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaisesRegex(GatewayError, "HTTP 401"): client.submit(req)
 
     def test_incomplete_read_is_unavailable(self):
         req = request("codex")

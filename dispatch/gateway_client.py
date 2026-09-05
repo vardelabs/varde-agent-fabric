@@ -40,6 +40,8 @@ class GatewayClient:
                 if getattr(response, "status", 200) != 200:
                     raise GatewayError(f"gateway returned HTTP {response.status}")
                 raw = response.read(self.max_response_bytes + 1)
+        except urllib.error.HTTPError as exc:
+            raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             raise GatewayError("gateway unavailable") from exc
         if len(raw) > self.max_response_bytes:
