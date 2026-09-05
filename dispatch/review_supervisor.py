@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 import multiprocessing
+import threading
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from dispatch.cluster_worker import WorkerResult
@@ -50,7 +51,7 @@ def _local_codex_child(local_codex: Callable[[ReviewRequest], WorkerResult], req
 
 
 def _run_local_codex_with_timeout(local_codex: Callable[[ReviewRequest], WorkerResult], request: ReviewRequest) -> WorkerResult:
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn" if threading.active_count() > 1 else "fork")
     parent, child = context.Pipe(duplex=False)
     process = context.Process(target=_local_codex_child, args=(local_codex, request, child), daemon=True)
     process.start()

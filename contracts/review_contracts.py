@@ -57,6 +57,8 @@ def _finding(value: Any, index: int) -> dict[str, Any]:
     unknown = set(value) - _ALLOWED_FINDING_KEYS
     if unknown:
         raise ContractError(f"findings[{index}] has unknown keys: {sorted(unknown)}")
+    if "message" not in value:
+        raise ContractError(f"findings[{index}].message is required")
     severity = value.get("severity")
     if severity not in _ALLOWED_SEVERITIES:
         raise ContractError(f"findings[{index}].severity must be red, yellow, or green")
@@ -90,6 +92,8 @@ class ReviewRequest:
             raise ContractError("paths must contain between 1 and 100 non-empty strings")
         for index, path in enumerate(self.paths):
             _text(path, f"paths[{index}]", max_length=_MAX_PATH_TEXT)
+            if path.startswith("/") or "\x00" in path or any(segment in {"", ".", ".."} for segment in path.split("/")):
+                raise ContractError(f"paths[{index}] must be a relative path without empty, '.', '..', or NUL segments")
         if self.kind not in _ALLOWED_KINDS:
             raise ContractError("kind is not approved")
         if self.worker_kind not in _ALLOWED_WORKERS:
