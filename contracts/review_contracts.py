@@ -10,8 +10,9 @@ class ContractError(ValueError):
 
 
 _MAX_TEXT = 256
+_MAX_PATH_TEXT = 512
 MAX_PACKET_BYTES = 256 * 1024
-MAX_TRANSPORT_BYTES = MAX_PACKET_BYTES + 4096
+MAX_TRANSPORT_BYTES = MAX_PACKET_BYTES + 64 * 1024
 _MAX_FINDINGS = 50
 _MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
@@ -24,6 +25,10 @@ _ALLOWED_FINDING_KEYS = {"severity", "file", "line", "message", "confidence", "c
 def _text(value: Any, field: str, *, max_length: int = _MAX_TEXT) -> str:
     if not isinstance(value, str) or not value or len(value) > max_length:
         raise ContractError(f"{field} must be a non-empty string of at most {max_length} characters")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ContractError(f"{field} must contain valid UTF-8 text") from exc
     return value
 
 
@@ -56,8 +61,8 @@ def _finding(value: Any, index: int) -> dict[str, Any]:
     if severity not in _ALLOWED_SEVERITIES:
         raise ContractError(f"findings[{index}].severity must be red, yellow, or green")
     for key in ("file", "message", "confidence", "category", "reproduction"):
-        if key in value and (not isinstance(value[key], str) or not value[key] or len(value[key]) > _MAX_FINDING_TEXT):
-            raise ContractError(f"findings[{index}].{key} must be a bounded non-empty string")
+        if key in value:
+            _text(value[key], f"findings[{index}].{key}", max_length=_MAX_FINDING_TEXT)
     if "line" in value and (not isinstance(value["line"], int) or isinstance(value["line"], bool) or value["line"] < 1):
         raise ContractError(f"findings[{index}].line must be a positive integer")
     return value
@@ -81,14 +86,17 @@ class ReviewRequest:
         _positive_int(self.pull_request, "pull_request")
         object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
         object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
-        if not self.paths or len(self.paths) > 100 or any(not isinstance(p, str) or not p for p in self.paths):
+        if not self.paths or len(self.paths) > 100:
             raise ContractError("paths must contain between 1 and 100 non-empty strings")
+        for index, path in enumerate(self.paths):
+            _text(path, f"paths[{index}]", max_length=_MAX_PATH_TEXT)
         if self.kind not in _ALLOWED_KINDS:
             raise ContractError("kind is not approved")
         if self.worker_kind not in _ALLOWED_WORKERS:
             raise ContractError("worker_kind is not approved")
         _text(self.correlation_id, "correlation_id", max_length=128)
-        if not isinstance(self.packet, str) or not self.packet or len(self.packet.encode()) > MAX_PACKET_BYTES:
+        _text(self.packet, "packet", max_length=MAX_PACKET_BYTES)
+        if len(self.packet.encode("utf-8")) > MAX_PACKET_BYTES:
             raise ContractError("packet must be non-empty and at most 262144 UTF-8 bytes")
         if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 900:
             raise ContractError("timeout_seconds must be an integer from 1 to 900")

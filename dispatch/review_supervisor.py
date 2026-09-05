@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import replace
+import multiprocessing
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayClient, GatewayError
@@ -22,15 +22,7 @@ class ReviewSupervisor:
             if request.worker_kind == "local-gemma":
                 raise
             if request.worker_kind == "codex" and self.local_codex is not None:
-                executor = ThreadPoolExecutor(max_workers=1)
-                future = executor.submit(self.local_codex, request)
-                try:
-                    result = future.result(timeout=request.timeout_seconds)
-                except FutureTimeoutError as exc:
-                    future.cancel()
-                    raise GatewayError("local Codex fallback timed out") from exc
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+                result = _run_local_codex_with_timeout(self.local_codex, request)
                 artifact = result.artifact
                 if (artifact.repository != request.repository or
                         artifact.pull_request != request.pull_request or
@@ -41,3 +33,32 @@ class ReviewSupervisor:
                     raise GatewayError("local fallback artifact does not match request identity")
                 return replace(artifact, fallback="cluster-unavailable-local-codex")
             raise
+
+
+def _local_codex_child(local_codex: Callable[[ReviewRequest], WorkerResult], request: ReviewRequest, output) -> None:
+    try:
+        output.put(("ok", local_codex(request)))
+    except BaseException as exc:
+        output.put(("error", type(exc).__name__, str(exc)))
+
+
+def _run_local_codex_with_timeout(local_codex: Callable[[ReviewRequest], WorkerResult], request: ReviewRequest) -> WorkerResult:
+    context = multiprocessing.get_context("fork")
+    output = context.Queue(maxsize=1)
+    process = context.Process(target=_local_codex_child, args=(local_codex, request, output), daemon=True)
+    process.start()
+    process.join(request.timeout_seconds)
+    if process.is_alive():
+        process.terminate()
+        process.join(1)
+        if process.is_alive():
+            process.kill()
+            process.join()
+        raise GatewayError("local Codex fallback timed out")
+    try:
+        message = output.get(timeout=1)
+    except Exception as exc:
+        raise GatewayError("local Codex fallback failed without a result") from exc
+    if message[0] == "error":
+        raise GatewayError(f"local Codex fallback failed: {message[1]}: {message[2]}")
+    return message[1]

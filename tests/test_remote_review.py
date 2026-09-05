@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contracts.review_contracts import ContractError, MAX_PACKET_BYTES, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
-from dispatch.cluster_worker import ClusterReviewWorker
+from dispatch.cluster_worker import ClusterReviewWorker, WorkerResult
 from dispatch.gateway_client import GatewayClient, GatewayError
 from dispatch.review_supervisor import ReviewSupervisor
 
@@ -64,6 +64,23 @@ class RemoteReviewTests(unittest.TestCase):
     def test_contract_normalizes_sha_case(self):
         value = ReviewRequest("vardelabs/example", 7, BASE.upper(), HEAD.upper(), ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet")
         self.assertEqual((value.base_sha, value.head_sha), (BASE, HEAD))
+        response = artifact(value, base_sha=BASE.upper(), head_sha=HEAD.upper())
+        normalized = ReviewArtifact.from_dict(response)
+        self.assertEqual((normalized.base_sha, normalized.head_sha), (BASE, HEAD))
+
+    def test_contract_rejects_surrogate_text(self):
+        with self.assertRaises(ContractError):
+            ReviewRequest("vardelabs/\ud800", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "packet")
+        with self.assertRaises(ContractError):
+            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/\ud800.py",), "reviewer", "codex", "corr-7", "packet")
+        with self.assertRaises(ContractError):
+            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "\ud800")
+        with self.assertRaises(ContractError):
+            ReviewArtifact(request().repository, 7, BASE, HEAD, "codex", "cluster", "codex", "corr-7", ({"severity": "red", "message": "\ud800"},), "completed")
+
+    def test_contract_bounds_path_lengths(self):
+        with self.assertRaises(ContractError):
+            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("x" * 513,), "reviewer", "codex", "corr-7", "packet")
 
     def test_fake_gateway_returns_validated_artifact(self):
         req = request()
@@ -122,8 +139,9 @@ class RemoteReviewTests(unittest.TestCase):
 
     def test_packet_at_contract_limit_is_sendable_with_transport_allowance(self):
         req = request()
-        packet = "x" * (MAX_PACKET_BYTES - 500)
-        sized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, req.paths, req.kind, req.worker_kind, req.correlation_id, packet, req.timeout_seconds)
+        packet = "x" * MAX_PACKET_BYTES
+        paths = tuple(f"packages/service-{i:03d}/src/components/Widget/index.tsx" for i in range(100))
+        sized = ReviewRequest(req.repository, req.pull_request, req.base_sha, req.head_sha, paths, req.kind, req.worker_kind, req.correlation_id, packet, req.timeout_seconds)
         network = mock.Mock(return_value=Response(json.dumps(artifact(sized)).encode()))
         result = GatewayClient("https://gateway.example", "secret", opener=network).submit(sized)
         self.assertEqual(result.repository, req.repository)
@@ -139,8 +157,10 @@ class RemoteReviewTests(unittest.TestCase):
 
     def test_oversized_response_is_rejected(self):
         req = request()
-        client = GatewayClient("https://gateway.example", "secret", opener=self.opener({"x": "y" * 200}), max_response_bytes=64)
-        with self.assertRaises(GatewayError): client.submit(req)
+        body = json.dumps(artifact(req)).encode() + (b" " * 200)
+        client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(body), max_response_bytes=64)
+        with self.assertRaisesRegex(GatewayError, "response exceeds transport limit"):
+            client.submit(req)
 
     def test_gemma_does_not_fallback(self):
         req = request()
@@ -160,9 +180,18 @@ class RemoteReviewTests(unittest.TestCase):
     def test_codex_fallback_rejects_stale_artifact(self):
         req = request("codex")
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
-        local = mock.Mock(return_value=type("Result", (), {"artifact": ReviewArtifact("other/repo", 99, "c" * 40, "d" * 40, "codex", "requester", "codex-local", "other-corr", (), "completed")})())
+        local = mock.Mock(return_value=WorkerResult(ReviewArtifact("other/repo", 99, "c" * 40, "d" * 40, "codex", "requester", "codex-local", "other-corr", (), "completed")))
         with self.assertRaisesRegex(GatewayError, "does not match"):
             ReviewSupervisor(client, local_codex=local).run(req)
+
+    def test_codex_fallback_converts_worker_failures(self):
+        req = request("codex")
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
+        for failure in (ContractError("bad findings"), OSError("codex binary missing"), AttributeError("bad result")):
+            with self.subTest(failure=type(failure).__name__):
+                local = mock.Mock(side_effect=failure)
+                with self.assertRaisesRegex(GatewayError, "local Codex fallback failed"):
+                    ReviewSupervisor(client, local_codex=local).run(req)
 
     def test_codex_fallback_honors_timeout(self):
         req = ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
