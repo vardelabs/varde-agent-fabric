@@ -73,6 +73,4 @@ def _run_local_codex_with_timeout(local_codex: Callable[[ReviewRequest], WorkerR
                 process.join()
     if message[0] == "error":
         raise GatewayError(f"local Codex fallback failed: {message[1]}: {message[2]}")
-    if len(message) != 2 or not isinstance(message[1], WorkerResult):
-        raise GatewayError("local fallback returned an invalid worker result")
     return message[1]

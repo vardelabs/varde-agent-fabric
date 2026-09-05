@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import multiprocessing
 import sys
 import time
 import unittest
@@ -220,7 +221,7 @@ class RemoteReviewTests(unittest.TestCase):
     def test_codex_fallback_drains_large_worker_results(self):
         req = request("codex")
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
-        findings = tuple({"severity": "yellow", "file": "src/app.py", "message": "m" * 1024, "confidence": "c" * 1024, "category": "k" * 1024, "reproduction": "r" * 1024, "line": 1} for _ in range(50))
+        findings = tuple({"severity": "yellow", "file": f"src/app-{i}.py", "message": f"{i:04d}-" + "m" * 1019, "confidence": f"{i:04d}-" + "c" * 1019, "category": f"{i:04d}-" + "k" * 1019, "reproduction": f"{i:04d}-" + "r" * 1019, "line": 1} for i in range(50))
         large = WorkerResult(ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, "codex", "requester", "codex-local", req.correlation_id, findings, "completed"))
         result = ReviewSupervisor(client, local_codex=mock.Mock(return_value=large)).run(req)
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
@@ -233,6 +234,7 @@ class RemoteReviewTests(unittest.TestCase):
             raise AssertionError("must not finish before timeout")
         with self.assertRaisesRegex(GatewayError, "timed out"):
             ReviewSupervisor(client, local_codex=hung).run(req)
+        self.assertEqual(multiprocessing.active_children(), [])
 
     def test_worker_emits_cluster_provenance(self):
         result = ClusterReviewWorker(lambda packet: [{"severity": "green", "message": "no findings"}], provider="gemma-private").execute(request()).artifact
