@@ -11,9 +11,12 @@ Bounded-work launch interfaces and harness adapters belong here.
 
 ## Public boundary
 
-This directory contains portable interfaces and adapters only. Deployment-owned
-policy, host identity, network listeners, credentials, private paths, tenant
-configuration, and platform delivery integrations belong outside this repository.
+This directory contains portable interfaces, artifact contracts, and transport
+adapters. Deployment-owned policy values, host identity, network listeners,
+credentials, private paths, tenant configuration, and platform delivery
+integrations belong outside this repository. The portable adapters may validate
+those values or exchange bounded artifacts, but they do not contain deployment
+secrets or claim to enforce a host boundary by themselves.
 
 A dispatch adapter must accept explicit bounded input, invoke only its declared
 backend, and return a bounded artifact. It must not post, approve, merge, push,

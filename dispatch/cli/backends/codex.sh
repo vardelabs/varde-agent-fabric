@@ -20,7 +20,7 @@ model="${DISPATCH_MODEL:-gpt-5.6-luna}"
 
 sandbox_mode="${DISPATCH_CODEX_SANDBOX:-read-only}"
 case "$sandbox_mode" in
-  read-only|workspace-write|danger-full-access) ;;
+  read-only|workspace-write) ;;
   *) printf 'DISPATCH_CODEX_SANDBOX is invalid\n' >&2; exit 2 ;;
 esac
 
