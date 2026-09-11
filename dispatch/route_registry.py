@@ -19,16 +19,16 @@ _ALLOWED_FALLBACK_KEYS = {"policy", "harness", "target"}
 def _name(value: Any, field: str, *, max_length: int = _MAX_NAME) -> str:
     if not isinstance(value, str) or not value or len(value) > max_length:
         raise RouteConfigError(f"{field} must be a non-empty string of at most {max_length} characters")
-    if any(character.isspace() for character in value) or "\x00" in value:
-        raise RouteConfigError(f"{field} must not contain whitespace or NUL")
+    if any(character.isspace() or not character.isprintable() for character in value) or "\x00" in value:
+        raise RouteConfigError(f"{field} must contain printable non-whitespace characters and no NUL")
     return value
 
 
 def _model(value: Any) -> str:
     if not isinstance(value, str) or not value or len(value) > _MAX_MODEL:
         raise RouteConfigError(f"model must be a non-empty string of at most {_MAX_MODEL} characters")
-    if any(character.isspace() for character in value) or "\x00" in value:
-        raise RouteConfigError("model must not contain whitespace or NUL")
+    if any(character.isspace() or not character.isprintable() for character in value) or "\x00" in value:
+        raise RouteConfigError("model must contain printable non-whitespace characters and no NUL")
     return value
 
 
@@ -113,6 +113,12 @@ class RouteDefinition:
         fallback = FallbackPolicy.from_dict(data["fallback"])
         if fallback.harness is not None and fallback.harness not in harnesses:
             raise RouteConfigError("fallback harness must be listed in harnesses")
+        if (
+            fallback.policy == "remote-unavailable"
+            and fallback.harness == default_harness
+            and fallback.target == target
+        ):
+            raise RouteConfigError("remote-unavailable fallback must change harness or target")
         return cls(model, default_harness, harnesses, target, kinds, fallback)
 
 

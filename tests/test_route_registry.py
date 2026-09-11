@@ -54,6 +54,50 @@ class RouteRegistryTests(unittest.TestCase):
             "target": "direct",
         })
 
+    def test_remote_fallback_cannot_repeat_the_same_route(self) -> None:
+        invalid = {
+            "schema": "dispatch-routes.v1",
+            "routes": {
+                "model": {
+                    "default_harness": "codex",
+                    "target": "cluster",
+                    "harnesses": ["codex"],
+                    "kinds": ["review"],
+                    "fallback": {
+                        "policy": "remote-unavailable",
+                        "harness": "codex",
+                        "target": "cluster",
+                    },
+                }
+            },
+        }
+        with self.assertRaisesRegex(RouteConfigError, "must change harness or target"):
+            RouteRegistry.from_dict(invalid)
+
+    def test_route_names_reject_control_characters(self) -> None:
+        invalid = {**BASE_CONFIG, "routes": {"bad\x1bmodel": BASE_CONFIG["routes"]["google/gemma-4"]}}
+        with self.assertRaisesRegex(RouteConfigError, "printable"):
+            RouteRegistry.from_dict(invalid)
+
+    def test_route_validation_branches_fail_closed(self) -> None:
+        cases = (
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "unexpected": True}, "unknown"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "none", "target": "local"}}, "policy none"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "harnesses": ["other"]}, "default_harness"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "kinds": ["review", "review"]}, "duplicates"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "remote-unavailable", "harness": "other", "target": "direct"}}, "fallback harness"),
+        )
+        for route, message in cases:
+            with self.subTest(message=message), self.assertRaises(RouteConfigError):
+                RouteRegistry.from_dict({"schema": "dispatch-routes.v1", "routes": {"model": route}})
+
+    def test_model_and_name_bounds_are_enforced(self) -> None:
+        with self.assertRaises(RouteConfigError):
+            RouteRegistry.from_dict({"schema": "dispatch-routes.v1", "routes": {"m" * 129: BASE_CONFIG["routes"]["google/gemma-4"]}})
+        invalid = {**BASE_CONFIG, "routes": {"model": {**BASE_CONFIG["routes"]["google/gemma-4"], "default_harness": "bad name"}}}
+        with self.assertRaises(RouteConfigError):
+            RouteRegistry.from_dict(invalid)
+
     def test_compatible_harness_override_is_recorded(self) -> None:
         config = {**BASE_CONFIG}
         config["routes"] = {
