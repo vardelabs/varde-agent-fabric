@@ -7,7 +7,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/work"
-printf 'diff\n' > "$TMP/change.diff"
+printf 'diff body\n' > "$TMP/change.diff"
 
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
@@ -38,13 +38,13 @@ while (($#)); do
   else shift
   fi
 done
-[[ -z "${DISPATCH_UNSAFE_SENTINEL:-}" ]] || exit 90
+[[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
 printf 'model=%s\nsandbox=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
 
-if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward \
+if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind review \
   --diff "$TMP/change.diff" --model test/model --task x --workdir "$TMP/work" \
   --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
@@ -56,7 +56,31 @@ check test -s "$TMP/out"
 check grep -qF "$TMP/out" "$TMP/stdout"
 check grep -qF 'model=test/model' "$TMP/out"
 check grep -qF 'sandbox=workspace-write' "$TMP/out"
-check grep -qF 'diff' "$TMP/out"
+check grep -qF 'BEGIN DIFF' "$TMP/out"
+check grep -qF 'diff body' "$TMP/out"
+
+if DISPATCH_MAX_TASK_BYTES=10 PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+  --kind review --diff "$TMP/change.diff" --task x --workdir "$TMP/work" \
+  --output "$TMP/out-large" >"$TMP/stdout-large" 2>"$TMP/err-large"; then
+  printf 'oversized diff unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'exceed DISPATCH_MAX_TASK_BYTES' "$TMP/err-large"
+
+if DISPATCH_CODEX_SANDBOX=danger-full-access PATH="$TMP/bin:/usr/bin:/bin" "$CLI" \
+  --harness codex --kind passthrough --task x --workdir "$TMP/work" \
+  --output "$TMP/out-danger" >"$TMP/stdout-danger" 2>"$TMP/err-danger"; then
+  printf 'danger-full-access unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'DISPATCH_CODEX_SANDBOX is invalid' "$TMP/err-danger"
+
+printf 'original\n' > "$TMP/safe-target"
+ln -s "$TMP/safe-target" "$TMP/out-link"
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \
+  --task x --workdir "$TMP/work" --output "$TMP/out-link" >"$TMP/stdout-link" 2>"$TMP/err-link"; then
+  printf 'symlink output unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'Too many levels of symbolic links' "$TMP/err-link"
+check grep -qF 'original' "$TMP/safe-target"
 
 mkdir -p "$TMP/single"
 if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \

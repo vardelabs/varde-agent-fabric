@@ -63,21 +63,39 @@ backend="$BACKENDS_DIR/$harness.sh"
 if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
 if (( $(LC_ALL=C printf '%s' "$task" | wc -c) > MAX_TASK_BYTES )); then fail 'task exceeds DISPATCH_MAX_TASK_BYTES'; fi
 
-if [[ -z "$output" ]]; then
-  output="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-output.XXXXXX")"
-else
-  [[ "$output" = /* && "$output" != *$'\n'* && "$output" != *$'\r'* ]] || fail '--output must be an absolute path without newlines'
-  output_parent="$(dirname -- "$output")"
-  [[ -d "$output_parent" ]] || fail 'output parent does not exist'
-fi
-
+diff_bytes=0
 if [[ -n "$diff" ]]; then
   diff="$(readlink -f -- "$diff")"
+  diff_bytes="$(wc -c < "$diff")"
+  [[ "$diff_bytes" =~ ^[0-9]+$ ]] || fail 'could not determine diff size'
+  if (( diff_bytes > MAX_TASK_BYTES )); then fail 'diff exceeds DISPATCH_MAX_TASK_BYTES'; fi
+  if (( diff_bytes + $(LC_ALL=C printf '%s' "$task" | wc -c) + 40 > MAX_TASK_BYTES )); then
+    fail 'combined task and diff exceed DISPATCH_MAX_TASK_BYTES'
+  fi
   export DISPATCH_DIFF="$diff"
 else
   unset DISPATCH_DIFF
 fi
-export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$output"
+
+requested_output=""
+backend_output=""
+if [[ -z "$output" ]]; then
+  output="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-output.XXXXXX")"
+  backend_output="$output"
+else
+  [[ "$output" = /* && "$output" != *$'\n'* && "$output" != *$'\r'* ]] || fail '--output must be an absolute path without newlines'
+  output_parent="$(dirname -- "$output")"
+  [[ -d "$output_parent" ]] || fail 'output parent does not exist'
+  output_parent="$(readlink -f -- "$output_parent")"
+  [[ "$output_parent" != *$'\n'* && "$output_parent" != *$'\r'* ]] || fail 'output parent contains an invalid path'
+  output_name="$(basename -- "$output")"
+  [[ "$output_name" != "." && "$output_name" != ".." && "$output_name" != *'/'* ]] || fail 'output filename is invalid'
+  requested_output="$output_parent/$output_name"
+  backend_output="$(mktemp "$output_parent/.agent-dispatch-backend.XXXXXX")"
+  output="$requested_output"
+fi
+
+export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output"
 [[ -n "$model" ]] && export DISPATCH_MODEL="$model" || unset DISPATCH_MODEL
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 
@@ -95,5 +113,34 @@ env -i \
   ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
 
-[[ -s "$output" ]] || fail 'backend completed without a non-empty output artifact' 5
+[[ -s "$backend_output" ]] || fail 'backend completed without a non-empty output artifact' 5
+if [[ -n "$requested_output" ]]; then
+  python3 - "$backend_output" "$requested_output" <<'PY'
+import os
+import pathlib
+import sys
+
+source, target = map(pathlib.Path, sys.argv[1:])
+parent = target.parent
+name = target.name
+parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+    try:
+        with source.open("rb") as src, os.fdopen(fd, "wb") as dst:
+            fd = -1
+            while True:
+                block = src.read(1024 * 1024)
+                if not block:
+                    break
+                dst.write(block)
+    finally:
+        if fd != -1:
+            os.close(fd)
+finally:
+    os.close(parent_fd)
+source.unlink()
+PY
+fi
 printf '%s\n' "$output"
