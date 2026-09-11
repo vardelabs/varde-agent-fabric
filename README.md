@@ -1,70 +1,134 @@
 # varde-agent-fabric
 
-> Safe, portable runtime components for bounded multi-agent work.
+Safe, portable runtime components for bounded multi-agent work.
 
-`varde-agent-fabric` is a public-ready foundation for dispatching bounded work,
-exchanging versioned artifacts, and operating local inference safely. It provides
-infrastructure, not an autonomous GitHub actor: named agents retain policy,
-validation, and any outward action.
+`varde-agent-fabric` provides the execution layer between an orchestrator and a
+bounded worker. It handles dispatch, versioned artifacts, narrow model-runtime
+interfaces, and evaluation. It is not an autonomous GitHub actor or a general
+purpose agent platform.
 
-## Scope
+## Why this exists
 
-- **Dispatch:** bounded task launch, isolation, routing, timeout, and result capture.
-- **Contracts:** versioned request, artifact, provenance, and unavailable-result schemas with strict validators.
-- **Routing:** model-first resolution of model, harness, target, kind, and explicit fallback policy.
-- **Inference:** narrowly scoped local-runtime adapters, broker protocols, and generic remote-worker interfaces.
-- **Evaluation:** replay tools, synthetic fixtures, contract checks, and safety-focused measurements.
+Multi-agent systems become difficult to trust when routing, model execution,
+permissions, and outward actions are mixed together. This project keeps those
+concerns separate:
 
-The public fabric is the portable runtime core. A deployment may provide a private
-configuration overlay for approved models, host policy, credentials, network
-listeners, and integration adapters. Those values are not defaults in this
-repository and are never required for the public tests.
+- callers submit bounded work
+- the fabric resolves and executes an approved route
+- workers return validated artifacts
+- an outer orchestrator owns policy and outward actions
 
-A typical flow is:
+A worker does not receive repository-write, shell, GitHub, or Discord authority
+merely because it can run a model or a harness.
+
+## Architecture
 
 ```text
-caller -> bounded dispatch request -> route resolution -> local or remote worker
-       <- validated artifact and provenance <-------------------------------
+caller
+  |
+  v
+bounded request
+  |
+  v
+route resolution: model, harness, target, kind
+  |
+  +--> local worker
+  |
+  +--> private remote worker
+  |
+  v
+validated artifact and provenance
+  |
+  v
+orchestrator-owned policy and delivery
 ```
 
-The worker returns an artifact. An outer, deployment-owned orchestrator remains
-responsible for policy decisions, exact-head rechecks, queue ownership, and any
-outward action.
+The public repository contains the portable runtime. A deployment can provide a
+private overlay for approved routes, credentials, host policy, private prompts,
+network listeners, and integration adapters. Those deployment values do not
+belong in this repository.
 
-## Non-goals
+## Components
 
-- Hosting credentials, production model weights, private deployment values, real source diffs, or real review artifacts.
-- Giving a model service repository-write, shell, or platform-posting authority.
-- Treating a loopback HTTP endpoint or private network reachability as complete authorization.
-- Storing Varde-specific routing, host paths, prompts, or delivery integrations in this repository.
+### Dispatch
+
+`dispatch/` contains bounded-work interfaces, lifecycle handling, harness
+adapters, routing integration, and result capture.
+
+The public CLI currently provides a narrow local dispatch core:
+
+```bash
+dispatch/cli/varde-agent-dispatch \
+  --harness codex \
+  --kind passthrough \
+  --task "Run the bounded task" \
+  --workdir /path/to/workdir
+```
+
+The CLI validates inputs, applies size limits, scrubs the backend environment,
+and returns a bounded output artifact. Its current interface is intentionally
+small. Model registry resolution and remote service integration are tracked in
+the project roadmap.
+
+### Contracts
+
+`contracts/` contains versioned, transport-neutral request and artifact schemas
+and their validators. A result is not usable merely because it looks like JSON.
+It must match the expected schema, request identity, and execution contract.
+
+### Inference
+
+`inference/` contains generic local-runtime adapters, broker protocols, output
+grammars, and service templates. Inference services are compute boundaries, not
+platform actors.
+
+### Evaluation
+
+`eval/` contains replay interfaces and synthetic fixtures for measuring contract
+behavior, safety properties, and model or adapter changes without publishing
+real source material or operational state.
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `.github/` | CI workflow definitions and their index. |
-| `dispatch/` | Bounded-work dispatch interfaces and adapters. |
-| `contracts/` | Versioned, transport-neutral artifact contracts. |
-| `inference/` | Local inference broker, client, grammars, and service templates. |
-| `eval/` | Replay evaluation interfaces and synthetic fixtures. |
-| `docs/` | Architecture, threat model, and operational design. |
-| `scripts/` | Documented repository-maintenance scripts. |
-| `tests/` | Cross-component safety and compatibility tests. |
+| `dispatch/` | Bounded work lifecycle and harness adapters |
+| `contracts/` | Versioned request and artifact contracts |
+| `inference/` | Broker protocols, grammars, clients, and service templates |
+| `eval/` | Replay evaluation and synthetic fixtures |
+| `docs/` | Architecture, threat model, and operational design |
+| `scripts/` | Repository maintenance and validation scripts |
+| `tests/` | Cross-component safety and compatibility tests |
 
-Each root has its own README with filing and use rules.
+## Project status
+
+The repository is under active construction. The public boundary and initial
+dispatch core are in place. The next roadmap slices are:
+
+1. Generalize portable dispatch contracts and configuration, [#10](https://github.com/vardelabs/varde-agent-fabric/issues/10)
+2. Resolve model-first routes, [#6](https://github.com/vardelabs/varde-agent-fabric/issues/6)
+3. Define the private deployment overlay, [#11](https://github.com/vardelabs/varde-agent-fabric/issues/11)
+4. Add the authenticated cluster service, [#7](https://github.com/vardelabs/varde-agent-fabric/issues/7)
+5. Integrate remote-first Codex dispatch, [#5](https://github.com/vardelabs/varde-agent-fabric/issues/5)
+6. Add public evaluation and release gates, [#12](https://github.com/vardelabs/varde-agent-fabric/issues/12)
+7. Complete vault caller migration and duplicate cleanup, [#8](https://github.com/vardelabs/varde-agent-fabric/issues/8)
 
 ## Public-ready rule
 
 Every reachable commit must be safe to publish.
-Do not add credentials, private hostnames, tenant paths, production prompts, real
-source diffs, model weights, or operational logs. Keep deployment-specific values in a private overlay or
-local configuration outside this repository.
+Keep credentials, private deployment values, model weights, real source diffs,
+private prompts, and operational logs outside this repository. The detailed
+contributor checklist and portable versus deployment-owned boundary are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Status
+## Contributing
 
-The repository is a skeleton. It establishes the public boundary and intended
-module ownership. Runtime code and shared-contract migrations will arrive as
-small, independently reviewed changes.
+Run the skeleton and relevant component tests before opening a pull request.
+Changes that affect contracts, routing, adapters, security boundaries, or
+migration dependencies should update the relevant issue and include focused
+regression coverage.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
