@@ -92,11 +92,18 @@ else
   [[ "$output_name" != "." && "$output_name" != ".." && "$output_name" != *'/'* ]] || fail 'output filename is invalid'
   requested_output="$output_parent/$output_name"
   backend_output="$(mktemp "$output_parent/.agent-dispatch-backend.XXXXXX")"
+  trap 'rm -f -- "$backend_output"' EXIT
   output="$requested_output"
 fi
 
 export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output"
-[[ -n "$model" ]] && export DISPATCH_MODEL="$model" || unset DISPATCH_MODEL
+if [[ -n "$model" ]]; then
+  export DISPATCH_MODEL="$model"
+elif [[ -n "${DISPATCH_MODEL:-}" ]]; then
+  export DISPATCH_MODEL
+else
+  unset DISPATCH_MODEL
+fi
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 
 # Deliberately pass a small, explicit environment. No caller credential or

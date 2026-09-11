@@ -12,7 +12,8 @@ printf 'diff body\n' > "$TMP/change.diff"
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
 
-check bash -n "$CLI" "$ROOT/dispatch/cli/backends/codex.sh"
+check bash -n "$CLI"
+check bash -n "$ROOT/dispatch/cli/backends/codex.sh"
 check test -x "$CLI"
 check test -x "$ROOT/dispatch/cli/backends/codex.sh"
 
@@ -59,6 +60,15 @@ check grep -qF 'sandbox=workspace-write' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
+if ! DISPATCH_MODEL=caller/model PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+  --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-env" \
+  >"$TMP/stdout-env" 2>"$TMP/err-env"; then
+  printf 'caller model dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-env" >&2
+  exit 1
+fi
+check grep -qF 'model=caller/model' "$TMP/out-env"
+
 if DISPATCH_MAX_TASK_BYTES=10 PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
   --kind review --diff "$TMP/change.diff" --task x --workdir "$TMP/work" \
   --output "$TMP/out-large" >"$TMP/stdout-large" 2>"$TMP/err-large"; then
@@ -81,10 +91,13 @@ if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \
 fi
 check grep -qF 'Too many levels of symbolic links' "$TMP/err-link"
 check grep -qF 'original' "$TMP/safe-target"
+shopt -s nullglob
+leftovers=("$TMP"/.agent-dispatch-backend.*)
+shopt -u nullglob
+check test "${#leftovers[@]}" -eq 0
 
-mkdir -p "$TMP/single"
 if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \
-  --task x --workdir "$TMP/single" --output "$TMP/out-root" >"$TMP/stdout-root" 2>"$TMP/err-root"; then
+  --task x --workdir /tmp --output "$TMP/out-root" >"$TMP/stdout-root" 2>"$TMP/err-root"; then
   printf 'single-component workdir unexpectedly failed\n' >&2
   cat "$TMP/err-root" >&2
   exit 1
