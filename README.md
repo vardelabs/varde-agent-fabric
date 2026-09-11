@@ -9,17 +9,34 @@ validation, and any outward action.
 
 ## Scope
 
-- **Dispatch:** bounded task launch, isolation, and result capture.
-- **Contracts:** versioned request and artifact schemas with strict validators.
-- **Inference:** narrowly scoped local-runtime adapters and broker protocol.
-- **Evaluation:** replay tools and safety-focused fixtures.
+- **Dispatch:** bounded task launch, isolation, routing, timeout, and result capture.
+- **Contracts:** versioned request, artifact, provenance, and unavailable-result schemas with strict validators.
+- **Routing:** model-first resolution of model, harness, target, kind, and explicit fallback policy.
+- **Inference:** narrowly scoped local-runtime adapters, broker protocols, and generic remote-worker interfaces.
+- **Evaluation:** replay tools, synthetic fixtures, contract checks, and safety-focused measurements.
+
+The public fabric is the portable runtime core. A deployment may provide a private
+configuration overlay for approved models, host policy, credentials, network
+listeners, and integration adapters. Those values are not defaults in this
+repository and are never required for the public tests.
+
+A typical flow is:
+
+```text
+caller -> bounded dispatch request -> route resolution -> local or remote worker
+       <- validated artifact and provenance <-------------------------------
+```
+
+The worker returns an artifact. An outer, deployment-owned orchestrator remains
+responsible for policy decisions, exact-head rechecks, queue ownership, and any
+outward action.
 
 ## Non-goals
 
-- Hosting credentials, production model weights, customer code, or real review
-  artifacts.
+- Hosting credentials, production model weights, private deployment values, real source diffs, or real review artifacts.
 - Giving a model service repository-write, shell, or platform-posting authority.
-- Treating a loopback HTTP endpoint as a cross-user authorization boundary.
+- Treating a loopback HTTP endpoint or private network reachability as complete authorization.
+- Storing Varde-specific routing, host paths, prompts, or delivery integrations in this repository.
 
 ## Repository layout
 
