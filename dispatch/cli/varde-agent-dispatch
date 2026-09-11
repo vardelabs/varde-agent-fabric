@@ -48,8 +48,8 @@ done
 [[ -n "$kind" ]] || fail '--kind is required'
 [[ -n "$task" ]] || fail '--task is required'
 [[ -n "$workdir" ]] || fail '--workdir is required'
-[[ "$workdir" = /* && -d "$workdir" ]] || fail '--workdir must be an existing absolute directory'
-[[ "$workdir" = /*/* && "$workdir" != *$'\n'* && "$workdir" != *$'\r'* ]] || fail '--workdir contains an invalid path'
+[[ "$workdir" = /* && "$workdir" != "/" && -d "$workdir" ]] || fail '--workdir must be an existing absolute directory other than /'
+[[ "$workdir" != *$'\n'* && "$workdir" != *$'\r'* ]] || fail '--workdir contains an invalid path'
 
 case "$kind" in
   passthrough) [[ -z "$diff" ]] || fail '--diff is only valid with --kind review' ;;
@@ -79,6 +79,7 @@ else
 fi
 export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$output"
 [[ -n "$model" ]] && export DISPATCH_MODEL="$model" || unset DISPATCH_MODEL
+sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 
 # Deliberately pass a small, explicit environment. No caller credential or
 # provider configuration is inherited by the backend.
@@ -91,6 +92,7 @@ env -i \
   DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
   ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
   ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
+  ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
 
 [[ -s "$output" ]] || fail 'backend completed without a non-empty output artifact' 5

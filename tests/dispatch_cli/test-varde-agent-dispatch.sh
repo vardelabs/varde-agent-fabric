@@ -31,19 +31,39 @@ cat > "$TMP/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 output=''
+prompt=''
 while (($#)); do
-  if [[ "$1" == '-o' ]]; then output="$2"; shift 2; else shift; fi
+  if [[ "$1" == '-o' ]]; then output="$2"; shift 2
+  elif [[ "$1" == '--' ]]; then shift; prompt="${1:-}"; break
+  else shift
+  fi
 done
-printf '{"status":"ok"}\n' > "$output"
+[[ -z "${DISPATCH_UNSAFE_SENTINEL:-}" ]] || exit 90
+printf 'model=%s\nsandbox=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" > "$output"
+printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
 
-if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind review --diff "$TMP/change.diff" --task x --workdir "$TMP/work" --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
+if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind review \
+  --diff "$TMP/change.diff" --model test/model --task x --workdir "$TMP/work" \
+  --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
   printf 'fake codex dispatch unexpectedly failed\n' >&2
   cat "$TMP/err" >&2
   exit 1
 fi
 check test -s "$TMP/out"
 check grep -qF "$TMP/out" "$TMP/stdout"
+check grep -qF 'model=test/model' "$TMP/out"
+check grep -qF 'sandbox=workspace-write' "$TMP/out"
+check grep -qF 'diff' "$TMP/out"
+
+mkdir -p "$TMP/single"
+if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \
+  --task x --workdir "$TMP/single" --output "$TMP/out-root" >"$TMP/stdout-root" 2>"$TMP/err-root"; then
+  printf 'single-component workdir unexpectedly failed\n' >&2
+  cat "$TMP/err-root" >&2
+  exit 1
+fi
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"
