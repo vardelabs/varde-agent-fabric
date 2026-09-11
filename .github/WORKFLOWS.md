@@ -11,4 +11,4 @@ Repository workflows live in `.github/workflows/` and are part of the public-rea
 
 ## Current workflows
 
-- `skeleton.yml`: validates the required skeleton layout, documentation markers, and repository-maintenance checks.
+- `skeleton.yml`: validates the required skeleton layout, documentation markers, repository-maintenance checks, and the public dispatch CLI smoke suite.
