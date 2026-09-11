@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Dispatch one bounded task to a local backend.
+#
+# This public entry point owns transport-neutral validation and invokes a
+# backend through a narrow environment contract. Deployment policy, network
+# services, credentials, and model routing belong to the caller or a private
+# adapter, not this repository.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+BACKENDS_DIR="$SELF_DIR/backends"
+MAX_TASK_BYTES="${DISPATCH_MAX_TASK_BYTES:-120000}"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: varde-agent-dispatch --harness NAME --kind KIND --task TEXT --workdir DIR [options]
+
+Options:
+  --harness NAME   Backend name, currently codex
+  --kind KIND      Work contract, currently passthrough or review
+  --task TEXT      Bounded task prompt
+  --workdir DIR    Existing absolute working directory
+  --diff FILE      Review input, required for review kind
+  --model ID       Explicit model identifier
+  --output FILE    Output file, default is a private temporary file
+  --help           Show this help
+EOF
+}
+
+fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
+
+harness=""; kind=""; task=""; workdir=""; diff=""; model=""; output=""
+while (($#)); do
+  case "$1" in
+    --harness) [[ $# -ge 2 ]] || fail '--harness requires a value'; harness="$2"; shift 2 ;;
+    --kind) [[ $# -ge 2 ]] || fail '--kind requires a value'; kind="$2"; shift 2 ;;
+    --task) [[ $# -ge 2 ]] || fail '--task requires a value'; task="$2"; shift 2 ;;
+    --workdir) [[ $# -ge 2 ]] || fail '--workdir requires a value'; workdir="$2"; shift 2 ;;
+    --diff) [[ $# -ge 2 ]] || fail '--diff requires a value'; diff="$2"; shift 2 ;;
+    --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; shift 2 ;;
+    --output) [[ $# -ge 2 ]] || fail '--output requires a value'; output="$2"; shift 2 ;;
+    --help) usage; exit 0 ;;
+    *) fail "unknown option: $1" ;;
+  esac
+done
+
+[[ -n "$harness" ]] || fail '--harness is required'
+[[ -n "$kind" ]] || fail '--kind is required'
+[[ -n "$task" ]] || fail '--task is required'
+[[ -n "$workdir" ]] || fail '--workdir is required'
+[[ "$workdir" = /* && -d "$workdir" ]] || fail '--workdir must be an existing absolute directory'
+[[ "$workdir" = /*/* && "$workdir" != *$'\n'* && "$workdir" != *$'\r'* ]] || fail '--workdir contains an invalid path'
+
+case "$kind" in
+  passthrough) [[ -z "$diff" ]] || fail '--diff is only valid with --kind review' ;;
+  review) [[ -n "$diff" && -f "$diff" ]] || fail '--diff must name a regular file for review' ;;
+  *) fail "unsupported kind: $kind" 3 ;;
+esac
+
+backend="$BACKENDS_DIR/$harness.sh"
+[[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
+
+if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
+if (( $(LC_ALL=C printf '%s' "$task" | wc -c) > MAX_TASK_BYTES )); then fail 'task exceeds DISPATCH_MAX_TASK_BYTES'; fi
+
+if [[ -z "$output" ]]; then
+  output="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-output.XXXXXX")"
+else
+  [[ "$output" = /* && "$output" != *$'\n'* && "$output" != *$'\r'* ]] || fail '--output must be an absolute path without newlines'
+  output_parent="$(dirname -- "$output")"
+  [[ -d "$output_parent" ]] || fail 'output parent does not exist'
+fi
+
+if [[ -n "$diff" ]]; then
+  diff="$(readlink -f -- "$diff")"
+  export DISPATCH_DIFF="$diff"
+else
+  unset DISPATCH_DIFF
+fi
+export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$output"
+[[ -n "$model" ]] && export DISPATCH_MODEL="$model" || unset DISPATCH_MODEL
+
+# Deliberately pass a small, explicit environment. No caller credential or
+# provider configuration is inherited by the backend.
+env -i \
+  PATH="${PATH:-/usr/bin:/bin}" \
+  HOME="${HOME:-}" \
+  TMPDIR="${TMPDIR:-/tmp}" \
+  DISPATCH_TASK="$DISPATCH_TASK" \
+  DISPATCH_WORKDIR="$DISPATCH_WORKDIR" \
+  DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
+  ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
+  ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
+  "$backend"
+
+[[ -s "$output" ]] || fail 'backend completed without a non-empty output artifact' 5
+printf '%s\n' "$output"
