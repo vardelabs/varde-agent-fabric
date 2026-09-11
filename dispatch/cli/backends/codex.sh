@@ -24,5 +24,13 @@ case "$sandbox_mode" in
   *) printf 'DISPATCH_CODEX_SANDBOX is invalid\n' >&2; exit 2 ;;
 esac
 
-args=(codex exec --ignore-user-config --skip-git-repo-check --model "$model" --sandbox "$sandbox_mode" -C "$DISPATCH_WORKDIR" -o "$DISPATCH_OUTPUT" -- "$DISPATCH_TASK")
+prompt="$DISPATCH_TASK"
+if [[ -n "${DISPATCH_DIFF:-}" ]]; then
+  diff_content="$(cat -- "$DISPATCH_DIFF")"
+  prompt+=$'\n\n--- BEGIN DIFF ---\n'
+  prompt+="$diff_content"
+  prompt+=$'\n--- END DIFF ---'
+fi
+
+args=(codex exec --ignore-user-config --skip-git-repo-check --model "$model" --sandbox "$sandbox_mode" -C "$DISPATCH_WORKDIR" -o "$DISPATCH_OUTPUT" -- "$prompt")
 "${args[@]}" </dev/null >&2

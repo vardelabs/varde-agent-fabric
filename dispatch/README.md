@@ -24,4 +24,6 @@ Filesystem and process isolation are deployment responsibilities. A working
 directory flag and a backend sandbox option are not substitutes for a host-level
 boundary. Any deployment that needs stronger isolation must provide and verify that
 boundary in a private integration layer without committing its policy or host
-identifiers here.
+identifiers here. In particular, a service manager may accept a filesystem-denial
+property without enforcing it, so deployments must verify enforcement with a
+positive-control probe before relying on it.

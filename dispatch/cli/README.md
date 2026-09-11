@@ -30,10 +30,11 @@ credentials, provider configuration, or shell aliases.
 `--kind passthrough` runs the task as supplied. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 
-The default Codex model is `gpt-5.6-luna`. Set `DISPATCH_MODEL` or pass
-`--model` to select another approved model. The default Codex sandbox is
-`read-only`; set `DISPATCH_CODEX_SANDBOX` only to one of the documented Codex
-sandbox modes.
+The caller can pass `--model` or set `DISPATCH_MODEL`, and can set
+`DISPATCH_CODEX_SANDBOX` to an approved Codex sandbox mode. These values are
+forwarded explicitly to the backend. `HOME` is retained for normal CLI runtime
+behavior, so this boundary does not claim to remove credentials stored by a
+provider CLI. Provider authentication remains a deployment concern.
 
 ## Public boundary
 
