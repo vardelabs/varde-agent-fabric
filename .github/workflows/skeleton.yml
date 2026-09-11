@@ -19,6 +19,7 @@ jobs:
       - run: bash -n tests/test-skeleton.sh
       - run: ./scripts/validate-skeleton.sh
       - run: ./tests/test-skeleton.sh
+      - run: bash tests/dispatch_cli/test-varde-agent-dispatch.sh
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Check changed whitespace
         env:
