@@ -1,6 +1,7 @@
 """Strict, transport-neutral contracts for one bounded remote review."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -44,6 +45,12 @@ def _positive_int(value: Any, field: str) -> None:
         raise ContractError(f"{field} must be a positive integer")
 
 
+def _mapping(value: Any, field: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ContractError(f"{field} must be an object")
+    return value
+
+
 def _keys(data: Mapping[str, Any], expected: set[str], field: str) -> None:
     unknown = set(data) - expected
     missing = expected - set(data)
@@ -76,7 +83,7 @@ class ReviewRequest:
     pull_request: int
     base_sha: str
     head_sha: str
-    paths: tuple[str, ...]
+    paths: Any
     kind: str
     worker_kind: str
     correlation_id: str
@@ -88,6 +95,8 @@ class ReviewRequest:
         _positive_int(self.pull_request, "pull_request")
         object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
         object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
+        if not isinstance(self.paths, tuple):
+            raise ContractError("paths must be a tuple")
         if not self.paths or len(self.paths) > 100:
             raise ContractError("paths must contain between 1 and 100 non-empty strings")
         for index, path in enumerate(self.paths):
@@ -104,6 +113,9 @@ class ReviewRequest:
             raise ContractError("packet must be non-empty and at most 262144 UTF-8 bytes")
         if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 900:
             raise ContractError("timeout_seconds must be an integer from 1 to 900")
+        body = json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(body) > MAX_TRANSPORT_BYTES:
+            raise ContractError("serialized request exceeds transport limit")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -121,7 +133,8 @@ class ReviewRequest:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReviewRequest":
+    def from_dict(cls, data: Any) -> "ReviewRequest":
+        data = _mapping(data, "review request")
         _keys(data, {"schema", "repository", "pull_request", "base_sha", "head_sha", "paths", "kind", "worker_kind", "correlation_id", "packet", "timeout_seconds"}, "review request")
         if data["schema"] != "review-request.v1":
             raise ContractError("unsupported review request schema")
@@ -170,7 +183,8 @@ class ReviewArtifact:
         return {"schema": "review-artifact.v1", "repository": self.repository, "pull_request": self.pull_request, "base_sha": self.base_sha, "head_sha": self.head_sha, "worker_kind": self.worker_kind, "execution_location": self.execution_location, "provider": self.provider, "correlation_id": self.correlation_id, "findings": list(self.findings), "finish_reason": self.finish_reason, "fallback": self.fallback, "latency_ms": self.latency_ms}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReviewArtifact":
+    def from_dict(cls, data: Any) -> "ReviewArtifact":
+        data = _mapping(data, "review artifact")
         _keys(data, {"schema", "repository", "pull_request", "base_sha", "head_sha", "worker_kind", "execution_location", "provider", "correlation_id", "findings", "finish_reason", "fallback", "latency_ms"}, "review artifact")
         if data["schema"] != "review-artifact.v1":
             raise ContractError("unsupported review artifact schema")

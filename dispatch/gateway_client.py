@@ -15,7 +15,7 @@ class GatewayError(RuntimeError):
 
 
 class GatewayClient:
-    def __init__(self, base_url: str, token: str, *, opener: Callable = urllib.request.urlopen, max_response_bytes: int = 128 * 1024) -> None:
+    def __init__(self, base_url: str, token: str, *, opener: Callable = urllib.request.urlopen, max_response_bytes: int = MAX_TRANSPORT_BYTES) -> None:
         if not base_url.startswith("https://"):
             raise ValueError("gateway must use HTTPS")
         if not token or len(token) > 4096:
