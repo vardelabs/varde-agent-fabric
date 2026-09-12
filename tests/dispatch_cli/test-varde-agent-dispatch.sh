@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset DISPATCH_MODEL DISPATCH_ROUTES_FILE
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
