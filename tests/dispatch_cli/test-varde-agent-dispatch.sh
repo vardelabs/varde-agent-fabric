@@ -8,6 +8,27 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/work"
 printf 'diff body\n' > "$TMP/change.diff"
+cat > "$TMP/routes.json" <<'EOF'
+{
+  "schema": "dispatch-routes.v1",
+  "routes": {
+    "test/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["review", "passthrough"],
+      "fallback": {"policy": "none"}
+    },
+    "caller/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["passthrough"],
+      "fallback": {"policy": "none"}
+    }
+  }
+}
+EOF
 
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
@@ -46,8 +67,8 @@ EOF
 chmod +x "$TMP/bin/codex"
 
 if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
-  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind review \
-  --diff "$TMP/change.diff" --model test/model --task x --workdir "$TMP/work" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
   --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
   printf 'fake codex dispatch unexpectedly failed\n' >&2
   cat "$TMP/err" >&2
@@ -60,7 +81,14 @@ check grep -qF 'sandbox=workspace-write' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
-if ! DISPATCH_MODEL=caller/model PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness missing --kind passthrough \
+  --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
+  --output "$TMP/out-incompatible" >"$TMP/stdout-incompatible" 2>"$TMP/err-incompatible"; then
+  printf 'incompatible harness unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'not approved for model' "$TMP/err-incompatible"
+
+if ! DISPATCH_MODEL=caller/model DISPATCH_ROUTES_FILE="$TMP/routes.json" PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
   --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-env" \
   >"$TMP/stdout-env" 2>"$TMP/err-env"; then
   printf 'caller model dispatch unexpectedly failed\n' >&2

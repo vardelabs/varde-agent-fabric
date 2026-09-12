@@ -8,7 +8,8 @@ configuration, private host paths, or provider secrets.
 
 ```text
 varde-agent-dispatch \
-  --harness codex \
+  --model example/model \
+  --routes /path/to/routes.json \
   --kind passthrough \
   --task "bounded task" \
   --workdir /path/to/worktree
@@ -22,9 +23,12 @@ runtime contract to a backend:
 - `DISPATCH_OUTPUT`
 - optional `DISPATCH_DIFF`
 - optional `DISPATCH_MODEL`
+- optional `DISPATCH_TARGET`
 
-The caller owns authentication, deployment policy, remote transport, and any
-model registry. The public adapter does not inherit the caller's environment,
+The caller owns authentication, deployment policy, and remote transport. When
+`--model` is supplied, `--routes` provides the portable model-first registry;
+`--harness` is optional and must be approved for that model. The public adapter
+does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
 `--kind passthrough` runs the task as supplied. `--kind review` additionally

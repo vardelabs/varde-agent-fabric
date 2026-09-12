@@ -22,6 +22,7 @@ Options:
   --workdir DIR    Existing absolute working directory
   --diff FILE      Review input, required for review kind
   --model ID       Explicit model identifier
+  --routes FILE    Model route configuration, required with --model
   --output FILE    Output file, default is a private temporary file
   --help           Show this help
 EOF
@@ -29,7 +30,7 @@ EOF
 
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
-harness=""; kind=""; task=""; workdir=""; diff=""; model=""; output=""
+harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; output=""
 while (($#)); do
   case "$1" in
     --harness) [[ $# -ge 2 ]] || fail '--harness requires a value'; harness="$2"; shift 2 ;;
@@ -38,13 +39,39 @@ while (($#)); do
     --workdir) [[ $# -ge 2 ]] || fail '--workdir requires a value'; workdir="$2"; shift 2 ;;
     --diff) [[ $# -ge 2 ]] || fail '--diff requires a value'; diff="$2"; shift 2 ;;
     --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; shift 2 ;;
+    --routes) [[ $# -ge 2 ]] || fail '--routes requires a value'; routes="$2"; shift 2 ;;
     --output) [[ $# -ge 2 ]] || fail '--output requires a value'; output="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
     *) fail "unknown option: $1" ;;
   esac
 done
 
-[[ -n "$harness" ]] || fail '--harness is required'
+model="${model:-${DISPATCH_MODEL:-}}"
+[[ -n "$kind" ]] || fail '--kind is required'
+
+if [[ -n "$model" ]]; then
+  routes="${routes:-${DISPATCH_ROUTES_FILE:-}}"
+  [[ -n "$routes" && "$routes" = /* && -f "$routes" ]] || fail '--routes must name a route configuration file when --model is used' 2
+  resolved_route="$({
+    PYTHONPATH="$SELF_DIR/../.." python3 - "$routes" "$model" "$kind" "$harness" <<'PY'
+import json
+import sys
+from dispatch.route_registry import RouteConfigError, RouteRegistry
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        registry = RouteRegistry.from_dict(json.load(stream))
+    route = registry.resolve(sys.argv[2], sys.argv[3], harness=sys.argv[4] or None)
+except (OSError, ValueError, json.JSONDecodeError, RouteConfigError) as exc:
+    print(f"route resolution failed: {exc}", file=sys.stderr)
+    raise SystemExit(3)
+print(f"{route.harness}\t{route.model}\t{route.target}")
+PY
+  } 2>&1)" || fail "$resolved_route" 3
+  IFS=$'\t' read -r harness model route_target <<< "$resolved_route"
+fi
+
+[[ -n "$harness" ]] || fail '--harness is required when --model is not used'
 [[ -n "$kind" ]] || fail '--kind is required'
 [[ -n "$task" ]] || fail '--task is required'
 [[ -n "$workdir" ]] || fail '--workdir is required'
@@ -117,6 +144,7 @@ env -i \
   DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
   ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
   ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
+  ${route_target:+DISPATCH_TARGET="$route_target"} \
   ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
 
