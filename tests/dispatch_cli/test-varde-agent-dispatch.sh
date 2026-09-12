@@ -61,7 +61,7 @@ while (($#)); do
   fi
 done
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
@@ -78,8 +78,16 @@ check test -s "$TMP/out"
 check grep -qF "$TMP/out" "$TMP/stdout"
 check grep -qF 'model=test/model' "$TMP/out"
 check grep -qF 'sandbox=workspace-write' "$TMP/out"
+check grep -qF 'target=local' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
+  --task x --workdir "$TMP/work" --output "$TMP/out-no-routes" \
+  >"$TMP/stdout-no-routes" 2>"$TMP/err-no-routes"; then
+  printf 'model dispatch without routes unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'routes must name a route configuration file' "$TMP/err-no-routes"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness missing --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \

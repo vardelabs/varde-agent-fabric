@@ -13,7 +13,7 @@ MAX_TASK_BYTES="${DISPATCH_MAX_TASK_BYTES:-120000}"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: varde-agent-dispatch --harness NAME --kind KIND --task TEXT --workdir DIR [options]
+Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind KIND --task TEXT --workdir DIR [options]
 
 Options:
   --harness NAME   Backend name, currently codex
