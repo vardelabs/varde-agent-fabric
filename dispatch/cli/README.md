@@ -24,6 +24,8 @@ runtime contract to a backend:
 - optional `DISPATCH_DIFF`
 - optional `DISPATCH_MODEL`
 - optional `DISPATCH_TARGET`
+- routed `DISPATCH_HARNESS_OVERRIDDEN`
+- routed `DISPATCH_FALLBACK_POLICY`
 
 The caller owns authentication, deployment policy, and remote transport. When
 `--model` is supplied, `--routes` provides the portable model-first registry;
@@ -39,14 +41,17 @@ The task and review diff are each bounded, and their combined prompt must fit
 oversized input before the backend reads it. The default Codex sandbox is
 `read-only`; the only alternate public mode is `workspace-write`.
 
-`--model` may also be supplied through `DISPATCH_MODEL`. Whenever a model is
-set, the registry must be supplied through `--routes` or
+`--model` may also be supplied through `DISPATCH_MODEL`. Whenever an explicit
+`--model` is set, the registry must be supplied through `--routes` or
 `DISPATCH_ROUTES_FILE`; the dispatcher refuses to guess a route. An explicit
-`--harness` override is allowed only when the registry approves it. The caller
-can set `DISPATCH_CODEX_SANDBOX` to one of the public modes. These values are
-forwarded explicitly to the backend. `HOME` is retained for normal CLI runtime
-behavior, so this boundary does not claim to remove credentials stored by a
-provider CLI. Provider authentication remains a deployment concern.
+`--harness` override is allowed only when the registry approves it. For
+compatibility, callers using `--harness` with only the legacy `DISPATCH_MODEL`
+forward that model without registry resolution. `--routes` without a model is
+rejected. The caller can set `DISPATCH_CODEX_SANDBOX` to one of the public
+modes. These values are forwarded explicitly to the backend. `HOME` is retained
+for normal CLI runtime behavior, so this boundary does not claim to remove
+credentials stored by a provider CLI. Provider authentication remains a
+deployment concern.
 
 ## Public boundary
 

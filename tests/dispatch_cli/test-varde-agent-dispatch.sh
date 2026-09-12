@@ -62,7 +62,7 @@ while (($#)); do
   fi
 done
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\ntarget=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
@@ -80,6 +80,8 @@ check grep -qF "$TMP/out" "$TMP/stdout"
 check grep -qF 'model=test/model' "$TMP/out"
 check grep -qF 'sandbox=workspace-write' "$TMP/out"
 check grep -qF 'target=local' "$TMP/out"
+check grep -qF 'overridden=false' "$TMP/out"
+check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
@@ -89,6 +91,23 @@ if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
   printf 'model dispatch without routes unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'routes must name a route configuration file' "$TMP/err-no-routes"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --routes "$TMP/routes.json" --kind passthrough \
+  --task x --workdir "$TMP/work" --output "$TMP/out-routes-without-model" \
+  >"$TMP/stdout-routes-without-model" 2>"$TMP/err-routes-without-model"; then
+  printf 'routes without model unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF -- '--routes requires --model' "$TMP/err-routes-without-model"
+
+if ! DISPATCH_MODEL=legacy/model DISPATCH_ROUTES_FILE= PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+  --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-legacy-env" \
+  >"$TMP/stdout-legacy-env" 2>"$TMP/err-legacy-env"; then
+  printf 'legacy model environment dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-legacy-env" >&2
+  exit 1
+fi
+check grep -qF 'model=legacy/model' "$TMP/out-legacy-env"
+check grep -qF 'fallback=' "$TMP/out-legacy-env"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness missing --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \

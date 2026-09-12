@@ -30,7 +30,8 @@ EOF
 
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
-harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; output=""
+harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; output=""
+model_from_cli=0; routes_from_cli=0
 while (($#)); do
   case "$1" in
     --harness) [[ $# -ge 2 ]] || fail '--harness requires a value'; harness="$2"; shift 2 ;;
@@ -38,8 +39,8 @@ while (($#)); do
     --task) [[ $# -ge 2 ]] || fail '--task requires a value'; task="$2"; shift 2 ;;
     --workdir) [[ $# -ge 2 ]] || fail '--workdir requires a value'; workdir="$2"; shift 2 ;;
     --diff) [[ $# -ge 2 ]] || fail '--diff requires a value'; diff="$2"; shift 2 ;;
-    --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; shift 2 ;;
-    --routes) [[ $# -ge 2 ]] || fail '--routes requires a value'; routes="$2"; shift 2 ;;
+    --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; model_from_cli=1; shift 2 ;;
+    --routes) [[ $# -ge 2 ]] || fail '--routes requires a value'; routes="$2"; routes_from_cli=1; shift 2 ;;
     --output) [[ $# -ge 2 ]] || fail '--output requires a value'; output="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
     *) fail "unknown option: $1" ;;
@@ -47,10 +48,16 @@ while (($#)); do
 done
 
 model="${model:-${DISPATCH_MODEL:-}}"
+routes_requested="$routes"
+if [[ -z "$routes_requested" ]]; then
+  routes_requested="${DISPATCH_ROUTES_FILE:-}"
+fi
+[[ "$routes_from_cli" -eq 0 || -n "$model" ]] || fail '--routes requires --model' 2
 [[ -n "$kind" ]] || fail '--kind is required'
 
-if [[ -n "$model" ]]; then
-  routes="${routes:-${DISPATCH_ROUTES_FILE:-}}"
+if [[ "$model_from_cli" -eq 1 || -n "$routes_requested" ]]; then
+  routes="$routes_requested"
+  [[ -n "$model" ]] || fail 'a model is required when route configuration is used' 2
   [[ -n "$routes" && "$routes" = /* && -f "$routes" ]] || fail '--routes must name a route configuration file when --model is used' 2
   resolved_route="$(PYTHONPATH="$SELF_DIR/../.." python3 - "$routes" "$model" "$kind" "$harness" <<'PY'
 import json
@@ -64,14 +71,13 @@ try:
 except (OSError, ValueError, json.JSONDecodeError, RouteConfigError) as exc:
     print(f"route resolution failed: {exc}", file=sys.stderr)
     raise SystemExit(3)
-print(f"{route.harness}\t{route.model}\t{route.target}")
+print(f"{route.harness}\t{route.model}\t{route.target}\t{str(route.harness_overridden).lower()}\t{route.fallback.policy}")
 PY
   )" || fail 'route resolution failed; see the validation error above' 3
-  IFS=$'\t' read -r harness model route_target <<< "$resolved_route"
+  IFS=$'\t' read -r harness model route_target route_harness_overridden route_fallback_policy <<< "$resolved_route"
 fi
 
 [[ -n "$harness" ]] || fail '--harness is required when --model is not used'
-[[ -n "$kind" ]] || fail '--kind is required'
 [[ -n "$task" ]] || fail '--task is required'
 [[ -n "$workdir" ]] || fail '--workdir is required'
 [[ "$workdir" = /* && "$workdir" != "/" && -d "$workdir" ]] || fail '--workdir must be an existing absolute directory other than /'
@@ -132,8 +138,10 @@ else
 fi
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 route_target_arg=()
+route_metadata_args=()
 if [[ -n "$route_target" ]]; then
   route_target_arg=("DISPATCH_TARGET=$route_target")
+  route_metadata_args=("DISPATCH_HARNESS_OVERRIDDEN=$route_harness_overridden" "DISPATCH_FALLBACK_POLICY=$route_fallback_policy")
 fi
 
 # Deliberately pass a small, explicit environment. No caller credential or
@@ -148,6 +156,7 @@ env -i \
   ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
   ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
   "${route_target_arg[@]}" \
+  "${route_metadata_args[@]}" \
   ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
 
