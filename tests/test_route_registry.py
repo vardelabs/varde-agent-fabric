@@ -41,6 +41,38 @@ class RouteRegistryTests(unittest.TestCase):
         registry = RouteRegistry.from_dict(json.loads(example.read_text(encoding="utf-8")))
         self.assertEqual(registry.resolve("example/model", "review").target, "local")
 
+    def test_remote_fallback_rejects_compatible_override_noop(self) -> None:
+        invalid = {
+            "schema": "dispatch-routes.v1",
+            "routes": {
+                "model": {
+                    "default_harness": "codex",
+                    "target": "cluster",
+                    "harnesses": ["codex", "opencode"],
+                    "kinds": ["review"],
+                    "fallback": {
+                        "policy": "remote-unavailable",
+                        "harness": "opencode",
+                        "target": "cluster",
+                    },
+                }
+            },
+        }
+        with self.assertRaisesRegex(RouteConfigError, "must change target"):
+            RouteRegistry.from_dict(invalid)
+
+    def test_registry_routes_are_immutable(self) -> None:
+        registry = RouteRegistry.from_dict(BASE_CONFIG)
+        with self.assertRaises(TypeError):
+            registry.routes["new-model"] = registry.routes["openai/gpt-5.6-luna"]  # type: ignore[index]
+        self.assertIsInstance(hash(registry), int)
+
+    def test_explicit_default_harness_is_not_a_deviation(self) -> None:
+        route = RouteRegistry.from_dict(BASE_CONFIG).resolve(
+            "openai/gpt-5.6-luna", "review", harness="codex"
+        )
+        self.assertFalse(route.harness_overridden)
+
     def test_model_first_resolution_records_effective_route(self) -> None:
         route = RouteRegistry.from_dict(BASE_CONFIG).resolve("openai/gpt-5.6-luna", "review")
         self.assertEqual(route.model, "openai/gpt-5.6-luna")
@@ -71,7 +103,7 @@ class RouteRegistryTests(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(RouteConfigError, "must change harness or target"):
+        with self.assertRaisesRegex(RouteConfigError, "must change target"):
             RouteRegistry.from_dict(invalid)
 
     def test_route_names_reject_control_characters(self) -> None:
@@ -81,14 +113,14 @@ class RouteRegistryTests(unittest.TestCase):
 
     def test_route_validation_branches_fail_closed(self) -> None:
         cases = (
-            ({**BASE_CONFIG["routes"]["google/gemma-4"], "unexpected": True}, "unknown"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "unexpected": True}, "unknown="),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "none", "target": "local"}}, "policy none"),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "harnesses": ["other"]}, "default_harness"),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "kinds": ["review", "review"]}, "duplicates"),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "remote-unavailable", "harness": "other", "target": "direct"}}, "fallback harness"),
         )
         for route, message in cases:
-            with self.subTest(message=message), self.assertRaises(RouteConfigError):
+            with self.subTest(message=message), self.assertRaisesRegex(RouteConfigError, message):
                 RouteRegistry.from_dict({"schema": "dispatch-routes.v1", "routes": {"model": route}})
 
     def test_model_and_name_bounds_are_enforced(self) -> None:

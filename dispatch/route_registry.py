@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Mapping
 
 
@@ -103,9 +104,7 @@ class RouteDefinition:
                 f"routes[{model!r}] keys invalid, missing={sorted(missing)}, unknown={sorted(unknown)}"
             )
         default_harness = _name(data["default_harness"], "default_harness")
-        harnesses = tuple(
-            _string_list(data.get("harnesses", [default_harness]), "harnesses")
-        )
+        harnesses = _string_list(data.get("harnesses", [default_harness]), "harnesses")
         if default_harness not in harnesses:
             raise RouteConfigError("default_harness must be listed in harnesses")
         target = _name(data["target"], "target")
@@ -115,10 +114,9 @@ class RouteDefinition:
             raise RouteConfigError("fallback harness must be listed in harnesses")
         if (
             fallback.policy == "remote-unavailable"
-            and fallback.harness == default_harness
             and fallback.target == target
         ):
-            raise RouteConfigError("remote-unavailable fallback must change harness or target")
+            raise RouteConfigError("remote-unavailable fallback must change target")
         return cls(model, default_harness, harnesses, target, kinds, fallback)
 
 
@@ -160,7 +158,10 @@ class RouteRegistry:
             _model(model): RouteDefinition.from_dict(model, route)
             for model, route in routes_data.items()
         }
-        return cls(routes)
+        return cls(MappingProxyType(routes))
+
+    def __hash__(self) -> int:
+        return hash(tuple(sorted(self.routes.items())))
 
     def resolve(self, model: str, kind: str, *, harness: str | None = None) -> ResolvedRoute:
         model = _model(model)
@@ -181,6 +182,6 @@ class RouteRegistry:
             kind=kind,
             harness=effective_harness,
             target=definition.target,
-            harness_overridden=harness is not None,
+            harness_overridden=harness is not None and harness != definition.default_harness,
             fallback=definition.fallback,
         )
