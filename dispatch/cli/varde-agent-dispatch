@@ -30,7 +30,7 @@ EOF
 
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
-harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; output=""
+harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; route_fallback_harness=""; route_fallback_target=""; output=""
 model_from_cli=0; routes_from_cli=0
 while (($#)); do
   case "$1" in
@@ -49,7 +49,7 @@ done
 
 model="${model:-${DISPATCH_MODEL:-}}"
 routes_requested="$routes"
-if [[ -z "$routes_requested" ]]; then
+if [[ -z "$routes_requested" && "$model_from_cli" -eq 1 ]]; then
   routes_requested="${DISPATCH_ROUTES_FILE:-}"
 fi
 [[ "$routes_from_cli" -eq 0 || -n "$model" ]] || fail '--routes requires --model' 2
@@ -71,10 +71,10 @@ try:
 except (OSError, ValueError, json.JSONDecodeError, RouteConfigError) as exc:
     print(f"route resolution failed: {exc}", file=sys.stderr)
     raise SystemExit(3)
-print(f"{route.harness}\t{route.model}\t{route.target}\t{str(route.harness_overridden).lower()}\t{route.fallback.policy}")
+print(f"{route.harness}\t{route.model}\t{route.target}\t{str(route.harness_overridden).lower()}\t{route.fallback.policy}\t{route.fallback.harness or ''}\t{route.fallback.target or ''}")
 PY
   )" || fail 'route resolution failed; see the validation error above' 3
-  IFS=$'\t' read -r harness model route_target route_harness_overridden route_fallback_policy <<< "$resolved_route"
+  IFS=$'\t' read -r harness model route_target route_harness_overridden route_fallback_policy route_fallback_harness route_fallback_target <<< "$resolved_route"
 fi
 
 [[ -n "$harness" ]] || fail '--harness is required when --model is not used'
@@ -141,7 +141,12 @@ route_target_arg=()
 route_metadata_args=()
 if [[ -n "$route_target" ]]; then
   route_target_arg=("DISPATCH_TARGET=$route_target")
-  route_metadata_args=("DISPATCH_HARNESS_OVERRIDDEN=$route_harness_overridden" "DISPATCH_FALLBACK_POLICY=$route_fallback_policy")
+  route_metadata_args=(
+    "DISPATCH_HARNESS_OVERRIDDEN=$route_harness_overridden"
+    "DISPATCH_FALLBACK_POLICY=$route_fallback_policy"
+    "DISPATCH_FALLBACK_HARNESS=$route_fallback_harness"
+    "DISPATCH_FALLBACK_TARGET=$route_fallback_target"
+  )
 fi
 
 # Deliberately pass a small, explicit environment. No caller credential or

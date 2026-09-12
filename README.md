@@ -55,7 +55,8 @@ belong in this repository.
 `dispatch/` contains bounded-work interfaces, lifecycle handling, harness
 adapters, routing integration, and result capture.
 
-The public CLI resolves model-first routes from the supplied registry:
+The public CLI resolves model-first routes from the supplied registry. The
+example registry uses the shipped `codex` backend:
 
 ```bash
 dispatch/cli/varde-agent-dispatch \

@@ -26,6 +26,13 @@ cat > "$TMP/routes.json" <<'EOF'
       "target": "local",
       "kinds": ["passthrough"],
       "fallback": {"policy": "none"}
+    },
+    "fallback/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["passthrough"],
+      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "remote"}
     }
   }
 }
@@ -62,7 +69,7 @@ while (($#)); do
   fi
 done
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
@@ -84,6 +91,17 @@ check grep -qF 'overridden=false' "$TMP/out"
 check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
+
+if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/routes.json" \
+  --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-fallback" \
+  >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
+  printf 'fallback route dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-fallback" >&2
+  exit 1
+fi
+check grep -qF 'fallback=remote-unavailable' "$TMP/out-fallback"
+check grep -qF 'fallback_harness=codex' "$TMP/out-fallback"
+check grep -qF 'fallback_target=remote' "$TMP/out-fallback"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
   --task x --workdir "$TMP/work" --output "$TMP/out-no-routes" \

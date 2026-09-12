@@ -2,7 +2,7 @@
   "schema": "dispatch-routes.v1",
   "routes": {
     "example/model": {
-      "default_harness": "example-harness",
+      "default_harness": "codex",
       "target": "local",
       "kinds": ["review", "passthrough"],
       "fallback": {

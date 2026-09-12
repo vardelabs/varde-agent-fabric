@@ -2,7 +2,8 @@
 
 A small, public-safe command for invoking a bounded local backend and capturing
 one output artifact. The repository contains no credentials, deployment
-configuration, private host paths, or provider secrets.
+configuration, private host paths, or provider secrets. The CLI requires Bash
+4.4 or newer.
 
 ## Contract
 
@@ -26,6 +27,8 @@ runtime contract to a backend:
 - optional `DISPATCH_TARGET`
 - routed `DISPATCH_HARNESS_OVERRIDDEN`
 - routed `DISPATCH_FALLBACK_POLICY`
+- routed `DISPATCH_FALLBACK_HARNESS`
+- routed `DISPATCH_FALLBACK_TARGET`
 
 The caller owns authentication, deployment policy, and remote transport. When
 `--model` is supplied, `--routes` provides the portable model-first registry;
