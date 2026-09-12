@@ -20,7 +20,7 @@ _ALLOWED_FALLBACK_KEYS = {"policy", "harness", "target"}
 def _name(value: Any, field: str, *, max_length: int = _MAX_NAME) -> str:
     if not isinstance(value, str) or not value or len(value) > max_length:
         raise RouteConfigError(f"{field} must be a non-empty string of at most {max_length} characters")
-    if any(character.isspace() or not character.isprintable() for character in value) or "\x00" in value:
+    if any(character.isspace() or not character.isprintable() for character in value):
         raise RouteConfigError(f"{field} must contain printable non-whitespace characters and no NUL")
     return value
 
@@ -28,7 +28,7 @@ def _name(value: Any, field: str, *, max_length: int = _MAX_NAME) -> str:
 def _model(value: Any) -> str:
     if not isinstance(value, str) or not value or len(value) > _MAX_MODEL:
         raise RouteConfigError(f"model must be a non-empty string of at most {_MAX_MODEL} characters")
-    if any(character.isspace() or not character.isprintable() for character in value) or "\x00" in value:
+    if any(character.isspace() or not character.isprintable() for character in value):
         raise RouteConfigError("model must contain printable non-whitespace characters and no NUL")
     return value
 
