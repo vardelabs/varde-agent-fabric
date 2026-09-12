@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-unset DISPATCH_MODEL DISPATCH_ROUTES_FILE
+unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_CODEX_SANDBOX DISPATCH_MAX_TASK_BYTES
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"

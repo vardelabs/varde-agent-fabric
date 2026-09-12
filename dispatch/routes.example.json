@@ -4,7 +4,7 @@
     "example/model": {
       "default_harness": "example-harness",
       "target": "local",
-      "kinds": ["review"],
+      "kinds": ["review", "passthrough"],
       "fallback": {
         "policy": "none"
       }
