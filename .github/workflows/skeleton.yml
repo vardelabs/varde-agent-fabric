@@ -24,6 +24,7 @@ jobs:
       - run: python3 -m eval.public_eval
       - run: ./scripts/check-public-safety.sh
       - run: bash tests/test-public-safety.sh
+      - run: bash tests/test-release-verification.sh
       - name: Check changed whitespace
         env:
           EVENT_NAME: ${{ github.event_name }}
