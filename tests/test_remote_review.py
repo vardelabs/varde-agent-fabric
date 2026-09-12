@@ -129,7 +129,20 @@ class RemoteReviewTests(unittest.TestCase):
                 client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req, **changes)))
                 with self.assertRaises(GatewayError): client.submit(req)
 
-    def test_http_and_malformed_responses_fail_closed(self):
+    def test_non_object_gateway_response_fails_closed(self):
+        req = request()
+        for value in ([], "not-an-object", 7, None):
+            with self.subTest(value=value):
+                client = GatewayClient(
+                    "https://gateway.example",
+                    "secret",
+                    opener=lambda *args, value=value, **kwargs: Response(
+                        json.dumps(value).encode()
+                    ),
+                )
+                with self.assertRaisesRegex(GatewayError, "malformed"):
+                    client.submit(req)
+
         req = request()
         class ErrorResponse(Response): status = 503
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: ErrorResponse(b""))

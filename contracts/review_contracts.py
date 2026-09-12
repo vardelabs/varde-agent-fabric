@@ -44,6 +44,12 @@ def _positive_int(value: Any, field: str) -> None:
         raise ContractError(f"{field} must be a positive integer")
 
 
+def _mapping(value: Any, field: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ContractError(f"{field} must be an object")
+    return value
+
+
 def _keys(data: Mapping[str, Any], expected: set[str], field: str) -> None:
     unknown = set(data) - expected
     missing = expected - set(data)
@@ -122,6 +128,7 @@ class ReviewRequest:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ReviewRequest":
+        data = _mapping(data, "review request")
         _keys(data, {"schema", "repository", "pull_request", "base_sha", "head_sha", "paths", "kind", "worker_kind", "correlation_id", "packet", "timeout_seconds"}, "review request")
         if data["schema"] != "review-request.v1":
             raise ContractError("unsupported review request schema")
@@ -171,6 +178,7 @@ class ReviewArtifact:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ReviewArtifact":
+        data = _mapping(data, "review artifact")
         _keys(data, {"schema", "repository", "pull_request", "base_sha", "head_sha", "worker_kind", "execution_location", "provider", "correlation_id", "findings", "finish_reason", "fallback", "latency_ms"}, "review artifact")
         if data["schema"] != "review-artifact.v1":
             raise ContractError("unsupported review artifact schema")
