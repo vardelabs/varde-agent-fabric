@@ -2,13 +2,15 @@
 
 A small, public-safe command for invoking a bounded local backend and capturing
 one output artifact. The repository contains no credentials, deployment
-configuration, private host paths, or provider secrets.
+configuration, private host paths, or provider secrets. The CLI requires Bash
+4.4 or newer.
 
 ## Contract
 
 ```text
 varde-agent-dispatch \
-  --harness codex \
+  --model example/model \
+  --routes /path/to/routes.json \
   --kind passthrough \
   --task "bounded task" \
   --workdir /path/to/worktree
@@ -22,9 +24,16 @@ runtime contract to a backend:
 - `DISPATCH_OUTPUT`
 - optional `DISPATCH_DIFF`
 - optional `DISPATCH_MODEL`
+- optional `DISPATCH_TARGET`
+- routed `DISPATCH_HARNESS_OVERRIDDEN`
+- routed `DISPATCH_FALLBACK_POLICY`
+- routed `DISPATCH_FALLBACK_HARNESS`
+- routed `DISPATCH_FALLBACK_TARGET`
 
-The caller owns authentication, deployment policy, remote transport, and any
-model registry. The public adapter does not inherit the caller's environment,
+The caller owns authentication, deployment policy, and remote transport. When
+`--model` is supplied, `--routes` provides the portable model-first registry;
+`--harness` is optional and must be approved for that model. The public adapter
+does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
 `--kind passthrough` runs the task as supplied. `--kind review` additionally
@@ -35,11 +44,17 @@ The task and review diff are each bounded, and their combined prompt must fit
 oversized input before the backend reads it. The default Codex sandbox is
 `read-only`; the only alternate public mode is `workspace-write`.
 
-The caller can pass `--model` or set `DISPATCH_MODEL`, and can set
-`DISPATCH_CODEX_SANDBOX` to one of those modes. These values are forwarded
-explicitly to the backend. `HOME` is retained for normal CLI runtime behavior,
-so this boundary does not claim to remove credentials stored by a provider CLI.
-Provider authentication remains a deployment concern.
+`--model` may also be supplied through `DISPATCH_MODEL`. Whenever an explicit
+`--model` is set, the registry must be supplied through `--routes` or
+`DISPATCH_ROUTES_FILE`; the dispatcher refuses to guess a route. An explicit
+`--harness` override is allowed only when the registry approves it. For
+compatibility, callers using `--harness` with only the legacy `DISPATCH_MODEL`
+forward that model without registry resolution. `--routes` without a model is
+rejected. The caller can set `DISPATCH_CODEX_SANDBOX` to one of the public
+modes. These values are forwarded explicitly to the backend. `HOME` is retained
+for normal CLI runtime behavior, so this boundary does not claim to remove
+credentials stored by a provider CLI. Provider authentication remains a
+deployment concern.
 
 ## Public boundary
 
