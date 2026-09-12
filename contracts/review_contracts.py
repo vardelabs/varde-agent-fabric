@@ -83,7 +83,7 @@ class ReviewRequest:
     pull_request: int
     base_sha: str
     head_sha: str
-    paths: tuple[str, ...]
+    paths: Any
     kind: str
     worker_kind: str
     correlation_id: str
@@ -95,6 +95,8 @@ class ReviewRequest:
         _positive_int(self.pull_request, "pull_request")
         object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
         object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
+        if not isinstance(self.paths, tuple):
+            raise ContractError("paths must be a tuple")
         if not self.paths or len(self.paths) > 100:
             raise ContractError("paths must contain between 1 and 100 non-empty strings")
         for index, path in enumerate(self.paths):

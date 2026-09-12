@@ -144,8 +144,14 @@ class RemoteReviewTests(unittest.TestCase):
                 "x" * MAX_PACKET_BYTES,
             )
 
+    def test_request_requires_immutable_paths(self):
+        with self.assertRaisesRegex(ContractError, "paths must be a tuple"):
+            ReviewRequest(
+                "vardelabs/example", 7, BASE, HEAD, ["src/app.py"],
+                "reviewer", "codex", "corr-7", "bounded packet",
+            )
+
     def test_non_object_contract_envelopes_raise_contract_error(self):
-        req = request()
         for value in ([], "not-an-object", 7, None):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ContractError, "must be an object"):
@@ -167,6 +173,7 @@ class RemoteReviewTests(unittest.TestCase):
                 with self.assertRaisesRegex(GatewayError, "malformed"):
                     client.submit(req)
 
+    def test_http_and_malformed_responses_fail_closed(self):
         req = request()
         class ErrorResponse(Response): status = 503
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: ErrorResponse(b""))
@@ -224,6 +231,32 @@ class RemoteReviewTests(unittest.TestCase):
         network = mock.Mock(return_value=Response(json.dumps(artifact(sized), ensure_ascii=False).encode()))
         result = GatewayClient("https://gateway.example", "secret", opener=network).submit(sized)
         self.assertEqual(result.repository, req.repository)
+
+    def test_default_response_limit_accepts_contract_valid_artifact(self):
+        req = request()
+        findings = tuple(
+            {
+                "severity": "yellow",
+                "file": f"src/app-{i}.py",
+                "message": "m" * 1024,
+                "confidence": "c" * 1024,
+                "category": "k" * 1024,
+                "reproduction": "r" * 1024,
+                "line": 1,
+            }
+            for i in range(50)
+        )
+        value = ReviewArtifact(
+            req.repository, req.pull_request, req.base_sha, req.head_sha,
+            req.worker_kind, "cluster", "gemma", req.correlation_id,
+            findings, "completed",
+        )
+        body = json.dumps(value.to_dict()).encode()
+        client = GatewayClient(
+            "https://gateway.example", "secret",
+            opener=lambda *args, **kwargs: Response(body),
+        )
+        self.assertEqual(client.submit(req), value)
 
     def test_oversized_response_is_rejected(self):
         req = request()
