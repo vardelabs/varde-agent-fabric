@@ -131,6 +131,10 @@ else
   unset DISPATCH_MODEL
 fi
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"
+route_target_arg=()
+if [[ -n "$route_target" ]]; then
+  route_target_arg=("DISPATCH_TARGET=$route_target")
+fi
 
 # Deliberately pass a small, explicit environment. No caller credential or
 # provider configuration is inherited by the backend.
@@ -143,7 +147,7 @@ env -i \
   DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
   ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
   ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
-  ${route_target:+DISPATCH_TARGET="$route_target"} \
+  "${route_target_arg[@]}" \
   ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
 

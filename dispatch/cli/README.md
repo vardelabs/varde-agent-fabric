@@ -44,7 +44,9 @@ set, the registry must be supplied through `--routes` or
 `DISPATCH_ROUTES_FILE`; the dispatcher refuses to guess a route. An explicit
 `--harness` override is allowed only when the registry approves it. The caller
 can set `DISPATCH_CODEX_SANDBOX` to one of the public modes. These values are
-forwarded explicitly to the backend.
+forwarded explicitly to the backend. `HOME` is retained for normal CLI runtime
+behavior, so this boundary does not claim to remove credentials stored by a
+provider CLI. Provider authentication remains a deployment concern.
 
 ## Public boundary
 
