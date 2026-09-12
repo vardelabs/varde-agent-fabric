@@ -14,9 +14,20 @@ patterns=(
   'discord\.com/api/webhooks/[A-Za-z0-9_-]+'
 )
 for pattern in "${patterns[@]}"; do
-  if git -C "$root" grep --text -n -E -- "$pattern" -- .; then
-    printf 'public safety scan failed for pattern: %s\n' "$pattern" >&2
-    exit 1
-  fi
+  set +e
+  git -C "$root" grep --text -n -E -- "$pattern" -- .
+  status=$?
+  set -e
+  case "$status" in
+    0)
+      printf 'public safety scan failed for pattern: %s\n' "$pattern" >&2
+      exit 1
+      ;;
+    1) ;;
+    *)
+      printf 'public safety scan could not inspect repository (status %s)\n' "$status" >&2
+      exit "$status"
+      ;;
+  esac
 done
 printf 'public safety scan: ok\n'

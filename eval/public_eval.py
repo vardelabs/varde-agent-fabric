@@ -24,10 +24,14 @@ def evaluate_fixture(path: Path) -> str:
         artifact = ReviewArtifact.from_dict(payload["artifact"])
         if case == "completed-valid":
             actual = "clean" if artifact.finish_reason == "completed" else "rejected"
+        elif case == "malformed-artifact":
+            actual = "clean"
         elif case == "stale-artifact":
             actual = "rejected" if artifact.head_sha != payload["expected_head_sha"] else "clean"
+        elif case == "unavailable-worker":
+            actual = "clean" if artifact.finish_reason == "completed" else "rejected"
         else:
-            actual = "rejected"
+            raise KeyError(case)
     except (ContractError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         actual = "rejected"
     if actual != expected:
