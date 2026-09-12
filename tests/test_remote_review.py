@@ -129,6 +129,30 @@ class RemoteReviewTests(unittest.TestCase):
                 client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req, **changes)))
                 with self.assertRaises(GatewayError): client.submit(req)
 
+    def test_request_rejects_combined_serialized_transport_overflow(self):
+        paths = tuple("漢" * 512 for _ in range(100))
+        with self.assertRaisesRegex(ContractError, "transport limit"):
+            ReviewRequest(
+                "vardelabs/example",
+                7,
+                BASE,
+                HEAD,
+                paths,
+                "reviewer",
+                "codex",
+                "corr-7",
+                "x" * MAX_PACKET_BYTES,
+            )
+
+    def test_non_object_contract_envelopes_raise_contract_error(self):
+        req = request()
+        for value in ([], "not-an-object", 7, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ContractError, "must be an object"):
+                    ReviewRequest.from_dict(value)
+                with self.assertRaisesRegex(ContractError, "must be an object"):
+                    ReviewArtifact.from_dict(value)
+
     def test_non_object_gateway_response_fails_closed(self):
         req = request()
         for value in ([], "not-an-object", 7, None):
