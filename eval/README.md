@@ -18,3 +18,7 @@ python3 -m unittest -q tests/test_public_eval.py
 
 The synthetic suite treats only a validated completed artifact as clean.
 Malformed, stale, and unavailable worker outcomes must remain rejected.
+
+The supplemental public-safety scan checks tracked text and binary content for
+high-signal private markers. It is a narrow CI aid, not a publication
+certification mechanism.

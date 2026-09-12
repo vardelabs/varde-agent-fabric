@@ -23,6 +23,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 -m eval.public_eval
       - run: ./scripts/check-public-safety.sh
+      - run: bash tests/test-public-safety.sh
       - name: Check changed whitespace
         env:
           EVENT_NAME: ${{ github.event_name }}
