@@ -2,10 +2,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-export GIT_CONFIG_COUNT=0
-export GIT_CONFIG_NOSYSTEM=1
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_SYSTEM=/dev/null
 script_path=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 
 if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -18,7 +14,8 @@ if [[ ${SKELETON_TEST_CONFIG_INJECTION:-0} != 1 ]]; then
     GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0=core.excludesFile \
     GIT_CONFIG_VALUE_0=/dev/null \
-    "$root/scripts/validate-skeleton.sh" 2>&1); then
+    SKELETON_TEST_CONFIG_INJECTION=1 \
+    "$script_path" 2>&1); then
     printf '%s\n' "$injected_output" >&2
     printf 'skeleton test is not isolated from injected Git config\n' >&2
     exit 1
