@@ -52,8 +52,7 @@ model="${model:-${DISPATCH_MODEL:-}}"
 if [[ -n "$model" ]]; then
   routes="${routes:-${DISPATCH_ROUTES_FILE:-}}"
   [[ -n "$routes" && "$routes" = /* && -f "$routes" ]] || fail '--routes must name a route configuration file when --model is used' 2
-  resolved_route="$({
-    PYTHONPATH="$SELF_DIR/../.." python3 - "$routes" "$model" "$kind" "$harness" <<'PY'
+  resolved_route="$(PYTHONPATH="$SELF_DIR/../.." python3 - "$routes" "$model" "$kind" "$harness" <<'PY'
 import json
 import sys
 from dispatch.route_registry import RouteConfigError, RouteRegistry
@@ -67,7 +66,7 @@ except (OSError, ValueError, json.JSONDecodeError, RouteConfigError) as exc:
     raise SystemExit(3)
 print(f"{route.harness}\t{route.model}\t{route.target}")
 PY
-  } 2>&1)" || fail "$resolved_route" 3
+  )" || fail 'route resolution failed; see the validation error above' 3
   IFS=$'\t' read -r harness model route_target <<< "$resolved_route"
 fi
 
