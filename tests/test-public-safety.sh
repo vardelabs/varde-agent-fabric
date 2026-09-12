@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/public-safety-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo"
-git_cmd=(env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c init.templateDir=)
+git_cmd=(env GIT_CONFIG_COUNT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c init.templateDir=)
 "${git_cmd[@]}" -C "$TMP/repo" init -q
 "${git_cmd[@]}" -C "$TMP/repo" config user.email test@example.invalid
 "${git_cmd[@]}" -C "$TMP/repo" config user.name synthetic

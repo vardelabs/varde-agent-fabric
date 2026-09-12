@@ -32,7 +32,7 @@ def evaluate_fixture(path: Path) -> str:
             actual = "clean" if artifact.finish_reason == "completed" else "rejected"
         else:
             raise KeyError(case)
-    except (ContractError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except (ContractError, TypeError, ValueError, json.JSONDecodeError):
         actual = "rejected"
     if actual != expected:
         raise AssertionError(f"{path.name}: expected {expected}, got {actual}")
