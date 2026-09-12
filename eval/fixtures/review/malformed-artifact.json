@@ -1,0 +1,8 @@
+{
+  "case": "malformed-artifact",
+  "artifact": [
+    "not",
+    "an",
+    "object"
+  ]
+}

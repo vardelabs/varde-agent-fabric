@@ -1,0 +1,18 @@
+{
+  "case": "unavailable-worker",
+  "artifact": {
+    "schema": "review-artifact.v1",
+    "repository": "example/project",
+    "pull_request": 7,
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "worker_kind": "codex",
+    "execution_location": "local",
+    "provider": "synthetic",
+    "correlation_id": "eval-unavailable",
+    "findings": [],
+    "finish_reason": "unavailable",
+    "fallback": null,
+    "latency_ms": 0
+  }
+}

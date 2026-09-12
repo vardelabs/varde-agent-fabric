@@ -1,0 +1,23 @@
+{
+  "case": "completed-valid",
+  "artifact": {
+    "schema": "review-artifact.v1",
+    "repository": "example/project",
+    "pull_request": 7,
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "worker_kind": "codex",
+    "execution_location": "local",
+    "provider": "synthetic",
+    "correlation_id": "eval-completed",
+    "findings": [
+      {
+        "severity": "green",
+        "message": "no synthetic findings"
+      }
+    ],
+    "finish_reason": "completed",
+    "fallback": null,
+    "latency_ms": 12
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "case": "stale-artifact",
+  "expected_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifact": {
+    "schema": "review-artifact.v1",
+    "repository": "example/project",
+    "pull_request": 7,
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "worker_kind": "codex",
+    "execution_location": "local",
+    "provider": "synthetic",
+    "correlation_id": "eval-stale",
+    "findings": [],
+    "finish_reason": "completed",
+    "fallback": null,
+    "latency_ms": 12
+  }
+}
