@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_CODEX_SANDBOX DISPATCH_MAX_TASK_BYTES
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
@@ -8,6 +9,34 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/work"
 printf 'diff body\n' > "$TMP/change.diff"
+cat > "$TMP/routes.json" <<'EOF'
+{
+  "schema": "dispatch-routes.v1",
+  "routes": {
+    "test/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["review", "passthrough"],
+      "fallback": {"policy": "none"}
+    },
+    "caller/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["passthrough"],
+      "fallback": {"policy": "none"}
+    },
+    "fallback/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "local",
+      "kinds": ["passthrough"],
+      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "remote"}
+    }
+  }
+}
+EOF
 
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
@@ -40,14 +69,14 @@ while (($#)); do
   fi
 done
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
 
 if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
-  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind review \
-  --diff "$TMP/change.diff" --model test/model --task x --workdir "$TMP/work" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
   --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
   printf 'fake codex dispatch unexpectedly failed\n' >&2
   cat "$TMP/err" >&2
@@ -57,10 +86,55 @@ check test -s "$TMP/out"
 check grep -qF "$TMP/out" "$TMP/stdout"
 check grep -qF 'model=test/model' "$TMP/out"
 check grep -qF 'sandbox=workspace-write' "$TMP/out"
+check grep -qF 'target=local' "$TMP/out"
+check grep -qF 'overridden=false' "$TMP/out"
+check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
-if ! DISPATCH_MODEL=caller/model PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/routes.json" \
+  --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-fallback" \
+  >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
+  printf 'fallback route dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-fallback" >&2
+  exit 1
+fi
+check grep -qF 'fallback=remote-unavailable' "$TMP/out-fallback"
+check grep -qF 'fallback_harness=codex' "$TMP/out-fallback"
+check grep -qF 'fallback_target=remote' "$TMP/out-fallback"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
+  --task x --workdir "$TMP/work" --output "$TMP/out-no-routes" \
+  >"$TMP/stdout-no-routes" 2>"$TMP/err-no-routes"; then
+  printf 'model dispatch without routes unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'routes must name a route configuration file' "$TMP/err-no-routes"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --routes "$TMP/routes.json" --kind passthrough \
+  --task x --workdir "$TMP/work" --output "$TMP/out-routes-without-model" \
+  >"$TMP/stdout-routes-without-model" 2>"$TMP/err-routes-without-model"; then
+  printf 'routes without model unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF -- '--routes requires --model' "$TMP/err-routes-without-model"
+
+if ! DISPATCH_MODEL=legacy/model DISPATCH_ROUTES_FILE= PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
+  --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-legacy-env" \
+  >"$TMP/stdout-legacy-env" 2>"$TMP/err-legacy-env"; then
+  printf 'legacy model environment dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-legacy-env" >&2
+  exit 1
+fi
+check grep -qF 'model=legacy/model' "$TMP/out-legacy-env"
+check grep -qF 'fallback=' "$TMP/out-legacy-env"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness missing --kind passthrough \
+  --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
+  --output "$TMP/out-incompatible" >"$TMP/stdout-incompatible" 2>"$TMP/err-incompatible"; then
+  printf 'incompatible harness unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'not approved for model' "$TMP/err-incompatible"
+
+if ! DISPATCH_MODEL=caller/model DISPATCH_ROUTES_FILE="$TMP/routes.json" PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex \
   --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-env" \
   >"$TMP/stdout-env" 2>"$TMP/err-env"; then
   printf 'caller model dispatch unexpectedly failed\n' >&2

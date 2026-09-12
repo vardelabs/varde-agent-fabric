@@ -55,20 +55,22 @@ belong in this repository.
 `dispatch/` contains bounded-work interfaces, lifecycle handling, harness
 adapters, routing integration, and result capture.
 
-The public CLI currently provides a narrow local dispatch core:
+The public CLI resolves model-first routes from the supplied registry. The
+example registry uses the shipped `codex` backend:
 
 ```bash
 dispatch/cli/varde-agent-dispatch \
-  --harness codex \
+  --model example/model \
+  --routes /path/to/routes.json \
   --kind passthrough \
   --task "Run the bounded task" \
   --workdir /path/to/workdir
 ```
 
 The CLI validates inputs, applies size limits, scrubs the backend environment,
-and returns a bounded output artifact. Its current interface is intentionally
-small. Model registry resolution and remote service integration are tracked in
-the project roadmap.
+and returns a bounded output artifact. A legacy `--harness`-only form remains
+available for callers that do not use model routing. Remote service integration
+and private deployment policy remain outside this public CLI.
 
 ### Contracts
 
