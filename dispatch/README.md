@@ -9,6 +9,27 @@ Bounded-work launch interfaces and harness adapters belong here.
 - Keep harness-specific behavior behind a narrow adapter boundary.
 - Put shared request and response shapes in `../contracts/`, not here.
 
+## Route configuration
+
+`route_registry.py` defines the portable model-first route configuration. The
+provider-neutral shape is illustrated by `routes.example.json`; deployments
+supply their approved values outside this repository.
+
+Each route keeps these axes separate:
+
+- `model`: the canonical model identity
+- `default_harness`: the normal invocation adapter
+- `harnesses`: compatible explicit overrides
+- `target`: the execution location, such as `local` or `cluster`
+- `kinds`: the bounded work contracts allowed for the route
+- `fallback`: an explicit policy, either `none` or `remote-unavailable` with a
+  named fallback harness and target
+
+Resolution is model-first. An explicit harness is accepted only when it is
+listed for that model. Missing models, unsupported kinds, malformed routes, and
+ambiguous fallback policies fail closed. The resolved route records whether the
+harness was overridden and preserves the fallback policy for provenance.
+
 ## Public boundary
 
 This directory contains portable interfaces, artifact contracts, and transport

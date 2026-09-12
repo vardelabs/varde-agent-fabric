@@ -1,0 +1,13 @@
+{
+  "schema": "dispatch-routes.v1",
+  "routes": {
+    "example/model": {
+      "default_harness": "example-harness",
+      "target": "local",
+      "kinds": ["review"],
+      "fallback": {
+        "policy": "none"
+      }
+    }
+  }
+}
