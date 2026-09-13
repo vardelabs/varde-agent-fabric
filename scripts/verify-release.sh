@@ -25,7 +25,13 @@ while (($#)); do
   esac
 done
 
-[[ -d "$repo/.git" || -f "$repo/.git" ]] || { printf 'release verification: repository is not a Git worktree\n' >&2; exit 1; }
+[[ -d "$repo" ]] || { printf 'release verification: repository path is not a directory\n' >&2; exit 1; }
+repo=$(realpath "$repo")
+git_dir=$("${git_cmd[@]}" -C "$repo" rev-parse --absolute-git-dir 2>/dev/null) || { printf 'release verification: repository is not a Git repository\n' >&2; exit 1; }
+if [[ -d "$repo/.git" ]] && [[ "$(realpath "$repo/.git")" != "$git_dir" ]]; then
+  printf 'release verification: repository path contains an unrelated .git directory\n' >&2
+  exit 1
+fi
 [[ -n "$commit" && "$commit" =~ ^[0-9a-fA-F]{40}$ ]] || { printf 'release verification: commit must be a 40-character SHA\n' >&2; exit 1; }
 [[ -n "$rollback_commit" && "$rollback_commit" =~ ^[0-9a-fA-F]{40}$ ]] || { printf 'release verification: rollback commit must be a 40-character SHA\n' >&2; exit 1; }
 [[ "$(lower "$commit")" != "$(lower "$rollback_commit")" ]] || { printf 'release verification: rollback commit must differ from release commit\n' >&2; exit 1; }

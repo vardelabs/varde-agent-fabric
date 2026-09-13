@@ -21,7 +21,7 @@ printf 'release-v2\n' > "$TMP/repo/artifact.bin"
 release=$("${git_cmd[@]}" -C "$TMP/repo" rev-parse HEAD)
 checksum=$(sha256sum "$TMP/repo/artifact.bin" | cut -d' ' -f1)
 
-output=$(env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0=/dev/null \
+output=$(env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.repositoryFormatVersion GIT_CONFIG_VALUE_0=999 \
   ./scripts/verify-release.sh \
   --repo "$TMP/repo" \
   --commit "$release" \
@@ -60,5 +60,16 @@ if ./scripts/verify-release.sh --repo "$TMP/repo" --commit "$upper_release" \
   printf 'expected case-insensitive self-rollback to fail\n' >&2
   exit 1
 fi
+
+mkdir -p "$TMP/repo/subdir" "$TMP/repo/fake/.git"
+if ./scripts/verify-release.sh --repo "$TMP/repo/fake" --commit "$release" \
+  --artifact "$TMP/repo/artifact.bin" --sha256 "$checksum" \
+  --rollback-commit "$rollback"; then
+  printf 'expected unrelated .git directory to fail\n' >&2
+  exit 1
+fi
+./scripts/verify-release.sh --repo "$TMP/repo/subdir" --commit "$release" \
+  --artifact "$TMP/repo/artifact.bin" --sha256 "$checksum" \
+  --rollback-commit "$rollback" >/dev/null
 
 printf 'release verification tests: passed\n'
