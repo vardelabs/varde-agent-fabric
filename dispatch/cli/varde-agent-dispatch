@@ -24,6 +24,12 @@ Options:
   --model ID       Explicit model identifier
   --routes FILE    Model route configuration, required with --model
   --output FILE    Output file, default is a private temporary file
+  --repository NAME  Repository metadata for remote reviews
+  --pull-request N   Pull request number for remote reviews
+  --base-sha SHA     Review base commit SHA
+  --head-sha SHA     Review head commit SHA
+  --correlation-id ID  Request correlation identifier
+  --path PATH       Changed path, repeat for remote reviews
   --help           Show this help
 EOF
 }
@@ -31,6 +37,7 @@ EOF
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
 harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; route_fallback_harness=""; route_fallback_target=""; output=""
+repository=""; pull_request=""; base_sha=""; head_sha=""; correlation_id=""; paths=()
 model_from_cli=0; routes_from_cli=0
 while (($#)); do
   case "$1" in
@@ -42,6 +49,12 @@ while (($#)); do
     --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; model_from_cli=1; shift 2 ;;
     --routes) [[ $# -ge 2 ]] || fail '--routes requires a value'; routes="$2"; routes_from_cli=1; shift 2 ;;
     --output) [[ $# -ge 2 ]] || fail '--output requires a value'; output="$2"; shift 2 ;;
+    --repository) [[ $# -ge 2 ]] || fail '--repository requires a value'; repository="$2"; shift 2 ;;
+    --pull-request) [[ $# -ge 2 ]] || fail '--pull-request requires a value'; pull_request="$2"; shift 2 ;;
+    --base-sha) [[ $# -ge 2 ]] || fail '--base-sha requires a value'; base_sha="$2"; shift 2 ;;
+    --head-sha) [[ $# -ge 2 ]] || fail '--head-sha requires a value'; head_sha="$2"; shift 2 ;;
+    --correlation-id) [[ $# -ge 2 ]] || fail '--correlation-id requires a value'; correlation_id="$2"; shift 2 ;;
+    --path) [[ $# -ge 2 ]] || fail '--path requires a value'; paths+=("$2"); shift 2 ;;
     --help) usage; exit 0 ;;
     *) fail "unknown option: $1" ;;
   esac
@@ -90,7 +103,16 @@ case "$kind" in
 esac
 
 backend="$BACKENDS_DIR/$harness.sh"
-[[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
+if [[ "$route_target" != "remote" ]]; then
+  [[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
+fi
+
+if [[ "$route_target" == "remote" ]]; then
+  [[ "$kind" == "review" ]] || fail 'remote routes require --kind review' 3
+  [[ -n "$repository" && -n "$pull_request" && -n "$base_sha" && -n "$head_sha" && -n "$correlation_id" ]] || fail 'remote reviews require explicit repository, pull request, base SHA, head SHA, and correlation ID' 2
+  ((${#paths[@]} > 0)) || fail 'remote reviews require at least one explicit --path' 2
+  [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
+fi
 
 if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
 if (( $(LC_ALL=C printf '%s' "$task" | wc -c) > MAX_TASK_BYTES )); then fail 'task exceeds DISPATCH_MAX_TASK_BYTES'; fi
@@ -136,6 +158,27 @@ elif [[ -n "${DISPATCH_MODEL:-}" ]]; then
 else
   unset DISPATCH_MODEL
 fi
+
+if [[ "$route_target" == "remote" ]]; then
+  timeout_seconds="${DISPATCH_TIMEOUT_SECONDS:-300}"
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || fail 'DISPATCH_TIMEOUT_SECONDS must be a positive integer' 2
+  remote_args=(
+    --output "$backend_output" --local-backend "$backend" --harness "$harness" --target "$route_target"
+    --fallback-policy "${route_fallback_policy:-none}" --model "$model"
+    --workdir "$workdir" --repository "$repository" --pull-request "$pull_request"
+    --base-sha "$base_sha" --head-sha "$head_sha" --correlation-id "$correlation_id"
+    --task "$task" --timeout-seconds "$timeout_seconds"
+  )
+  [[ -n "$diff" ]] && remote_args+=(--diff "$diff")
+  for path in "${paths[@]}"; do remote_args+=(--path "$path"); done
+  if [[ -z "${DISPATCH_GATEWAY_URL:-}" || -z "${DISPATCH_GATEWAY_TOKEN:-}" ]]; then
+    fail 'remote route requires DISPATCH_GATEWAY_URL and DISPATCH_GATEWAY_TOKEN' 4
+  fi
+  env -i PATH="${PATH:-/usr/bin:/bin}" HOME="${HOME:-}" TMPDIR="${TMPDIR:-/tmp}" \
+    DISPATCH_GATEWAY_URL="$DISPATCH_GATEWAY_URL" DISPATCH_GATEWAY_TOKEN="$DISPATCH_GATEWAY_TOKEN" \
+    DISPATCH_GATEWAY_CA_FILE="${DISPATCH_GATEWAY_CA_FILE:-}" \
+    PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/../remote_runner.py" "${remote_args[@]}"
+else
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 route_target_arg=()
 route_metadata_args=()
@@ -164,6 +207,7 @@ env -i \
   "${route_metadata_args[@]}" \
   ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
   "$backend"
+fi
 
 [[ -s "$backend_output" ]] || fail 'backend completed without a non-empty output artifact' 5
 if [[ -n "$requested_output" ]]; then

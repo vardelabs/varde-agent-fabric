@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contracts.review_contracts import ContractError, MAX_PACKET_BYTES, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
 from dispatch.cluster_worker import ClusterReviewWorker, WorkerResult
-from dispatch.gateway_client import GatewayClient, GatewayError
+from dispatch.gateway_client import GatewayClient, GatewayError, GatewayUnavailable
 from dispatch.review_supervisor import ReviewSupervisor
 
 
@@ -194,6 +194,15 @@ class RemoteReviewTests(unittest.TestCase):
         req = request("codex")
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
         with self.assertRaises(GatewayError): ReviewSupervisor(client).run(req)
+
+    def test_gateway_unavailable_is_preserved_for_legacy_callers(self):
+        req = request("codex")
+        unavailable = GatewayUnavailable("offline")
+        gateway = mock.Mock()
+        gateway.submit.side_effect = unavailable
+        with self.assertRaises(GatewayUnavailable) as raised:
+            ReviewSupervisor(gateway).run(req)
+        self.assertIs(raised.exception, unavailable)
 
     def test_http_401_does_not_trigger_local_fallback(self):
         req = request("codex")

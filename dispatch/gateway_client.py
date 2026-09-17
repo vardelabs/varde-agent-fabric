@@ -42,7 +42,10 @@ class GatewayClient:
         try:
             with self.opener(http_request, timeout=request.timeout_seconds) as response:
                 if getattr(response, "status", 200) != 200:
-                    raise GatewayError(f"gateway returned HTTP {response.status}")
+                    status = response.status
+                    if status in {502, 503, 504}:
+                        raise GatewayUnavailable(f"gateway returned HTTP {status}")
+                    raise GatewayError(f"gateway returned HTTP {status}")
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             if exc.code in {502, 503, 504}:
