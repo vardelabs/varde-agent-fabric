@@ -8,7 +8,7 @@ import threading
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from dispatch.cluster_worker import WorkerResult
-from dispatch.gateway_client import GatewayClient, GatewayError
+from dispatch.gateway_client import GatewayClient, GatewayError, GatewayUnavailable
 
 
 class ReviewSupervisor:
@@ -19,7 +19,7 @@ class ReviewSupervisor:
     def run(self, request: ReviewRequest) -> ReviewArtifact:
         try:
             return self.gateway.submit(request)
-        except GatewayError:
+        except GatewayUnavailable:
             if request.worker_kind == "local-gemma":
                 raise
             if request.worker_kind == "codex" and self.local_codex is not None:
