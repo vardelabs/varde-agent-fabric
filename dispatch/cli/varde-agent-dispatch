@@ -166,7 +166,7 @@ if [[ "$route_target" == "remote" ]]; then
   timeout_seconds="${DISPATCH_TIMEOUT_SECONDS:-300}"
   [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || fail 'DISPATCH_TIMEOUT_SECONDS must be a positive integer' 2
   remote_args=(
-    --output "$backend_output" --local-backend "$backend"
+    --output "$backend_output" --local-backend "$backend" --harness "$harness" --target "$route_target"
     --fallback-policy "${route_fallback_policy:-none}" --model "$model"
     --workdir "$workdir" --repository "$repository" --pull-request "$pull_request"
     --base-sha "$base_sha" --head-sha "$head_sha" --correlation-id "$correlation_id"
@@ -179,6 +179,7 @@ if [[ "$route_target" == "remote" ]]; then
   fi
   env -i PATH="${PATH:-/usr/bin:/bin}" HOME="${HOME:-}" TMPDIR="${TMPDIR:-/tmp}" \
     DISPATCH_GATEWAY_URL="$DISPATCH_GATEWAY_URL" DISPATCH_GATEWAY_TOKEN="$DISPATCH_GATEWAY_TOKEN" \
+    DISPATCH_GATEWAY_CA_FILE="${DISPATCH_GATEWAY_CA_FILE:-}" \
     PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/../remote_runner.py" "${remote_args[@]}"
 else
 sandbox="${DISPATCH_CODEX_SANDBOX:-}"

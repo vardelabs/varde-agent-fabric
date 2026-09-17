@@ -17,17 +17,17 @@ BASE_CONFIG = {
     "routes": {
         "openai/gpt-5.6-luna": {
             "default_harness": "codex",
-            "target": "cluster",
+            "target": "remote",
             "kinds": ["review", "implement"],
             "fallback": {
                 "policy": "remote-unavailable",
                 "harness": "codex",
-                "target": "direct",
+                "target": "local",
             },
         },
         "google/gemma-4": {
             "default_harness": "llama-broker",
-            "target": "cluster",
+            "target": "remote",
             "kinds": ["review"],
             "fallback": {"policy": "none"},
         },
@@ -47,13 +47,13 @@ class RouteRegistryTests(unittest.TestCase):
             "routes": {
                 "model": {
                     "default_harness": "codex",
-                    "target": "cluster",
+                    "target": "remote",
                     "harnesses": ["codex", "opencode"],
                     "kinds": ["review"],
                     "fallback": {
                         "policy": "remote-unavailable",
                         "harness": "opencode",
-                        "target": "cluster",
+                        "target": "remote",
                     },
                 }
             },
@@ -77,13 +77,13 @@ class RouteRegistryTests(unittest.TestCase):
         route = RouteRegistry.from_dict(BASE_CONFIG).resolve("openai/gpt-5.6-luna", "review")
         self.assertEqual(route.model, "openai/gpt-5.6-luna")
         self.assertEqual(route.harness, "codex")
-        self.assertEqual(route.target, "cluster")
+        self.assertEqual(route.target, "remote")
         self.assertFalse(route.harness_overridden)
         self.assertEqual(route.fallback.policy, "remote-unavailable")
         self.assertEqual(route.to_dict()["fallback"], {
             "policy": "remote-unavailable",
             "harness": "codex",
-            "target": "direct",
+            "target": "local",
         })
 
     def test_remote_fallback_cannot_repeat_the_same_route(self) -> None:
@@ -92,13 +92,13 @@ class RouteRegistryTests(unittest.TestCase):
             "routes": {
                 "model": {
                     "default_harness": "codex",
-                    "target": "cluster",
+                    "target": "remote",
                     "harnesses": ["codex"],
                     "kinds": ["review"],
                     "fallback": {
                         "policy": "remote-unavailable",
                         "harness": "codex",
-                        "target": "cluster",
+                        "target": "remote",
                     },
                 }
             },
@@ -117,7 +117,7 @@ class RouteRegistryTests(unittest.TestCase):
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "none", "target": "local"}}, "policy none"),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "harnesses": ["other"]}, "default_harness"),
             ({**BASE_CONFIG["routes"]["google/gemma-4"], "kinds": ["review", "review"]}, "duplicates"),
-            ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "remote-unavailable", "harness": "other", "target": "direct"}}, "fallback harness"),
+            ({**BASE_CONFIG["routes"]["google/gemma-4"], "fallback": {"policy": "remote-unavailable", "harness": "other", "target": "local"}}, "fallback harness"),
         )
         for route, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(RouteConfigError, message):
@@ -177,13 +177,20 @@ class RouteRegistryTests(unittest.TestCase):
             "routes": {
                 "model": {
                     "default_harness": "codex",
-                    "target": "cluster",
+                    "target": "remote",
                     "kinds": ["review"],
                     "fallback": {"policy": "remote-unavailable"},
                 }
             },
         }
         with self.assertRaisesRegex(RouteConfigError, "fallback harness and target"):
+            RouteRegistry.from_dict(invalid)
+
+    def test_route_target_vocabulary_is_fail_closed(self) -> None:
+        invalid = {**BASE_CONFIG, "routes": {"model": {
+            **BASE_CONFIG["routes"]["google/gemma-4"], "target": "cluster"
+        }}}
+        with self.assertRaisesRegex(RouteConfigError, "target must be local or remote"):
             RouteRegistry.from_dict(invalid)
 
 

@@ -1,14 +1,18 @@
 """Remote-first review boundary for the public dispatch command."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import urllib.request
+import ssl
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
-from dispatch.gateway_client import GatewayClient, GatewayUnavailable
+from dispatch.fallback_policy import run_with_remote_fallback
+from dispatch.gateway_client import GatewayClient, GatewayError
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,8 @@ class RemoteReviewMetadata:
     model: str
     local_backend: str
     output: str
+    harness: str = "codex"
+    target: str = "remote"
     timeout_seconds: int = 300
 
 
@@ -34,6 +40,7 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
         packet += "\n\n--- BEGIN DIFF ---\n"
         packet += Path(metadata.diff).read_text(encoding="utf-8")
         packet += "\n--- END DIFF ---"
+    worker_kind = "codex" if metadata.harness == "codex" else "local-gemma"
     return ReviewRequest(
         repository=metadata.repository,
         pull_request=metadata.pull_request,
@@ -41,26 +48,18 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
         head_sha=metadata.head_sha,
         paths=metadata.paths,
         kind="reviewer",
-        worker_kind="codex",
+        worker_kind=worker_kind,
         correlation_id=metadata.correlation_id,
         packet=packet,
         timeout_seconds=metadata.timeout_seconds,
     )
 
 
-def _validate_identity(artifact: ReviewArtifact, request: ReviewRequest) -> None:
-    if (artifact.repository, artifact.pull_request, artifact.base_sha, artifact.head_sha,
-            artifact.correlation_id, artifact.worker_kind) != (
-                request.repository, request.pull_request, request.base_sha,
-                request.head_sha, request.correlation_id, request.worker_kind):
-        raise RuntimeError("local fallback artifact does not match request identity")
-
-
 def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
     local_output = Path(metadata.output + ".local")
     env = {
-        "PATH": "/usr/bin:/bin",
-        "HOME": os.environ.get("DISPATCH_HOME", ""),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", ""),
         "TMPDIR": metadata.workdir,
         "DISPATCH_TASK": metadata.task,
         "DISPATCH_WORKDIR": metadata.workdir,
@@ -87,26 +86,33 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
                 raise RuntimeError("local backend returned invalid findings")
             artifact = ReviewArtifact(
                 request.repository, request.pull_request, request.base_sha,
-                request.head_sha, "codex", "requester", metadata.model,
+                request.head_sha, request.worker_kind, "requester", metadata.model,
                 request.correlation_id, tuple(findings), "completed",
             )
-        _validate_identity(artifact, request)
-        return replace(artifact, fallback="cluster-unavailable-local-codex")
+        return artifact
     finally:
         local_output.unlink(missing_ok=True)
 
 
+def _gateway_client() -> GatewayClient:
+    opener = urllib.request.urlopen
+    ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
+    if ca_file:
+        context = ssl.create_default_context(cafile=ca_file)
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context)).open
+        return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"], opener=opener)
+    return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"])
+
+
 def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -> ReviewArtifact:
     request = build_review_request(metadata)
-    client = GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"])
-    try:
-        return client.submit(request)
-    except GatewayUnavailable:
-        if fallback_policy == "remote-unavailable":
-            artifact = _run_local_codex(metadata, request)
-            _validate_identity(artifact, request)
-            return replace(artifact, fallback="cluster-unavailable-local-codex")
-        raise
+    if metadata.target != "remote":
+        raise GatewayError("remote runner requires a remote target")
+    client = _gateway_client()
+    local_fallback = None
+    if fallback_policy == "remote-unavailable" and metadata.harness == "codex":
+        local_fallback = lambda: _run_local_codex(metadata, request)
+    return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)
 
 
 def main() -> int:
@@ -114,6 +120,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--local-backend", required=True)
+    parser.add_argument("--harness", required=True)
+    parser.add_argument("--target", required=True)
     parser.add_argument("--fallback-policy", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--workdir", required=True)
@@ -131,13 +139,17 @@ def main() -> int:
         args.repository, args.pull_request, args.base_sha, args.head_sha,
         args.correlation_id, tuple(args.path), args.task, args.diff,
         args.workdir, args.model, args.local_backend, args.output,
-        args.timeout_seconds,
+        args.harness, args.target, args.timeout_seconds,
     )
-    artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
-    Path(args.output).write_text(
-        json.dumps(artifact.to_dict(), ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    try:
+        artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
+        Path(args.output).write_text(
+            json.dumps(artifact.to_dict(), ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"varde-agent-dispatch: remote review failed: {exc}", file=sys.stderr)
+        return 4
     return 0
 
 

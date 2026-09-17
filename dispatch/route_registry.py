@@ -13,6 +13,7 @@ class RouteConfigError(ValueError):
 _MAX_MODEL = 128
 _MAX_NAME = 64
 _ALLOWED_POLICIES = {"none", "remote-unavailable"}
+_ALLOWED_TARGETS = {"local", "remote"}
 _ALLOWED_ROUTE_KEYS = {"default_harness", "harnesses", "target", "kinds", "fallback"}
 _ALLOWED_FALLBACK_KEYS = {"policy", "harness", "target"}
 
@@ -73,6 +74,8 @@ class FallbackPolicy:
         else:
             harness = _name(harness, f"{field}.harness")
             target = _name(target, f"{field}.target")
+            if target not in _ALLOWED_TARGETS:
+                raise RouteConfigError(f"{field}.target must be local or remote")
         return cls(policy=policy, harness=harness, target=target)
 
     def to_dict(self) -> dict[str, str]:
@@ -108,6 +111,8 @@ class RouteDefinition:
         if default_harness not in harnesses:
             raise RouteConfigError("default_harness must be listed in harnesses")
         target = _name(data["target"], "target")
+        if target not in _ALLOWED_TARGETS:
+            raise RouteConfigError("target must be local or remote")
         kinds = _string_list(data["kinds"], "kinds")
         fallback = FallbackPolicy.from_dict(data["fallback"])
         if fallback.harness is not None and fallback.harness not in harnesses:

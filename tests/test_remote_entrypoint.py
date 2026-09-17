@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -53,6 +54,41 @@ class RemoteEntrypointTests(unittest.TestCase):
             "packet": "Review this change",
             "timeout_seconds": 30,
         })
+
+    def test_resolved_harness_sets_request_worker_kind(self):
+        self.assertEqual(
+            build_review_request(self.metadata(harness="llama-broker", target="remote")).worker_kind,
+            "local-gemma",
+        )
+
+    def test_remote_gemma_never_falls_back(self):
+        metadata = self.metadata(harness="llama-broker", target="remote")
+        with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
+            with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
+                with mock.patch("dispatch.remote_runner._run_local_codex") as local:
+                    with self.assertRaises(GatewayUnavailable):
+                        run_remote_review(metadata, fallback_policy="remote-unavailable")
+                    local.assert_not_called()
+
+    def test_local_fallback_preserves_safe_caller_path_and_home(self):
+        metadata = self.metadata(local_backend="/bin/local")
+        request = build_review_request(metadata)
+        payload = json.dumps({"findings": []})
+        with tempfile.TemporaryDirectory() as workdir:
+            metadata = self.metadata(workdir=workdir, output=f"{workdir}/remote.json")
+            with mock.patch.dict(os.environ, {"PATH": "/custom/bin:/usr/bin", "HOME": "/caller-home", "DISPATCH_GATEWAY_TOKEN": "must-not-forward"}, clear=False):
+                with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                    def execute(*args, **kwargs):
+                        Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(payload, encoding="utf-8")
+                        return mock.Mock(returncode=0)
+                    run.side_effect = execute
+                    from dispatch.remote_runner import _run_local_codex
+                    _run_local_codex(metadata, request)
+                    environment = run.call_args.kwargs["env"]
+            self.assertEqual(environment["PATH"], "/custom/bin:/usr/bin")
+            self.assertEqual(environment["HOME"], "/caller-home")
+            self.assertNotIn("DISPATCH_GATEWAY_TOKEN", environment)
 
     def test_remote_route_calls_gateway_without_local_fallback(self):
         req = build_review_request(self.metadata())
