@@ -5,7 +5,7 @@ unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_CODEX_SANDBOX DISPATCH_MAX_TA
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-test.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+trap '[[ -z "${SERVER_PID:-}" ]] || kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/work"
 printf 'diff body\n' > "$TMP/change.diff"
@@ -30,9 +30,9 @@ cat > "$TMP/routes.json" <<'EOF'
     "fallback/model": {
       "default_harness": "codex",
       "harnesses": ["codex"],
-      "target": "local",
-      "kinds": ["passthrough"],
-      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "remote"}
+      "target": "remote",
+      "kinds": ["review"],
+      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"}
     }
   }
 }
@@ -92,16 +92,25 @@ check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
-if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/routes.json" \
+cp "$TMP/routes.json" "$TMP/invalid-routes.json"
+python3 - "$TMP/invalid-routes.json" <<'PY'
+import json
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["routes"]["fallback/model"]["target"] = "local"
+path.write_text(json.dumps(data))
+PY
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/invalid-routes.json" \
   --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-fallback" \
   >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
-  printf 'fallback route dispatch unexpectedly failed\n' >&2
-  cat "$TMP/err-fallback" >&2
-  exit 1
+  printf 'local remote-unavailable route unexpectedly succeeded\n' >&2; exit 1
 fi
-check grep -qF 'fallback=remote-unavailable' "$TMP/out-fallback"
-check grep -qF 'fallback_harness=codex' "$TMP/out-fallback"
-check grep -qF 'fallback_target=remote' "$TMP/out-fallback"
+check grep -qF 'remote primary route' "$TMP/err-fallback"
+check test ! -e "$TMP/out-fallback"
+check test ! -s "$TMP/stdout-fallback"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
   --task x --workdir "$TMP/work" --output "$TMP/out-no-routes" \
@@ -176,5 +185,55 @@ if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind passthrough \
   cat "$TMP/err-root" >&2
   exit 1
 fi
+
+# Exercise the real CLI remote branch against a localhost HTTPS gateway.
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+  -addext subjectAltName=DNS:localhost -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
+  >/dev/null 2>&1
+cat > "$TMP/https-gateway.py" <<'PY'
+import http.server, json, ssl, sys
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers["Content-Length"])
+        request = json.loads(self.rfile.read(length))
+        assert self.path == "/v1/reviews"
+        assert self.headers["Authorization"] == "Bearer cli-test-token"
+        assert request["worker_kind"] == "codex"
+        body = json.dumps({
+            "schema": "review-artifact.v1", "repository": request["repository"],
+            "pull_request": request["pull_request"], "base_sha": request["base_sha"],
+            "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
+            "execution_location": "cluster", "provider": "codex-test",
+            "correlation_id": request["correlation_id"], "findings": [],
+            "finish_reason": "completed", "fallback": None, "latency_ms": 1,
+        }).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *_): pass
+server = http.server.HTTPServer(("localhost", 0), Handler)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(sys.argv[1], sys.argv[2])
+server.socket = context.wrap_socket(server.socket, server_side=True)
+with open(sys.argv[3], "w") as stream: stream.write(str(server.server_port))
+server.serve_forever()
+PY
+python3 "$TMP/https-gateway.py" "$TMP/cert.pem" "$TMP/key.pem" "$TMP/port" &
+SERVER_PID=$!
+for _ in $(seq 1 50); do [[ -s "$TMP/port" ]] && break; sleep 0.02; done
+[[ -s "$TMP/port" ]] || { printf 'HTTPS gateway did not start\n' >&2; exit 1; }
+cat > "$TMP/remote-routes.json" <<'EOF'
+{"schema":"dispatch-routes.v1","routes":{"remote/model":{"default_harness":"codex","harnesses":["codex"],"target":"remote","kinds":["review"],"fallback":{"policy":"none"}}}}
+EOF
+remote_port="$(<"$TMP/port")"
+if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind review \
+  --diff "$TMP/change.diff" --repository vardelabs/example --pull-request 20 --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" --correlation-id cli-corr --path src/app.py \
+  --task remote-task --workdir "$TMP/work" --output "$TMP/out-remote" >"$TMP/stdout-remote" 2>"$TMP/err-remote"; then
+  printf 'remote CLI dispatch unexpectedly failed\n' >&2; cat "$TMP/err-remote" >&2; exit 1
+fi
+check test -s "$TMP/out-remote"
+check grep -qF '"execution_location":"cluster"' "$TMP/out-remote"
+check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"
