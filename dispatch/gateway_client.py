@@ -14,6 +14,10 @@ class GatewayError(RuntimeError):
     """A gateway request failed closed."""
 
 
+class GatewayUnavailable(GatewayError):
+    """The gateway could not be reached or reported temporary unavailability."""
+
+
 class GatewayClient:
     def __init__(self, base_url: str, token: str, *, opener: Callable = urllib.request.urlopen, max_response_bytes: int = MAX_TRANSPORT_BYTES) -> None:
         if not base_url.startswith("https://"):
@@ -41,9 +45,11 @@ class GatewayClient:
                     raise GatewayError(f"gateway returned HTTP {response.status}")
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
+            if exc.code in {502, 503, 504}:
+                raise GatewayUnavailable(f"gateway returned HTTP {exc.code}") from exc
             raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
-            raise GatewayError("gateway unavailable") from exc
+            raise GatewayUnavailable("gateway unavailable") from exc
         if len(raw) > self.max_response_bytes:
             raise GatewayError("gateway response exceeds transport limit")
         try:

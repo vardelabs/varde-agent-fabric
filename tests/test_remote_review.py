@@ -195,6 +195,23 @@ class RemoteReviewTests(unittest.TestCase):
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
         with self.assertRaises(GatewayError): ReviewSupervisor(client).run(req)
 
+    def test_http_401_does_not_trigger_local_fallback(self):
+        req = request("codex")
+        error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 401, "unauthorized", Message(), None)
+        local = mock.Mock()
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaisesRegex(GatewayError, "HTTP 401"):
+            ReviewSupervisor(client, local_codex=local).run(req)
+        local.assert_not_called()
+
+    def test_http_503_triggers_local_fallback(self):
+        req = request("codex")
+        error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 503, "unavailable", Message(), None)
+        local = mock.Mock(return_value=WorkerResult(ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, "codex", "requester", "codex-local", req.correlation_id, (), "completed")))
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        result = ReviewSupervisor(client, local_codex=local).run(req)
+        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+
     def test_transport_configuration_is_validated(self):
         with self.assertRaises(ValueError): GatewayClient("http://gateway.example", "secret")
         with self.assertRaises(ValueError): GatewayClient("https://gateway.example", "")
