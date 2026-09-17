@@ -103,7 +103,7 @@ case "$kind" in
 esac
 
 backend="$BACKENDS_DIR/$harness.sh"
-if [[ "$route_target" != "remote" || "$route_fallback_policy" == "remote-unavailable" ]]; then
+if [[ "$route_target" != "remote" ]]; then
   [[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
 fi
 
@@ -112,9 +112,6 @@ if [[ "$route_target" == "remote" ]]; then
   [[ -n "$repository" && -n "$pull_request" && -n "$base_sha" && -n "$head_sha" && -n "$correlation_id" ]] || fail 'remote reviews require explicit repository, pull request, base SHA, head SHA, and correlation ID' 2
   ((${#paths[@]} > 0)) || fail 'remote reviews require at least one explicit --path' 2
   [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
-  if [[ "$route_fallback_policy" == "remote-unavailable" ]]; then
-    [[ "$route_fallback_target" == "local" && "$route_fallback_harness" == "codex" ]] || fail 'remote-unavailable fallback must target the local codex backend' 3
-  fi
 fi
 
 if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
