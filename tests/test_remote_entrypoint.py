@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contracts.review_contracts import ReviewArtifact
+from contracts.review_contracts import ContractError, ReviewArtifact
 from dispatch.gateway_client import GatewayError, GatewayUnavailable
 from dispatch.remote_runner import RemoteReviewMetadata, build_review_request, run_remote_review
 
@@ -55,14 +55,12 @@ class RemoteEntrypointTests(unittest.TestCase):
             "timeout_seconds": 30,
         })
 
-    def test_resolved_harness_sets_request_worker_kind(self):
-        self.assertEqual(
-            build_review_request(self.metadata(harness="llama-broker", target="remote")).worker_kind,
-            "local-gemma",
-        )
+    def test_unknown_harness_is_rejected_by_request_allowlist(self):
+        with self.assertRaises(ContractError):
+            build_review_request(self.metadata(harness="llama-broker", target="remote"))
 
     def test_remote_gemma_never_falls_back(self):
-        metadata = self.metadata(harness="llama-broker", target="remote")
+        metadata = self.metadata(harness="local-gemma", target="remote")
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")

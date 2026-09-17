@@ -8,7 +8,7 @@ import threading
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from dispatch.cluster_worker import WorkerResult
 from dispatch.fallback_policy import run_with_remote_fallback
-from dispatch.gateway_client import GatewayClient, GatewayError
+from dispatch.gateway_client import GatewayClient, GatewayError, GatewayUnavailable
 
 
 class ReviewSupervisor:
@@ -32,6 +32,8 @@ class ReviewSupervisor:
                 fallback if self.local_codex is not None else None,
             )
         except RuntimeError as exc:
+            if isinstance(exc, GatewayUnavailable):
+                raise
             raise GatewayError(str(exc)) from exc
 
 

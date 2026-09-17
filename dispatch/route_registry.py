@@ -117,11 +117,11 @@ class RouteDefinition:
         fallback = FallbackPolicy.from_dict(data["fallback"])
         if fallback.harness is not None and fallback.harness not in harnesses:
             raise RouteConfigError("fallback harness must be listed in harnesses")
-        if (
-            fallback.policy == "remote-unavailable"
-            and fallback.target == target
-        ):
-            raise RouteConfigError("remote-unavailable fallback must change target")
+        if fallback.policy == "remote-unavailable":
+            if target != "remote":
+                raise RouteConfigError("remote-unavailable policy requires a remote primary route")
+            if fallback.target != "local" or fallback.harness != "codex":
+                raise RouteConfigError("remote-unavailable fallback must target the local codex backend")
         return cls(model, default_harness, harnesses, target, kinds, fallback)
 
 

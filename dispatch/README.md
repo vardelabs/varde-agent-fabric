@@ -20,7 +20,7 @@ Each route keeps these axes separate:
 - `model`: the canonical model identity
 - `default_harness`: the normal invocation adapter
 - `harnesses`: compatible explicit overrides
-- `target`: the execution location, such as `local` or `cluster`
+- `target`: the execution location, either `local` or `remote`
 - `kinds`: the bounded work contracts allowed for the route
 - `fallback`: an explicit policy, either `none` or `remote-unavailable` with a
   named fallback harness and target

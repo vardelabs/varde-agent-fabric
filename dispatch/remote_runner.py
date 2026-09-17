@@ -40,7 +40,6 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
         packet += "\n\n--- BEGIN DIFF ---\n"
         packet += Path(metadata.diff).read_text(encoding="utf-8")
         packet += "\n--- END DIFF ---"
-    worker_kind = "codex" if metadata.harness == "codex" else "local-gemma"
     return ReviewRequest(
         repository=metadata.repository,
         pull_request=metadata.pull_request,
@@ -48,7 +47,7 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
         head_sha=metadata.head_sha,
         paths=metadata.paths,
         kind="reviewer",
-        worker_kind=worker_kind,
+        worker_kind=metadata.harness,
         correlation_id=metadata.correlation_id,
         packet=packet,
         timeout_seconds=metadata.timeout_seconds,

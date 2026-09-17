@@ -30,9 +30,9 @@ cat > "$TMP/routes.json" <<'EOF'
     "fallback/model": {
       "default_harness": "codex",
       "harnesses": ["codex"],
-      "target": "local",
-      "kinds": ["passthrough"],
-      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "remote"}
+      "target": "remote",
+      "kinds": ["review"],
+      "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"}
     }
   }
 }
@@ -92,16 +92,25 @@ check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
-if ! PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/routes.json" \
+cp "$TMP/routes.json" "$TMP/invalid-routes.json"
+python3 - "$TMP/invalid-routes.json" <<'PY'
+import json
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["routes"]["fallback/model"]["target"] = "local"
+path.write_text(json.dumps(data))
+PY
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model fallback/model --routes "$TMP/invalid-routes.json" \
   --kind passthrough --task x --workdir "$TMP/work" --output "$TMP/out-fallback" \
   >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
-  printf 'fallback route dispatch unexpectedly failed\n' >&2
-  cat "$TMP/err-fallback" >&2
-  exit 1
+  printf 'local remote-unavailable route unexpectedly succeeded\n' >&2; exit 1
 fi
-check grep -qF 'fallback=remote-unavailable' "$TMP/out-fallback"
-check grep -qF 'fallback_harness=codex' "$TMP/out-fallback"
-check grep -qF 'fallback_target=remote' "$TMP/out-fallback"
+check grep -qF 'remote primary route' "$TMP/err-fallback"
+check test ! -e "$TMP/out-fallback"
+check test ! -s "$TMP/stdout-fallback"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model test/model --kind passthrough \
   --task x --workdir "$TMP/work" --output "$TMP/out-no-routes" \

@@ -58,7 +58,7 @@ class RouteRegistryTests(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(RouteConfigError, "must change target"):
+        with self.assertRaisesRegex(RouteConfigError, "local codex"):
             RouteRegistry.from_dict(invalid)
 
     def test_registry_routes_are_immutable(self) -> None:
@@ -103,7 +103,7 @@ class RouteRegistryTests(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(RouteConfigError, "must change target"):
+        with self.assertRaisesRegex(RouteConfigError, "local codex"):
             RouteRegistry.from_dict(invalid)
 
     def test_route_names_reject_control_characters(self) -> None:
@@ -192,6 +192,40 @@ class RouteRegistryTests(unittest.TestCase):
         }}}
         with self.assertRaisesRegex(RouteConfigError, "target must be local or remote"):
             RouteRegistry.from_dict(invalid)
+
+    def test_remote_unavailable_requires_remote_primary_and_local_codex_fallback(self) -> None:
+        local_primary = {
+            "schema": "dispatch-routes.v1",
+            "routes": {"model": {
+                "default_harness": "codex",
+                "target": "local",
+                "kinds": ["review"],
+                "fallback": {
+                    "policy": "remote-unavailable",
+                    "harness": "codex",
+                    "target": "local",
+                },
+            }},
+        }
+        with self.assertRaisesRegex(RouteConfigError, "remote primary"):
+            RouteRegistry.from_dict(local_primary)
+
+        remote_non_codex_fallback = {
+            "schema": "dispatch-routes.v1",
+            "routes": {"model": {
+                "default_harness": "codex",
+                "target": "remote",
+                "harnesses": ["codex", "opencode"],
+                "kinds": ["review"],
+                "fallback": {
+                    "policy": "remote-unavailable",
+                    "harness": "opencode",
+                    "target": "local",
+                },
+            }},
+        }
+        with self.assertRaisesRegex(RouteConfigError, "local codex"):
+            RouteRegistry.from_dict(remote_non_codex_fallback)
 
 
 if __name__ == "__main__":
