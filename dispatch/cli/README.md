@@ -8,14 +8,14 @@ configuration, private host paths, or provider secrets. The CLI requires Bash
 ## Contract
 
 ```text
+DISPATCH_CODEX_SANDBOX=workspace-write \
 varde-agent-dispatch \
   --model example/model \
   --routes /path/to/routes.json \
-  --kind passthrough \
+  --kind implement \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
-
 The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
 runtime contract to a backend:
 
@@ -37,14 +37,17 @@ The caller owns authentication, deployment policy, and remote transport. When
 does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
-`--kind passthrough` runs the task as supplied. `--kind review` additionally
+`--kind implement` is the canonical write-capable implementation task.
+`passthrough` remains a legacy compatibility spelling. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
-OpenCode accepts diff attachments only for `review`; passthrough jobs reject a
-supplied diff rather than silently changing task semantics.
-Because passthrough maps to OpenCode's write-capable `build` agent, it also
-requires `DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed.
-The `opencode` adapter maps `review` to OpenCode's `plan` agent and
-`passthrough` to its `build` agent. It requires an explicit model and reads
+Implementation jobs reject a supplied diff rather than silently changing task
+semantics. Codex preserves the
+ungated `passthrough` behavior, inheriting the caller's sandbox (read-only by
+default), while canonical `implement` requires
+`DISPATCH_CODEX_SANDBOX=workspace-write`.
+The OpenCode adapter maps `review` to its `plan` agent and
+`implement` and `passthrough` to its `build` agent. OpenCode implementation jobs require
+`DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.

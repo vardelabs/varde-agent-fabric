@@ -17,7 +17,7 @@ Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind K
 
 Options:
   --harness NAME   Backend name, codex or opencode
-  --kind KIND      Work contract, currently passthrough or review
+  --kind KIND      Work contract, review or implement (passthrough is legacy spelling; behavior is harness-specific)
   --task TEXT      Bounded task prompt
   --workdir DIR    Existing absolute working directory
   --diff FILE      Review input, required for review kind
@@ -97,7 +97,7 @@ fi
 [[ "$workdir" != *$'\n'* && "$workdir" != *$'\r'* ]] || fail '--workdir contains an invalid path'
 
 case "$kind" in
-  passthrough) [[ -z "$diff" ]] || fail '--diff is only valid with --kind review' ;;
+  implement|passthrough) [[ -z "$diff" ]] || fail '--diff is only valid with --kind review' ;;
   review) [[ -n "$diff" && -f "$diff" ]] || fail '--diff must name a regular file for review' ;;
   *) fail "unsupported kind: $kind" 3 ;;
 esac
