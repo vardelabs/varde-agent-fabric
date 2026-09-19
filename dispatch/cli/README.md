@@ -46,7 +46,8 @@ ungated `passthrough` behavior, inheriting the caller's sandbox (read-only by
 default), while canonical `implement` requires
 `DISPATCH_CODEX_SANDBOX=workspace-write`.
 The OpenCode adapter maps `review` to its `plan` agent and
-`implement` and `passthrough` to its `build` agent. It requires an explicit model and reads
+`implement` and `passthrough` to its `build` agent. OpenCode implementation jobs require
+`DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.
