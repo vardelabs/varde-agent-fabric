@@ -9,6 +9,8 @@ REAL_OPENCODE="$(command -v opencode || true)"
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-test.XXXXXX")"
+# The CLI prints readlink -f canonical paths; macOS resolves /var and /tmp to /private.
+TMP="$(cd "$TMP" && pwd -P)"
 trap '[[ -z "${SERVER_PID:-}" ]] || kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/work" "$TMP/caller-home" "$TMP/opencode-home"
