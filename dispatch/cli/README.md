@@ -39,11 +39,25 @@ credentials, provider configuration, or shell aliases.
 
 `--kind passthrough` runs the task as supplied. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
+OpenCode accepts diff attachments only for `review`; passthrough jobs reject a
+supplied diff rather than silently changing task semantics.
 The `opencode` adapter maps `review` to OpenCode's `plan` agent and
 `passthrough` to its `build` agent. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
-fallback.
+fallback. Review diffs are attached with OpenCode's native `--file` option.
+The adapter invokes `--pure`, `--format json`, `--agent`, `--model`, `--dir`,
+and `--file`; the installed CLI help surface is smoke tested when available.
+The adapter output is OpenCode's raw JSONL event stream from `--format json`;
+callers that need the final response must select the final `type=text` event.
+Set `DISPATCH_OPENCODE_HOME` to a dedicated home directory containing only
+the OpenCode configuration and authentication needed for this worker. The
+adapter refuses to use the caller's general home directory, because an
+OpenCode agent with file tools could otherwise read unrelated user credentials.
+This dedicated home reduces credential exposure but is not a full filesystem
+sandbox; the provider auth in it remains readable by the OpenCode process and
+its tools. Use this local harness only for trusted bounded tasks until a
+stronger worker sandbox is supplied by deployment policy.
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an

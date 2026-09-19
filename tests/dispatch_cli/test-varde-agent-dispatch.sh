@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_CODEX_SANDBOX DISPATCH_MAX_TASK_BYTES
+unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_CODEX_SANDBOX DISPATCH_MAX_TASK_BYTES DISPATCH_OPENCODE_HOME
+unset OPENAI_API_KEY OPENCODE_API_KEY OPENCODE_GO_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+unset GEMINI_API_KEY GOOGLE_API_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+unset AZURE_OPENAI_API_KEY COHERE_API_KEY MISTRAL_API_KEY XAI_API_KEY
+REAL_OPENCODE="$(command -v opencode || true)"
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-test.XXXXXX")"
 trap '[[ -z "${SERVER_PID:-}" ]] || kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/work"
+mkdir -p "$TMP/work" "$TMP/caller-home" "$TMP/opencode-home"
 printf 'diff body\n' > "$TMP/change.diff"
 cat > "$TMP/routes.json" <<'EOF'
 {
@@ -95,22 +99,41 @@ check grep -qF 'diff body' "$TMP/out"
 cat > "$TMP/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-agent=''; model=''; workdir=''; prompt=''
-while (($#)); do
-  case "$1" in
-    --agent) agent="$2"; shift 2 ;;
-    --model) model="$2"; shift 2 ;;
-    --dir) workdir="$2"; shift 2 ;;
-    --) shift; prompt="${1:-}"; break ;;
-    *) shift ;;
-  esac
-done
+[[ "${1:-}" == run ]] || exit 91
+shift
+prompt="${1:-}"
+shift
+[[ "${1:-}" == --pure ]] || exit 92
+shift
+[[ "${1:-}" == --format && "${2:-}" == json ]] || exit 93
+shift 2
+[[ "${1:-}" == --agent && "${2:-}" == plan ]] || [[ "${1:-}" == --agent && "${2:-}" == build ]] || exit 94
+agent="$2"
+shift 2
+[[ "${1:-}" == --model ]] || exit 95
+model="$2"
+shift 2
+[[ "${1:-}" == --dir ]] || exit 96
+workdir="$2"
+shift 2
+diff=''
+if [[ "${1:-}" == --file ]]; then diff="$2"; shift 2; fi
+[[ $# -eq 0 ]] || exit 97
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}${OPENCODE_GO_API_KEY:-}" ]] || exit 90
-printf '{"agent":"%s","model":"%s","workdir":"%s","kind":"%s"}\n%s\n' "$agent" "$model" "$workdir" "${DISPATCH_KIND:-}" "$prompt"
+[[ -n "$diff" && -f "$diff" ]] || [[ -z "$diff" ]] || exit 98
+printf '{"type":"text","agent":"%s","model":"%s","workdir":"%s","kind":"%s","diff":"%s","home":"%s","text":"%s"}\n' "$agent" "$model" "$workdir" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$prompt"
+printf '{"type":"step_finish","reason":"stop"}\n'
 EOF
 chmod +x "$TMP/bin/opencode"
 
-if ! DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+if [[ -n "$REAL_OPENCODE" ]]; then
+  real_help="$($REAL_OPENCODE run --help 2>&1)"
+  for flag in --pure --format --agent --model --dir --file; do
+    check grep -q -- "$flag" <<<"$real_help"
+  done
+fi
+
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review \
   --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task opencode-review \
   --workdir "$TMP/work" --output "$TMP/out-opencode-review" >"$TMP/stdout-opencode-review" 2>"$TMP/err-opencode-review"; then
@@ -122,9 +145,11 @@ check test -s "$TMP/out-opencode-review"
 check grep -qF '"agent":"plan"' "$TMP/out-opencode-review"
 check grep -qF '"model":"test/model"' "$TMP/out-opencode-review"
 check grep -qF '"kind":"review"' "$TMP/out-opencode-review"
-check grep -qF 'diff body' "$TMP/out-opencode-review"
+check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-review"
+check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-review"
+check grep -qF '"type":"step_finish"' "$TMP/out-opencode-review"
 
-if ! DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task opencode-build --workdir "$TMP/work" \
   --output "$TMP/out-opencode-build" >"$TMP/stdout-opencode-build" 2>"$TMP/err-opencode-build"; then
@@ -134,6 +159,28 @@ if ! DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forw
 fi
 check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
 check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
+
+if HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
+  --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
+  --output "$TMP/out-opencode-no-home" >"$TMP/stdout-opencode-no-home" 2>"$TMP/err-opencode-no-home"; then
+  printf 'opencode without dedicated home unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'DISPATCH_OPENCODE_HOME' "$TMP/err-opencode-no-home"
+
+mkdir -p "$TMP/caller-home/nested-opencode-home"
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/caller-home/nested-opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-nested" >"$TMP/stdout-opencode-nested" 2>"$TMP/err-opencode-nested"; then
+  printf 'nested opencode home unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'outside the caller home' "$TMP/err-opencode-nested"
+
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind review --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-no-diff" >"$TMP/stdout-opencode-no-diff" 2>"$TMP/err-opencode-no-diff"; then
+  printf 'opencode review without diff unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF -- '--diff' "$TMP/err-opencode-no-diff"
 
 cp "$TMP/routes.json" "$TMP/invalid-routes.json"
 python3 - "$TMP/invalid-routes.json" <<'PY'

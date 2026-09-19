@@ -28,8 +28,14 @@ Each route keeps these axes separate:
 The shipped local adapters are `codex` and `opencode`. `opencode` means the
 OpenCode CLI harness; its provider and exact model remain runtime route policy,
 so OpenCode Go, OpenCode Zen, and other providers are not interchangeable by
-name. The adapter preserves the caller's `HOME` for native OpenCode
-authentication but receives no provider secret through the dispatcher.
+name. The adapter uses the dedicated OpenCode home for native authentication but receives no provider secret through the dispatcher.
+The local adapter requires `DISPATCH_OPENCODE_HOME`, a dedicated OpenCode home
+that does not contain unrelated caller credentials. This is credential-scope
+reduction, not a filesystem sandbox; deployment policy must supply stronger
+containment before using it for untrusted tasks.
+The CLI rejects missing, nested, or non-directory dedicated homes before
+starting the backend. OpenCode review requires a regular diff file; passthrough
+does not accept a diff attachment.
 
 Resolution is model-first. An explicit harness is accepted only when it is
 listed for that model. Missing models, unsupported kinds, malformed routes, and
