@@ -25,6 +25,12 @@ Each route keeps these axes separate:
 - `fallback`: either `none`, or `remote-unavailable` for a remote primary route
   with the local `codex` fallback
 
+The shipped local adapters are `codex` and `opencode`. `opencode` means the
+OpenCode CLI harness; its provider and exact model remain runtime route policy,
+so OpenCode Go, OpenCode Zen, and other providers are not interchangeable by
+name. The adapter preserves the caller's `HOME` for native OpenCode
+authentication but receives no provider secret through the dispatcher.
+
 Resolution is model-first. An explicit harness is accepted only when it is
 listed for that model. Missing models, unsupported kinds, malformed routes, and
 ambiguous fallback policies fail closed. The resolved route records whether the

@@ -16,12 +16,13 @@ varde-agent-dispatch \
   --workdir /path/to/worktree
 ```
 
-The current public backend is `codex`. The dispatcher passes only an explicit
+The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
 runtime contract to a backend:
 
 - `DISPATCH_TASK`
 - `DISPATCH_WORKDIR`
 - `DISPATCH_OUTPUT`
+- `DISPATCH_KIND`
 - optional `DISPATCH_DIFF`
 - optional `DISPATCH_MODEL`
 - optional `DISPATCH_TARGET`
@@ -38,6 +39,11 @@ credentials, provider configuration, or shell aliases.
 
 `--kind passthrough` runs the task as supplied. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
+The `opencode` adapter maps `review` to OpenCode's `plan` agent and
+`passthrough` to its `build` agent. It requires an explicit model and reads
+provider authentication from OpenCode's native user configuration. The
+dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
+fallback.
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an

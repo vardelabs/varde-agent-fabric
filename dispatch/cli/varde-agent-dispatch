@@ -150,7 +150,7 @@ else
   output="$requested_output"
 fi
 
-export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output"
+export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output" DISPATCH_KIND="$kind"
 if [[ -n "$model" ]]; then
   export DISPATCH_MODEL="$model"
 elif [[ -n "${DISPATCH_MODEL:-}" ]]; then
@@ -201,6 +201,7 @@ env -i \
   DISPATCH_TASK="$DISPATCH_TASK" \
   DISPATCH_WORKDIR="$DISPATCH_WORKDIR" \
   DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
+  DISPATCH_KIND="$DISPATCH_KIND" \
   ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
   ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
   "${route_target_arg[@]}" \
