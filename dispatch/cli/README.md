@@ -42,7 +42,8 @@ credentials, provider configuration, or shell aliases.
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 Implementation jobs reject a supplied diff rather than silently changing task
 semantics. Codex preserves the
-legacy read-only `passthrough` behavior, while canonical `implement` requires
+ungated `passthrough` behavior, inheriting the caller's sandbox (read-only by
+default), while canonical `implement` requires
 `DISPATCH_CODEX_SANDBOX=workspace-write`.
 The OpenCode adapter maps `review` to its `plan` agent and
 `implement` and `passthrough` to its `build` agent. It requires an explicit model and reads
