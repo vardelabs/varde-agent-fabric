@@ -15,7 +15,7 @@ cat > "$TMP/routes.json" <<'EOF'
   "routes": {
     "test/model": {
       "default_harness": "codex",
-      "harnesses": ["codex"],
+      "harnesses": ["codex", "opencode"],
       "target": "local",
       "kinds": ["review", "passthrough"],
       "fallback": {"policy": "none"}
@@ -91,6 +91,49 @@ check grep -qF 'overridden=false' "$TMP/out"
 check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
+
+cat > "$TMP/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+agent=''; model=''; workdir=''; prompt=''
+while (($#)); do
+  case "$1" in
+    --agent) agent="$2"; shift 2 ;;
+    --model) model="$2"; shift 2 ;;
+    --dir) workdir="$2"; shift 2 ;;
+    --) shift; prompt="${1:-}"; break ;;
+    *) shift ;;
+  esac
+done
+[[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}${OPENCODE_GO_API_KEY:-}" ]] || exit 90
+printf '{"agent":"%s","model":"%s","workdir":"%s","kind":"%s"}\n%s\n' "$agent" "$model" "$workdir" "${DISPATCH_KIND:-}" "$prompt"
+EOF
+chmod +x "$TMP/bin/opencode"
+
+if ! DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task opencode-review \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-review" >"$TMP/stdout-opencode-review" 2>"$TMP/err-opencode-review"; then
+  printf 'fake opencode review dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-review" >&2
+  exit 1
+fi
+check test -s "$TMP/out-opencode-review"
+check grep -qF '"agent":"plan"' "$TMP/out-opencode-review"
+check grep -qF '"model":"test/model"' "$TMP/out-opencode-review"
+check grep -qF '"kind":"review"' "$TMP/out-opencode-review"
+check grep -qF 'diff body' "$TMP/out-opencode-review"
+
+if ! DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
+  --model test/model --routes "$TMP/routes.json" --task opencode-build --workdir "$TMP/work" \
+  --output "$TMP/out-opencode-build" >"$TMP/stdout-opencode-build" 2>"$TMP/err-opencode-build"; then
+  printf 'fake opencode passthrough dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-build" >&2
+  exit 1
+fi
+check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
+check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
 
 cp "$TMP/routes.json" "$TMP/invalid-routes.json"
 python3 - "$TMP/invalid-routes.json" <<'PY'
