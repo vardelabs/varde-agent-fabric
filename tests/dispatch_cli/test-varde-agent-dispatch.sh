@@ -21,7 +21,7 @@ cat > "$TMP/routes.json" <<'EOF'
       "default_harness": "codex",
       "harnesses": ["codex", "opencode"],
       "target": "local",
-      "kinds": ["review", "passthrough"],
+      "kinds": ["review", "implement", "passthrough"],
       "fallback": {"policy": "none"}
     },
     "caller/model": {
@@ -49,6 +49,8 @@ check bash -n "$CLI"
 check bash -n "$ROOT/dispatch/cli/backends/codex.sh"
 check test -x "$CLI"
 check test -x "$ROOT/dispatch/cli/backends/codex.sh"
+help_text="$($CLI --help 2>&1 || true)"
+check grep -qF 'review or implement' <<<"$help_text"
 
 if "$CLI" --harness missing --kind passthrough --task x --workdir "$TMP/work" 2>"$TMP/err"; then
   printf 'unsupported harness unexpectedly succeeded\n' >&2; exit 1
@@ -159,6 +161,17 @@ if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATC
 fi
 check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
 check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
+
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task opencode-implement --workdir "$TMP/work" \
+  --output "$TMP/out-opencode-implement" >"$TMP/stdout-opencode-implement" 2>"$TMP/err-opencode-implement"; then
+  printf 'fake opencode implement dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-implement" >&2
+  exit 1
+fi
+check grep -qF '"agent":"build"' "$TMP/out-opencode-implement"
+check grep -qF '"kind":"implement"' "$TMP/out-opencode-implement"
 
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
   "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \

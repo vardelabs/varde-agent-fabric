@@ -34,9 +34,9 @@ that does not contain unrelated caller credentials. This is credential-scope
 reduction, not a filesystem sandbox; deployment policy must supply stronger
 containment before using it for untrusted tasks.
 The dispatch path rejects missing, nested, or non-directory dedicated homes
-before OpenCode starts. OpenCode review requires a regular diff file; passthrough
-does not accept a diff attachment and requires explicit
-`DISPATCH_OPENCODE_ALLOW_WRITE=1`.
+before OpenCode starts. OpenCode review requires a regular diff file. The
+documented builder kind is `implement`; `passthrough` remains a compatibility
+alias, and both require explicit `DISPATCH_OPENCODE_ALLOW_WRITE=1`.
 
 Resolution is model-first. An explicit harness is accepted only when it is
 listed for that model. Missing models, unsupported kinds, malformed routes, and

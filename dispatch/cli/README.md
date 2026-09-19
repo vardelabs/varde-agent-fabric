@@ -11,7 +11,7 @@ configuration, private host paths, or provider secrets. The CLI requires Bash
 varde-agent-dispatch \
   --model example/model \
   --routes /path/to/routes.json \
-  --kind passthrough \
+  --kind implement \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
@@ -37,14 +37,16 @@ The caller owns authentication, deployment policy, and remote transport. When
 does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
-`--kind passthrough` runs the task as supplied. `--kind review` additionally
+`--kind implement` runs a write-capable implementation task. `passthrough` is
+retained as a compatibility alias. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 OpenCode accepts diff attachments only for `review`; passthrough jobs reject a
 supplied diff rather than silently changing task semantics.
-Because passthrough maps to OpenCode's write-capable `build` agent, it also
-requires `DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed.
+Because implement maps to OpenCode's write-capable `build` agent, it requires
+`DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed. The compatibility
+alias uses the same gate.
 The `opencode` adapter maps `review` to OpenCode's `plan` agent and
-`passthrough` to its `build` agent. It requires an explicit model and reads
+`implement` and `passthrough` to its `build` agent. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.
