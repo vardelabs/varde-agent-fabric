@@ -64,6 +64,7 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         "DISPATCH_WORKDIR": metadata.workdir,
         "DISPATCH_OUTPUT": str(local_output),
         "DISPATCH_MODEL": metadata.model,
+        "DISPATCH_KIND": "review",
         "DISPATCH_CODEX_SANDBOX": "read-only",
     }
     if metadata.diff is not None:
