@@ -195,16 +195,6 @@ fi
 # Deliberately pass a small, explicit environment. No caller credential or
 # provider configuration is inherited by the backend. Build this as an array
 # so paths and task values cannot split or expand into extra env arguments.
-if [[ "$harness" == opencode ]]; then
-  [[ -n "${DISPATCH_OPENCODE_HOME:-}" && "$DISPATCH_OPENCODE_HOME" = /* && -d "$DISPATCH_OPENCODE_HOME" ]] ||
-    fail 'opencode requires an existing absolute DISPATCH_OPENCODE_HOME' 2
-  [[ -n "${HOME:-}" ]] || fail 'opencode requires a non-empty caller HOME' 2
-  caller_home_real="$(realpath -- "$HOME")"
-  opencode_home_real="$(realpath -- "$DISPATCH_OPENCODE_HOME")"
-  case "$opencode_home_real/" in
-    "$caller_home_real/"*) fail 'DISPATCH_OPENCODE_HOME must be outside the caller home' 2 ;;
-  esac
-fi
 backend_env=(
   "PATH=${PATH:-/usr/bin:/bin}"
   "HOME=${HOME:-}"
@@ -215,6 +205,7 @@ backend_env=(
   "DISPATCH_KIND=$DISPATCH_KIND"
 )
 [[ -n "${DISPATCH_OPENCODE_HOME:-}" ]] && backend_env+=("DISPATCH_OPENCODE_HOME=$DISPATCH_OPENCODE_HOME")
+[[ -n "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" ]] && backend_env+=("DISPATCH_OPENCODE_ALLOW_WRITE=$DISPATCH_OPENCODE_ALLOW_WRITE")
 [[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
 [[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
 backend_env+=("${route_target_arg[@]}" "${route_metadata_args[@]}")

@@ -27,11 +27,14 @@ if [[ -n "$caller_home" ]]; then
       exit 2
       ;;
   esac
+  case "$caller_home_real/" in
+    "$opencode_home_real/"*)
+      printf 'DISPATCH_OPENCODE_HOME must not contain the caller home\n' >&2
+      exit 2
+      ;;
+  esac
 fi
 export HOME="$DISPATCH_OPENCODE_HOME"
-unset OPENAI_API_KEY OPENCODE_API_KEY OPENCODE_GO_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY \
-  GEMINI_API_KEY GOOGLE_API_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
-  AZURE_OPENAI_API_KEY COHERE_API_KEY MISTRAL_API_KEY XAI_API_KEY
 
 command -v opencode >/dev/null 2>&1 || {
   printf 'opencode CLI not found on PATH\n' >&2
@@ -46,7 +49,13 @@ model="$DISPATCH_MODEL"
 
 case "${DISPATCH_KIND:-}" in
   review) agent='plan' ;;
-  passthrough) agent='build' ;;
+  passthrough)
+    [[ "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" == 1 ]] || {
+      printf 'OpenCode passthrough requires DISPATCH_OPENCODE_ALLOW_WRITE=1\n' >&2
+      exit 2
+    }
+    agent='build'
+    ;;
   *) printf 'unsupported OpenCode dispatch kind\n' >&2; exit 2 ;;
 esac
 

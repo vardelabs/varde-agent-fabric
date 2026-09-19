@@ -35,7 +35,8 @@ reduction, not a filesystem sandbox; deployment policy must supply stronger
 containment before using it for untrusted tasks.
 The CLI rejects missing, nested, or non-directory dedicated homes before
 starting the backend. OpenCode review requires a regular diff file; passthrough
-does not accept a diff attachment.
+does not accept a diff attachment and requires explicit
+`DISPATCH_OPENCODE_ALLOW_WRITE=1`.
 
 Resolution is model-first. An explicit harness is accepted only when it is
 listed for that model. Missing models, unsupported kinds, malformed routes, and

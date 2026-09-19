@@ -149,7 +149,7 @@ check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-review"
 check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-review"
 check grep -qF '"type":"step_finish"' "$TMP/out-opencode-review"
 
-if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task opencode-build --workdir "$TMP/work" \
   --output "$TMP/out-opencode-build" >"$TMP/stdout-opencode-build" 2>"$TMP/err-opencode-build"; then
@@ -159,6 +159,13 @@ if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATC
 fi
 check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
 check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
+
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP" DISPATCH_OPENCODE_ALLOW_WRITE=1 PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-ancestor" >"$TMP/stdout-opencode-ancestor" 2>"$TMP/err-opencode-ancestor"; then
+  printf 'ancestor opencode home unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'must not contain the caller home' "$TMP/err-opencode-ancestor"
 
 if HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \

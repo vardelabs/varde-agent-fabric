@@ -41,6 +41,8 @@ credentials, provider configuration, or shell aliases.
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 OpenCode accepts diff attachments only for `review`; passthrough jobs reject a
 supplied diff rather than silently changing task semantics.
+Because passthrough maps to OpenCode's write-capable `build` agent, it also
+requires `DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed.
 The `opencode` adapter maps `review` to OpenCode's `plan` agent and
 `passthrough` to its `build` agent. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
