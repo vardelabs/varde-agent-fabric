@@ -120,7 +120,7 @@ if (( $(LC_ALL=C printf '%s' "$task" | wc -c) > MAX_TASK_BYTES )); then fail 'ta
 diff_bytes=0
 if [[ -n "$diff" ]]; then
   diff="$(readlink -f -- "$diff")"
-  diff_bytes="$(wc -c < "$diff")"
+  diff_bytes="$(wc -c < "$diff" | tr -d '[:space:]')"
   [[ "$diff_bytes" =~ ^[0-9]+$ ]] || fail 'could not determine diff size'
   if (( diff_bytes > MAX_TASK_BYTES )); then fail 'diff exceeds DISPATCH_MAX_TASK_BYTES'; fi
   if (( diff_bytes + $(LC_ALL=C printf '%s' "$task" | wc -c) + 40 > MAX_TASK_BYTES )); then
@@ -208,7 +208,7 @@ backend_env=(
 [[ -n "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" ]] && backend_env+=("DISPATCH_OPENCODE_ALLOW_WRITE=$DISPATCH_OPENCODE_ALLOW_WRITE")
 [[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
 [[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
-backend_env+=("${route_target_arg[@]}" "${route_metadata_args[@]}")
+backend_env+=(${route_target_arg[@]+"${route_target_arg[@]}"} ${route_metadata_args[@]+"${route_metadata_args[@]}"})
 [[ -n "$sandbox" ]] && backend_env+=("DISPATCH_CODEX_SANDBOX=$sandbox")
 env -i "${backend_env[@]}" "$backend"
 fi
