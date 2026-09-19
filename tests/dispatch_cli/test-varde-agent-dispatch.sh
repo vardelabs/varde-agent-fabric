@@ -98,6 +98,13 @@ check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
+  --output "$TMP/out-codex-implement-denied" >"$TMP/stdout-codex-implement-denied" 2>"$TMP/err-codex-implement-denied"; then
+  printf 'fake codex implement without write sandbox unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'Codex implement requires DISPATCH_CODEX_SANDBOX=workspace-write' "$TMP/err-codex-implement-denied"
+
 if ! DISPATCH_CODEX_SANDBOX=workspace-write PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
   --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
   --output "$TMP/out-codex-implement" >"$TMP/stdout-codex-implement" 2>"$TMP/err-codex-implement"; then

@@ -8,6 +8,7 @@ configuration, private host paths, or provider secrets. The CLI requires Bash
 ## Contract
 
 ```text
+DISPATCH_CODEX_SANDBOX=workspace-write \
 varde-agent-dispatch \
   --model example/model \
   --routes /path/to/routes.json \
@@ -15,6 +16,8 @@ varde-agent-dispatch \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
+For a Codex route, implementation also requires
+`DISPATCH_CODEX_SANDBOX=workspace-write`.
 
 The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
 runtime contract to a backend:
@@ -37,15 +40,14 @@ The caller owns authentication, deployment policy, and remote transport. When
 does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
-`--kind implement` runs a write-capable implementation task. `passthrough` is
-retained as a compatibility alias. `--kind review` additionally
+`--kind implement` is the canonical write-capable implementation task.
+`passthrough` remains a legacy compatibility spelling. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
-OpenCode accepts diff attachments only for `review`; implementation jobs reject
-a supplied diff rather than silently changing task semantics. This applies to
-both `implement` and its `passthrough` compatibility alias.
-Because implement maps to OpenCode's write-capable `build` agent, it requires
-`DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed. The compatibility
-alias uses the same gate.
+Implementation jobs reject a supplied diff rather than silently changing task
+semantics. OpenCode maps both builder spellings to its write-capable `build`
+agent and requires `DISPATCH_OPENCODE_ALLOW_WRITE=1`. Codex preserves the
+legacy read-only `passthrough` behavior, while canonical `implement` requires
+`DISPATCH_CODEX_SANDBOX=workspace-write`.
 The `opencode` adapter maps `review` to OpenCode's `plan` agent and
 `implement` and `passthrough` to its `build` agent. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
