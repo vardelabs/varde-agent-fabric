@@ -16,7 +16,7 @@ usage() {
 Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind KIND --task TEXT --workdir DIR [options]
 
 Options:
-  --harness NAME   Backend name, currently codex
+  --harness NAME   Backend name, codex or opencode
   --kind KIND      Work contract, currently passthrough or review
   --task TEXT      Bounded task prompt
   --workdir DIR    Existing absolute working directory
@@ -150,7 +150,7 @@ else
   output="$requested_output"
 fi
 
-export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output"
+export DISPATCH_TASK="$task" DISPATCH_WORKDIR="$workdir" DISPATCH_OUTPUT="$backend_output" DISPATCH_KIND="$kind"
 if [[ -n "$model" ]]; then
   export DISPATCH_MODEL="$model"
 elif [[ -n "${DISPATCH_MODEL:-}" ]]; then
@@ -193,20 +193,24 @@ if [[ -n "$route_target" ]]; then
 fi
 
 # Deliberately pass a small, explicit environment. No caller credential or
-# provider configuration is inherited by the backend.
-env -i \
-  PATH="${PATH:-/usr/bin:/bin}" \
-  HOME="${HOME:-}" \
-  TMPDIR="${TMPDIR:-/tmp}" \
-  DISPATCH_TASK="$DISPATCH_TASK" \
-  DISPATCH_WORKDIR="$DISPATCH_WORKDIR" \
-  DISPATCH_OUTPUT="$DISPATCH_OUTPUT" \
-  ${DISPATCH_DIFF:+DISPATCH_DIFF="$DISPATCH_DIFF"} \
-  ${DISPATCH_MODEL:+DISPATCH_MODEL="$DISPATCH_MODEL"} \
-  "${route_target_arg[@]}" \
-  "${route_metadata_args[@]}" \
-  ${sandbox:+DISPATCH_CODEX_SANDBOX="$sandbox"} \
-  "$backend"
+# provider configuration is inherited by the backend. Build this as an array
+# so paths and task values cannot split or expand into extra env arguments.
+backend_env=(
+  "PATH=${PATH:-/usr/bin:/bin}"
+  "HOME=${HOME:-}"
+  "TMPDIR=${TMPDIR:-/tmp}"
+  "DISPATCH_TASK=$DISPATCH_TASK"
+  "DISPATCH_WORKDIR=$DISPATCH_WORKDIR"
+  "DISPATCH_OUTPUT=$DISPATCH_OUTPUT"
+  "DISPATCH_KIND=$DISPATCH_KIND"
+)
+[[ -n "${DISPATCH_OPENCODE_HOME:-}" ]] && backend_env+=("DISPATCH_OPENCODE_HOME=$DISPATCH_OPENCODE_HOME")
+[[ -n "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" ]] && backend_env+=("DISPATCH_OPENCODE_ALLOW_WRITE=$DISPATCH_OPENCODE_ALLOW_WRITE")
+[[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
+[[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
+backend_env+=("${route_target_arg[@]}" "${route_metadata_args[@]}")
+[[ -n "$sandbox" ]] && backend_env+=("DISPATCH_CODEX_SANDBOX=$sandbox")
+env -i "${backend_env[@]}" "$backend"
 fi
 
 [[ -s "$backend_output" ]] || fail 'backend completed without a non-empty output artifact' 5
