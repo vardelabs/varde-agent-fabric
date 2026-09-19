@@ -33,8 +33,8 @@ The local adapter requires `DISPATCH_OPENCODE_HOME`, a dedicated OpenCode home
 that does not contain unrelated caller credentials. This is credential-scope
 reduction, not a filesystem sandbox; deployment policy must supply stronger
 containment before using it for untrusted tasks.
-The CLI rejects missing, nested, or non-directory dedicated homes before
-starting the backend. OpenCode review requires a regular diff file; passthrough
+The dispatch path rejects missing, nested, or non-directory dedicated homes
+before OpenCode starts. OpenCode review requires a regular diff file; passthrough
 does not accept a diff attachment and requires explicit
 `DISPATCH_OPENCODE_ALLOW_WRITE=1`.
 

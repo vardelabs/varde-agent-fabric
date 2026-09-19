@@ -160,12 +160,26 @@ fi
 check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
 check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
 
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-no-write" >"$TMP/stdout-opencode-no-write" 2>"$TMP/err-opencode-no-write"; then
+  printf 'opencode passthrough without write opt-in unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'DISPATCH_OPENCODE_ALLOW_WRITE=1' "$TMP/err-opencode-no-write"
+
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP" DISPATCH_OPENCODE_ALLOW_WRITE=1 PATH="$TMP/bin:/usr/bin:/bin" \
   "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
   --workdir "$TMP/work" --output "$TMP/out-opencode-ancestor" >"$TMP/stdout-opencode-ancestor" 2>"$TMP/err-opencode-ancestor"; then
   printf 'ancestor opencode home unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'must not contain the caller home' "$TMP/err-opencode-ancestor"
+
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME=/ DISPATCH_OPENCODE_ALLOW_WRITE=1 PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-root" >"$TMP/stdout-opencode-root" 2>"$TMP/err-opencode-root"; then
+  printf 'root opencode home unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'filesystem root' "$TMP/err-opencode-root"
 
 if HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
   --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \

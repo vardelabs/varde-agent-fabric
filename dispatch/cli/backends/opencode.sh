@@ -18,22 +18,26 @@ caller_home="${HOME:-}"
   printf 'OpenCode requires a non-empty caller home\n' >&2
   exit 2
 }
-if [[ -n "$caller_home" ]]; then
-  caller_home_real="$(realpath -- "$caller_home")"
-  opencode_home_real="$(realpath -- "$DISPATCH_OPENCODE_HOME")"
-  case "$opencode_home_real/" in
-    "$caller_home_real/"*)
-      printf 'DISPATCH_OPENCODE_HOME must be outside the caller home\n' >&2
-      exit 2
-      ;;
-  esac
-  case "$caller_home_real/" in
-    "$opencode_home_real/"*)
-      printf 'DISPATCH_OPENCODE_HOME must not contain the caller home\n' >&2
-      exit 2
-      ;;
-  esac
+caller_home_real="$(realpath -- "$caller_home")"
+opencode_home_real="$(realpath -- "$DISPATCH_OPENCODE_HOME")"
+if [[ "$caller_home_real" == / || "$opencode_home_real" == / ]]; then
+  printf 'OpenCode homes must not be the filesystem root\n' >&2
+  exit 2
 fi
+caller_home_real="${caller_home_real%/}"
+opencode_home_real="${opencode_home_real%/}"
+case "$opencode_home_real/" in
+  "$caller_home_real/"*)
+    printf 'DISPATCH_OPENCODE_HOME must be outside the caller home\n' >&2
+    exit 2
+    ;;
+esac
+case "$caller_home_real/" in
+  "$opencode_home_real/"*)
+    printf 'DISPATCH_OPENCODE_HOME must not contain the caller home\n' >&2
+    exit 2
+    ;;
+esac
 export HOME="$DISPATCH_OPENCODE_HOME"
 
 command -v opencode >/dev/null 2>&1 || {
