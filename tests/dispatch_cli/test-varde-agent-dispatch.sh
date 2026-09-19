@@ -21,7 +21,7 @@ cat > "$TMP/routes.json" <<'EOF'
       "default_harness": "codex",
       "harnesses": ["codex", "opencode"],
       "target": "local",
-      "kinds": ["review", "passthrough"],
+      "kinds": ["review", "implement", "passthrough"],
       "fallback": {"policy": "none"}
     },
     "caller/model": {
@@ -49,6 +49,8 @@ check bash -n "$CLI"
 check bash -n "$ROOT/dispatch/cli/backends/codex.sh"
 check test -x "$CLI"
 check test -x "$ROOT/dispatch/cli/backends/codex.sh"
+help_text="$($CLI --help 2>&1 || true)"
+check grep -qF 'review or implement' <<<"$help_text"
 
 if "$CLI" --harness missing --kind passthrough --task x --workdir "$TMP/work" 2>"$TMP/err"; then
   printf 'unsupported harness unexpectedly succeeded\n' >&2; exit 1
@@ -95,6 +97,22 @@ check grep -qF 'overridden=false' "$TMP/out"
 check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
+
+if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
+  --output "$TMP/out-codex-implement-denied" >"$TMP/stdout-codex-implement-denied" 2>"$TMP/err-codex-implement-denied"; then
+  printf 'fake codex implement without write sandbox unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'Codex implement requires DISPATCH_CODEX_SANDBOX=workspace-write' "$TMP/err-codex-implement-denied"
+
+if ! DISPATCH_CODEX_SANDBOX=workspace-write PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
+  --output "$TMP/out-codex-implement" >"$TMP/stdout-codex-implement" 2>"$TMP/err-codex-implement"; then
+  printf 'fake codex implement dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-codex-implement" >&2
+  exit 1
+fi
+check grep -qF 'sandbox=workspace-write' "$TMP/out-codex-implement"
 
 cat > "$TMP/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
@@ -160,12 +178,30 @@ fi
 check grep -qF '"agent":"build"' "$TMP/out-opencode-build"
 check grep -qF '"kind":"passthrough"' "$TMP/out-opencode-build"
 
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task opencode-implement --workdir "$TMP/work" \
+  --output "$TMP/out-opencode-implement" >"$TMP/stdout-opencode-implement" 2>"$TMP/err-opencode-implement"; then
+  printf 'fake opencode implement dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-implement" >&2
+  exit 1
+fi
+check grep -qF '"agent":"build"' "$TMP/out-opencode-implement"
+check grep -qF '"kind":"implement"' "$TMP/out-opencode-implement"
+
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
-  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  "$CLI" --harness opencode --kind implement --model test/model --routes "$TMP/routes.json" --task x \
   --workdir "$TMP/work" --output "$TMP/out-opencode-no-write" >"$TMP/stdout-opencode-no-write" 2>"$TMP/err-opencode-no-write"; then
-  printf 'opencode passthrough without write opt-in unexpectedly succeeded\n' >&2; exit 1
+  printf 'opencode implement without write opt-in unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'DISPATCH_OPENCODE_ALLOW_WRITE=1' "$TMP/err-opencode-no-write"
+
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-passthrough-no-write" >"$TMP/stdout-opencode-passthrough-no-write" 2>"$TMP/err-opencode-passthrough-no-write"; then
+  printf 'opencode passthrough without write opt-in unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'OpenCode implementation requires DISPATCH_OPENCODE_ALLOW_WRITE=1 (kind: passthrough)' "$TMP/err-opencode-passthrough-no-write"
 
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP" DISPATCH_OPENCODE_ALLOW_WRITE=1 PATH="$TMP/bin:/usr/bin:/bin" \
   "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \

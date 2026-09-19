@@ -59,10 +59,11 @@ The public CLI resolves model-first routes from the supplied registry. The
 example registry uses the shipped `codex` backend:
 
 ```bash
+DISPATCH_CODEX_SANDBOX=workspace-write \
 dispatch/cli/varde-agent-dispatch \
   --model example/model \
   --routes /path/to/routes.json \
-  --kind passthrough \
+  --kind implement \
   --task "Run the bounded task" \
   --workdir /path/to/workdir
 ```

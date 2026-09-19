@@ -4,7 +4,7 @@
     "example/model": {
       "default_harness": "codex",
       "target": "local",
-      "kinds": ["review", "passthrough"],
+      "kinds": ["review", "implement", "passthrough"],
       "fallback": {
         "policy": "none"
       }
