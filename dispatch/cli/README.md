@@ -16,9 +16,6 @@ varde-agent-dispatch \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
-For a Codex route, implementation also requires
-`DISPATCH_CODEX_SANDBOX=workspace-write`.
-
 The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
 runtime contract to a backend:
 
@@ -44,11 +41,10 @@ credentials, provider configuration, or shell aliases.
 `passthrough` remains a legacy compatibility spelling. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 Implementation jobs reject a supplied diff rather than silently changing task
-semantics. OpenCode maps both builder spellings to its write-capable `build`
-agent and requires `DISPATCH_OPENCODE_ALLOW_WRITE=1`. Codex preserves the
+semantics. Codex preserves the
 legacy read-only `passthrough` behavior, while canonical `implement` requires
 `DISPATCH_CODEX_SANDBOX=workspace-write`.
-The `opencode` adapter maps `review` to OpenCode's `plan` agent and
+The OpenCode adapter maps `review` to its `plan` agent and
 `implement` and `passthrough` to its `build` agent. It requires an explicit model and reads
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex

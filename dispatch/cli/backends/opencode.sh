@@ -55,7 +55,7 @@ case "${DISPATCH_KIND:-}" in
   review) agent='plan' ;;
   implement|passthrough)
     [[ "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" == 1 ]] || {
-      printf 'OpenCode implement requires DISPATCH_OPENCODE_ALLOW_WRITE=1\n' >&2
+      printf 'OpenCode implementation requires DISPATCH_OPENCODE_ALLOW_WRITE=1 (kind: %s)\n' "$DISPATCH_KIND" >&2
       exit 2
     }
     agent='build'
