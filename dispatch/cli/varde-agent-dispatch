@@ -208,7 +208,8 @@ backend_env=(
 [[ -n "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" ]] && backend_env+=("DISPATCH_OPENCODE_ALLOW_WRITE=$DISPATCH_OPENCODE_ALLOW_WRITE")
 [[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
 [[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
-backend_env+=(${route_target_arg[@]+"${route_target_arg[@]}"} ${route_metadata_args[@]+"${route_metadata_args[@]}"})
+if ((${#route_target_arg[@]})); then backend_env+=("${route_target_arg[@]}"); fi
+if ((${#route_metadata_args[@]})); then backend_env+=("${route_metadata_args[@]}"); fi
 [[ -n "$sandbox" ]] && backend_env+=("DISPATCH_CODEX_SANDBOX=$sandbox")
 env -i "${backend_env[@]}" "$backend"
 fi
