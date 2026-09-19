@@ -196,6 +196,13 @@ if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TM
 fi
 check grep -qF 'DISPATCH_OPENCODE_ALLOW_WRITE=1' "$TMP/err-opencode-no-write"
 
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-passthrough-no-write" >"$TMP/stdout-opencode-passthrough-no-write" 2>"$TMP/err-opencode-passthrough-no-write"; then
+  printf 'opencode passthrough without write opt-in unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'OpenCode implementation requires DISPATCH_OPENCODE_ALLOW_WRITE=1 (kind: passthrough)' "$TMP/err-opencode-passthrough-no-write"
+
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP" DISPATCH_OPENCODE_ALLOW_WRITE=1 PATH="$TMP/bin:/usr/bin:/bin" \
   "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
   --workdir "$TMP/work" --output "$TMP/out-opencode-ancestor" >"$TMP/stdout-opencode-ancestor" 2>"$TMP/err-opencode-ancestor"; then
