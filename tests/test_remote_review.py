@@ -58,6 +58,11 @@ class RemoteReviewTests(unittest.TestCase):
         payload["unexpected"] = True
         with self.assertRaises(ContractError): ReviewRequest.from_dict(payload)
 
+    def test_contract_accepts_opencode_worker_identity(self):
+        value = request("opencode")
+        self.assertEqual(value.worker_kind, "opencode")
+        self.assertEqual(ReviewArtifact.from_dict(artifact(value)).worker_kind, "opencode")
+
     def test_contract_rejects_non_integer_pull_request_numbers(self):
         for value in ("7", None, 7.5, True):
             with self.subTest(value=value):
