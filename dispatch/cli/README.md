@@ -40,8 +40,9 @@ credentials, provider configuration, or shell aliases.
 `--kind implement` runs a write-capable implementation task. `passthrough` is
 retained as a compatibility alias. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
-OpenCode accepts diff attachments only for `review`; passthrough jobs reject a
-supplied diff rather than silently changing task semantics.
+OpenCode accepts diff attachments only for `review`; implementation jobs reject
+a supplied diff rather than silently changing task semantics. This applies to
+both `implement` and its `passthrough` compatibility alias.
 Because implement maps to OpenCode's write-capable `build` agent, it requires
 `DISPATCH_OPENCODE_ALLOW_WRITE=1`; the default is fail-closed. The compatibility
 alias uses the same gate.

@@ -24,6 +24,17 @@ case "$sandbox_mode" in
   *) printf 'DISPATCH_CODEX_SANDBOX is invalid\n' >&2; exit 2 ;;
 esac
 
+case "${DISPATCH_KIND:-}" in
+  review|passthrough) ;;
+  implement)
+    [[ "$sandbox_mode" == workspace-write ]] || {
+      printf 'Codex implement requires DISPATCH_CODEX_SANDBOX=workspace-write\n' >&2
+      exit 2
+    }
+    ;;
+  *) printf 'unsupported Codex dispatch kind\n' >&2; exit 2 ;;
+esac
+
 prompt="$DISPATCH_TASK"
 if [[ -n "${DISPATCH_DIFF:-}" ]]; then
   diff_content="$(cat -- "$DISPATCH_DIFF")"

@@ -98,6 +98,15 @@ check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 
+if ! DISPATCH_CODEX_SANDBOX=workspace-write PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
+  --output "$TMP/out-codex-implement" >"$TMP/stdout-codex-implement" 2>"$TMP/err-codex-implement"; then
+  printf 'fake codex implement dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-codex-implement" >&2
+  exit 1
+fi
+check grep -qF 'sandbox=workspace-write' "$TMP/out-codex-implement"
+
 cat > "$TMP/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -174,9 +183,9 @@ check grep -qF '"agent":"build"' "$TMP/out-opencode-implement"
 check grep -qF '"kind":"implement"' "$TMP/out-opencode-implement"
 
 if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
-  "$CLI" --harness opencode --kind passthrough --model test/model --routes "$TMP/routes.json" --task x \
+  "$CLI" --harness opencode --kind implement --model test/model --routes "$TMP/routes.json" --task x \
   --workdir "$TMP/work" --output "$TMP/out-opencode-no-write" >"$TMP/stdout-opencode-no-write" 2>"$TMP/err-opencode-no-write"; then
-  printf 'opencode passthrough without write opt-in unexpectedly succeeded\n' >&2; exit 1
+  printf 'opencode implement without write opt-in unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'DISPATCH_OPENCODE_ALLOW_WRITE=1' "$TMP/err-opencode-no-write"
 
