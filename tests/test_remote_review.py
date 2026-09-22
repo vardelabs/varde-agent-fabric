@@ -186,6 +186,14 @@ class RemoteReviewTests(unittest.TestCase):
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(b"not-json"))
         with self.assertRaisesRegex(GatewayError, "malformed"): client.submit(req)
 
+        error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 400, "bad request", Message(), None)
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaisesRegex(
+            GatewayError,
+            "gateway rejected review request \(HTTP 400\).*verify review route contract and required identity/path metadata",
+        ):
+            client.submit(req)
+
         error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 401, "unauthorized", Message(), None)
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
         with self.assertRaisesRegex(GatewayError, "HTTP 401"): client.submit(req)

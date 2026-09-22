@@ -100,11 +100,19 @@ class GatewayClient:
                     status = response.status
                     if status in {502, 503, 504}:
                         raise GatewayUnavailable(f"gateway returned HTTP {status}")
+                    if status == 400:
+                        raise GatewayError(
+                            "gateway rejected review request (HTTP 400); verify review route contract and required identity/path metadata"
+                        )
                     raise GatewayError(f"gateway returned HTTP {status}")
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             if exc.code in {502, 503, 504}:
                 raise GatewayUnavailable(f"gateway returned HTTP {exc.code}") from exc
+            if exc.code == 400:
+                raise GatewayError(
+                    "gateway rejected review request (HTTP 400); verify review route contract and required identity/path metadata"
+                ) from exc
             raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             raise GatewayUnavailable("gateway unavailable") from exc
