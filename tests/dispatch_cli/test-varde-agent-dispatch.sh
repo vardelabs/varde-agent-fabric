@@ -70,12 +70,20 @@ cat > "$TMP/bin/codex" <<'EOF'
 set -euo pipefail
 output=''
 prompt=''
+for arg in "$@"; do
+  [[ "$arg" != *'diff body'* && "$arg" != *'private-task-sentinel'* ]] || exit 94
+done
 while (($#)); do
   if [[ "$1" == '-o' ]]; then output="$2"; shift 2
-  elif [[ "$1" == '--' ]]; then shift; prompt="${1:-}"; break
+  elif [[ "$1" == '--' ]]; then
+    shift
+    [[ $# -eq 1 && "$1" == '-' ]] || exit 92
+    prompt="$(cat)"
+    break
   else shift
   fi
 done
+[[ "$(printenv)" != *'diff body'* && "$(printenv)" != *'private-task-sentinel'* ]] || exit 93
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
 printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" > "$output"
 printf '%s\n' "$prompt" >> "$output"
@@ -84,7 +92,7 @@ chmod +x "$TMP/bin/codex"
 
 if ! DISPATCH_CODEX_SANDBOX=workspace-write DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --kind review \
-  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task x --workdir "$TMP/work" \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task private-task-sentinel --workdir "$TMP/work" \
   --output "$TMP/out" >"$TMP/stdout" 2>"$TMP/err"; then
   printf 'fake codex dispatch unexpectedly failed\n' >&2
   cat "$TMP/err" >&2
@@ -99,6 +107,7 @@ check grep -qF 'overridden=false' "$TMP/out"
 check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
+check grep -qF 'private-task-sentinel' "$TMP/out"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
   --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \

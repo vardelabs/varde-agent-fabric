@@ -43,5 +43,6 @@ if [[ -n "${DISPATCH_DIFF:-}" ]]; then
   prompt+=$'\n--- END DIFF ---'
 fi
 
-args=(codex exec --ignore-user-config --skip-git-repo-check --model "$model" --sandbox "$sandbox_mode" -C "$DISPATCH_WORKDIR" -o "$DISPATCH_OUTPUT" -- "$prompt")
-"${args[@]}" </dev/null >&2
+unset DISPATCH_TASK DISPATCH_DIFF
+args=(codex exec --ignore-user-config --skip-git-repo-check --model "$model" --sandbox "$sandbox_mode" -C "$DISPATCH_WORKDIR" -o "$DISPATCH_OUTPUT" -- -)
+printf '%s' "$prompt" | "${args[@]}" >&2
