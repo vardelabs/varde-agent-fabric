@@ -99,13 +99,17 @@ class ImplementTests(unittest.TestCase):
         from http.client import HTTPMessage
         req = urllib.request.Request('https://gateway.example/v1/implementations', data=b'{}',
                                      headers={'Authorization': 'Bearer secret'})
-        client = GatewayClient('https://gateway.example', 'secret')
-        handlers = [item for item in getattr(getattr(client.opener, '__self__'), 'handlers')
-                    if isinstance(item, _NoRedirect)]
-        self.assertEqual(len(handlers), 1)
-        self.assertIsNone(handlers[0].redirect_request(
-            req, io.BytesIO(), 302, 'Found', HTTPMessage(),
-            'https://other.example/steal'))
+        import ssl
+        for label, client in (('default', GatewayClient('https://gateway.example', 'secret')),
+                              ('ca', GatewayClient('https://gateway.example', 'secret',
+                                                   ssl_context=ssl.create_default_context()))):
+            with self.subTest(opener=label):
+                handlers = [item for item in getattr(getattr(client.opener, '__self__'), 'handlers')
+                            if isinstance(item, _NoRedirect)]
+                self.assertEqual(len(handlers), 1)
+                self.assertIsNone(handlers[0].redirect_request(
+                    req, io.BytesIO(), 302, 'Found', HTTPMessage(),
+                    'https://other.example/steal'))
 
     def test_remote_error_never_falls_back(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:

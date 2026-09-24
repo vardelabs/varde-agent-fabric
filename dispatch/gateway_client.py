@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import hashlib
 import http.client
+import ssl as _ssl
 import urllib.error
 import urllib.request
 from typing import Callable
@@ -26,14 +27,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 class GatewayClient:
-    def __init__(self, base_url: str, token: str, *, opener: Callable | None = None, max_response_bytes: int = MAX_TRANSPORT_BYTES) -> None:
+    def __init__(self, base_url: str, token: str, *, opener: Callable | None = None,
+                 max_response_bytes: int = MAX_TRANSPORT_BYTES, ssl_context: "_ssl.SSLContext | None" = None) -> None:
         if not base_url.startswith("https://"):
             raise ValueError("gateway must use HTTPS")
         if not token or len(token) > 4096:
             raise ValueError("gateway token is required and bounded")
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.opener = opener if opener is not None else urllib.request.build_opener(_NoRedirect()).open
+        if opener is None:
+            handlers: list = []
+            if ssl_context is not None:
+                handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
+            handlers.append(_NoRedirect())
+            opener = urllib.request.build_opener(*handlers).open
+        self.opener = opener
         self.max_response_bytes = max_response_bytes
 
     def submit_implementation(self, request: ImplementRequest) -> ImplementArtifact:
@@ -47,10 +55,15 @@ class GatewayClient:
         )
         try:
             with self.opener(http_request, timeout=request.timeout_seconds) as response:
-                if getattr(response, "status", 200) != 200:
-                    raise GatewayError(f"gateway returned HTTP {response.status}")
+                status = getattr(response, "status", 200)
+                if status != 200:
+                    if status in {502, 503, 504}:
+                        raise GatewayUnavailable(f"gateway returned HTTP {status}")
+                    raise GatewayError(f"gateway returned HTTP {status}")
                 raw = response.read(MAX_IMPLEMENT_BYTES + 1)
         except urllib.error.HTTPError as exc:
+            if exc.code in {502, 503, 504}:
+                raise GatewayUnavailable(f"gateway returned HTTP {exc.code}") from exc
             raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             raise GatewayUnavailable("gateway unavailable") from exc

@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import urllib.request
 import ssl
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
@@ -96,13 +95,11 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
 
 
 def _gateway_client() -> GatewayClient:
-    opener = urllib.request.urlopen
+    context = None
     ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
     if ca_file:
         context = ssl.create_default_context(cafile=ca_file)
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context)).open
-        return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"], opener=opener)
-    return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"])
+    return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"], ssl_context=context)
 
 
 def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -> ReviewArtifact:

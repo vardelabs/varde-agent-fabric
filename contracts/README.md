@@ -36,6 +36,8 @@ file object is `path`, `content`). It is not a wire request field.
 `after_text` as null or UTF-8 text), `model_output`, `finish_reason`
 (`completed`), `fallback` (null), and nonnegative `latency_ms`. Request and
 artifact JSON are each capped at 320 KiB. The gateway client checks all four
-identity fields including the locally computed snapshot digest and restricts
-changed paths to the supplied snapshot. The public runner returns the artifact
-only. It does not apply, commit, or push the proposed changes.
+identity fields including the locally computed snapshot digest, and binds every
+change to the snapshot: a modified or deleted path must carry the matching
+preimage hash, while a created path carries a null preimage. Changes never
+apply, commit, or push automatically. The public runner returns the artifact
+only.
