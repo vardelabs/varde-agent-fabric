@@ -349,22 +349,34 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
   -addext subjectAltName=DNS:localhost -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
   >/dev/null 2>&1
 cat > "$TMP/https-gateway.py" <<'PY'
-import http.server, json, ssl, sys
+import hashlib, http.server, json, ssl, sys
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
-        assert self.path == "/v1/reviews"
         assert self.headers["Authorization"] == "Bearer cli-test-token"
         assert request["worker_kind"] == "codex"
-        body = json.dumps({
+        if self.path == "/v1/implementations":
+            files = sorted(request["files"], key=lambda item: item["path"])
+            digest = hashlib.sha256(json.dumps(files, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            changes = [] if request["task"] == "no-op" else [{
+                "path": files[0]["path"], "before_sha256": hashlib.sha256(files[0]["content"].encode()).hexdigest(),
+                "after_text": "after"}]
+            body = json.dumps({"schema":"implement-artifact.v1", "repository":request["repository"],
+                "worker_kind":"codex", "correlation_id":request["correlation_id"],
+                "snapshot_sha256":digest, "provider":"codex-test", "execution_location":"cluster",
+                "changes":changes, "model_output":"done", "finish_reason":"completed",
+                "fallback":None, "latency_ms":1}).encode()
+        else:
+            assert self.path == "/v1/reviews"
+            body = json.dumps({
             "schema": "review-artifact.v1", "repository": request["repository"],
             "pull_request": request["pull_request"], "base_sha": request["base_sha"],
             "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
             "execution_location": "cluster", "provider": "codex-test",
             "correlation_id": request["correlation_id"], "findings": [],
             "finish_reason": "completed", "fallback": None, "latency_ms": 1,
-        }).encode()
+            }).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
     def log_message(self, *_): pass
@@ -393,5 +405,22 @@ fi
 check test -s "$TMP/out-remote"
 check grep -qF '"execution_location":"cluster"' "$TMP/out-remote"
 check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
+
+printf 'before' > "$TMP/work/selected.txt"
+cat > "$TMP/implement-routes.json" <<'EOF'
+{"schema":"dispatch-routes.v1","routes":{"remote/model":{"default_harness":"codex","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}}}}
+EOF
+for scenario in change no-op; do
+  status=0
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+    PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
+    --repository vardelabs/example --correlation-id cli-implement --path selected.txt --task "$scenario" \
+    --workdir "$TMP/work" --output "$TMP/out-implement-$scenario" >"$TMP/stdout-implement-$scenario" 2>"$TMP/err-implement-$scenario" || status=$?
+  if [[ "$scenario" == change ]]; then check test "$status" -eq 0; else check test "$status" -eq 6; fi
+  check test -s "$TMP/out-implement-$scenario"
+  check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-$scenario"
+  check grep -qF before "$TMP/work/selected.txt"
+done
+check grep -qF '"changes":[]' "$TMP/out-implement-no-op"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"

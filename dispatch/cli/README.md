@@ -97,8 +97,11 @@ The route requires `DISPATCH_GATEWAY_URL` (HTTPS) and `DISPATCH_GATEWAY_TOKEN` i
 the caller environment. It rejects review PR, SHA, and diff arguments, unsafe
 or duplicate paths, symlinks anywhere in a file path, and excessive input.
 The response is a validated `implement-artifact.v1` diff proposal, not an
-applied change. Authentication failures and unavailability never trigger a
-local implementation fallback. Remote reviews retain their existing route.
+applied change. Exit 0 means the artifact proposes at least one change. A
+validated empty proposal is still published but exits 6, so callers must not
+mistake successful worker completion for a file modification. Authentication
+failures and unavailability never trigger a local implementation fallback.
+Remote reviews retain their existing route.
 
 ## Public boundary
 

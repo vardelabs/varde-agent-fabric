@@ -54,7 +54,7 @@ class GatewayClient:
                      "Accept": "application/json", "Content-Length": str(len(body))},
         )
         try:
-            with self.opener(http_request, timeout=request.timeout_seconds) as response:
+            with self.opener(http_request, timeout=request.timeout_seconds + 45) as response:
                 status = getattr(response, "status", 200)
                 if status != 200:
                     if status in {502, 503, 504}:

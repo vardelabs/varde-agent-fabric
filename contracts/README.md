@@ -41,3 +41,12 @@ change to the snapshot: a modified or deleted path must carry the matching
 preimage hash, while a created path carries a null preimage. Changes never
 apply, commit, or push automatically. The public runner returns the artifact
 only.
+
+An empty `changes` list is a completed worker attempt, not evidence that files
+were modified: the implementation CLI publishes its validated artifact and exits
+6 for that case (0 means at least one proposed change). A null-preimage create
+is checked against existing unselected paths at collection time, but this is
+not an atomic apply guarantee. A future applier must create with exclusive,
+no-follow filesystem operations and revalidate the destination at apply time.
+Portable paths reject case variants of `.git`, control characters, and Unicode
+normalization aliases within one file set.

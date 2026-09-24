@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import unicodedata
 from typing import Any
 
 
@@ -44,7 +45,9 @@ def _text(value: Any, name: str, maximum: int, *, empty: bool = False) -> str:
 
 def _path(value: Any) -> str:
     value = _text(value, "path", 512)
-    if value.startswith("/") or "\\" in value or any(part in ("", ".", "..", ".git") for part in value.split("/")):
+    if (value.startswith("/") or "\\" in value
+            or any(unicodedata.category(char) == "Cc" for char in value)
+            or any(part in ("", ".", "..") or part.casefold() == ".git" for part in value.split("/"))):
         raise ContractError("unsafe relative path")
     return value
 
@@ -68,9 +71,10 @@ def _files(value: Any, *, changes: bool = False) -> tuple[dict, ...]:
     for item in value:
         _keys(item, {"path", "before_sha256", "after_text"} if changes else {"path", "content"})
         path = _path(item["path"])
-        if path in seen:
+        key = unicodedata.normalize("NFC", path)
+        if key in seen:
             raise ContractError("duplicate path")
-        seen.add(path)
+        seen.add(key)
         before = after = None
         if changes:
             before, after = item["before_sha256"], item["after_text"]
@@ -172,7 +176,7 @@ class ImplementArtifact:
 
 def collect_files(workdir: str | Path, paths: tuple[str, ...]) -> tuple[dict, ...]:
     """Read only explicit regular files through no-follow descriptors."""
-    if not 1 <= len(paths) <= 50 or len(set(paths)) != len(paths):
+    if not 1 <= len(paths) <= 50 or len({unicodedata.normalize("NFC", path) for path in paths}) != len(paths):
         raise ContractError("paths must contain 1 to 50 unique entries")
     root = os.open(workdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     files = []
@@ -188,7 +192,7 @@ def collect_files(workdir: str | Path, paths: tuple[str, ...]) -> tuple[dict, ..
                 file_fd = os.open(path.split("/")[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
                 try:
                     size = os.fstat(file_fd)
-                    if not stat.S_ISREG(size.st_mode) or size.st_size > MAX_BYTES:
+                    if not stat.S_ISREG(size.st_mode) or size.st_nlink != 1 or size.st_size > MAX_BYTES:
                         raise ContractError("source must be a bounded regular file")
                     chunks = []
                     remaining = MAX_BYTES + 1

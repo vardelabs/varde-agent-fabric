@@ -131,7 +131,11 @@ def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: 
         raise GatewayError("remote implementation requires codex and no fallback")
     request = ImplementRequest(metadata.repository, metadata.harness, metadata.correlation_id,
                                metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds)
-    return _gateway_client().submit_implementation(request)
+    artifact = _gateway_client().submit_implementation(request)
+    for change in artifact.changes:
+        if change["before_sha256"] is None and os.path.lexists(Path(metadata.workdir) / change["path"]):
+            raise GatewayError("created path already exists outside the selected snapshot")
+    return artifact
 
 
 def main() -> int:
@@ -178,8 +182,10 @@ def main() -> int:
             encoding="utf-8",
         )
     except Exception as exc:
-        print(f"varde-agent-dispatch: remote review failed: {exc}", file=sys.stderr)
+        print(f"varde-agent-dispatch: remote {args.kind} failed: {exc}", file=sys.stderr)
         return 4
+    if isinstance(artifact, ImplementArtifact) and not artifact.changes:
+        return 6
     return 0
 
 

@@ -46,11 +46,22 @@ class ImplementTests(unittest.TestCase):
 
     def test_invalid_requests(self):
         req = self.request().to_dict()
-        for path in ('/a', '../a', 'a//b', '.git/config', 'x/.git/y', 'a\\b', 'x\x00y', 'x'*513):
+        for path in ('/a', '../a', 'a//b', '.git/config', '.GIT/config', '.Git/hooks/pre-commit',
+                     'x/.git/y', 'a\\b', 'x\x00y', 'x\ny', 'x\x1by', 'x'*513):
             with self.subTest(path=path), self.assertRaises(ContractError):
                 ImplementRequest.from_dict(dict(req, files=[{'path':path,'content':'x'}]))
         for files in ([{'path':'a','content':'x'}]*2, [], [{'path':str(i),'content':'x'} for i in range(51)]):
             with self.assertRaises(ContractError): ImplementRequest.from_dict(dict(req, files=files))
+        twins = ['café.py', 'cafe\u0301.py']
+        with self.assertRaises(ContractError):
+            ImplementRequest.from_dict(dict(req, files=[{'path':p,'content':'x'} for p in twins]))
+        for path in ('.GIT/config', 'x\ny'):
+            with self.assertRaises(ContractError):
+                ImplementArtifact.from_dict(dict(self.artifact(self.request()), changes=[
+                    {'path':path,'before_sha256':None,'after_text':'x'}]))
+        with self.assertRaises(ContractError):
+            ImplementArtifact.from_dict(dict(self.artifact(self.request()), changes=[
+                {'path':p,'before_sha256':None,'after_text':'x'} for p in twins]))
         with self.assertRaises(ContractError): ImplementRequest.from_dict(dict(req, task='x'*16385))
         with self.assertRaises(ContractError): ImplementRequest.from_dict(dict(req, files=[{'path':'a','content':'x'*330000}]))
 
@@ -64,10 +75,13 @@ class ImplementTests(unittest.TestCase):
             self.assertEqual(collect_files(root, ('a.txt',)), ({'path':'a.txt','content':'hello'},))
             for path in ('link', 'dir/indirect', '../a.txt'):
                 with self.assertRaises(ContractError): collect_files(root, (path,))
+            os.link(root/'a.txt', root/'hardlink')
+            with self.assertRaises(ContractError): collect_files(root, ('a.txt',))
 
     def test_gateway_success_and_identity_failures(self):
         req = self.request()
         def opener(http_req, timeout):
+            self.assertEqual(timeout, req.timeout_seconds + 45)
             self.assertEqual(http_req.full_url, 'https://gateway.example/v1/implementations')
             self.assertEqual(http_req.get_header('Authorization'), 'Bearer secret')
             self.assertEqual(json.loads(http_req.data), req.to_dict())
@@ -93,7 +107,7 @@ class ImplementTests(unittest.TestCase):
         client = GatewayClient('https://gateway.example', 'secret', opener=mock.Mock(side_effect=error))
         with self.assertRaisesRegex(GatewayError, '401'): client.submit_implementation(req)
 
-    def test_no_fallback(self):
+    def test_implementation_redirects_refused(self):
         import io
         import urllib.request
         from http.client import HTTPMessage
@@ -120,6 +134,18 @@ class ImplementTests(unittest.TestCase):
                 with self.assertRaises(OSError): run_remote_implement(meta, fallback_policy='none')
                 with self.assertRaises(GatewayError): run_remote_implement(meta, fallback_policy='remote-unavailable')
                 local.assert_not_called()
+
+    def test_create_collision_refused_before_publication(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as directory:
+            root = Path(directory)
+            (root/'a.txt').write_text('before')
+            (root/'new.txt').write_text('unselected')
+            meta = RemoteImplementMetadata('org/repo','corr',('a.txt',),'change it',directory,str(root/'out.json'))
+            with mock.patch('dispatch.remote_runner._gateway_client') as client:
+                client.return_value.submit_implementation.side_effect = lambda req: ImplementArtifact.from_dict(self.artifact(req))
+                with self.assertRaisesRegex(GatewayError, 'already exists'):
+                    run_remote_implement(meta, fallback_policy='none')
+            self.assertEqual((root/'new.txt').read_text(), 'unselected')
 
     def test_cli_routes_implementation_and_rejects_review_fields(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
@@ -160,6 +186,24 @@ class ImplementTests(unittest.TestCase):
                 client.return_value.submit_implementation.side_effect = submit
                 self.assertEqual(main(), 0)
             self.assertEqual(json.loads(output.read_text())['schema'], 'implement-artifact.v1')
+            self.assertEqual((root/'a.txt').read_text(), 'before')
+
+    def test_runner_main_no_changes_preserves_artifact_with_distinct_status(self):
+        from dispatch.remote_runner import main
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as directory:
+            root = Path(directory)
+            (root/'a.txt').write_text('before')
+            output = root/'artifact.json'
+            argv = ['remote_runner.py','--output',str(output),'--local-backend','/bin/false',
+                    '--harness','codex','--target','remote','--fallback-policy','none','--model','model',
+                    '--workdir',directory,'--repository','org/repo','--correlation-id','corr',
+                    '--kind','implement','--path','a.txt','--task','change it']
+            def submit(req):
+                return ImplementArtifact.from_dict(dict(self.artifact(req), changes=[]))
+            with mock.patch.object(sys,'argv',argv), mock.patch('dispatch.remote_runner._gateway_client') as client:
+                client.return_value.submit_implementation.side_effect = submit
+                self.assertEqual(main(), 6)
+            self.assertEqual(json.loads(output.read_text())['changes'], [])
             self.assertEqual((root/'a.txt').read_text(), 'before')
 
 if __name__ == '__main__': unittest.main()
