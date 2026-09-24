@@ -38,21 +38,21 @@ fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
 harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; route_fallback_harness=""; route_fallback_target=""; output=""
 repository=""; pull_request=""; base_sha=""; head_sha=""; correlation_id=""; paths=()
-model_from_cli=0; routes_from_cli=0
+model_from_cli=0; routes_from_cli=0; review_args_supplied=0
 while (($#)); do
   case "$1" in
     --harness) [[ $# -ge 2 ]] || fail '--harness requires a value'; harness="$2"; shift 2 ;;
     --kind) [[ $# -ge 2 ]] || fail '--kind requires a value'; kind="$2"; shift 2 ;;
     --task) [[ $# -ge 2 ]] || fail '--task requires a value'; task="$2"; shift 2 ;;
     --workdir) [[ $# -ge 2 ]] || fail '--workdir requires a value'; workdir="$2"; shift 2 ;;
-    --diff) [[ $# -ge 2 ]] || fail '--diff requires a value'; diff="$2"; shift 2 ;;
+    --diff) [[ $# -ge 2 ]] || fail '--diff requires a value'; diff="$2"; review_args_supplied=1; shift 2 ;;
     --model) [[ $# -ge 2 ]] || fail '--model requires a value'; model="$2"; model_from_cli=1; shift 2 ;;
     --routes) [[ $# -ge 2 ]] || fail '--routes requires a value'; routes="$2"; routes_from_cli=1; shift 2 ;;
     --output) [[ $# -ge 2 ]] || fail '--output requires a value'; output="$2"; shift 2 ;;
     --repository) [[ $# -ge 2 ]] || fail '--repository requires a value'; repository="$2"; shift 2 ;;
-    --pull-request) [[ $# -ge 2 ]] || fail '--pull-request requires a value'; pull_request="$2"; shift 2 ;;
-    --base-sha) [[ $# -ge 2 ]] || fail '--base-sha requires a value'; base_sha="$2"; shift 2 ;;
-    --head-sha) [[ $# -ge 2 ]] || fail '--head-sha requires a value'; head_sha="$2"; shift 2 ;;
+    --pull-request) [[ $# -ge 2 ]] || fail '--pull-request requires a value'; pull_request="$2"; review_args_supplied=1; shift 2 ;;
+    --base-sha) [[ $# -ge 2 ]] || fail '--base-sha requires a value'; base_sha="$2"; review_args_supplied=1; shift 2 ;;
+    --head-sha) [[ $# -ge 2 ]] || fail '--head-sha requires a value'; head_sha="$2"; review_args_supplied=1; shift 2 ;;
     --correlation-id) [[ $# -ge 2 ]] || fail '--correlation-id requires a value'; correlation_id="$2"; shift 2 ;;
     --path) [[ $# -ge 2 ]] || fail '--path requires a value'; paths+=("$2"); shift 2 ;;
     --help) usage; exit 0 ;;
@@ -108,10 +108,16 @@ if [[ "$route_target" != "remote" ]]; then
 fi
 
 if [[ "$route_target" == "remote" ]]; then
-  [[ "$kind" == "review" ]] || fail 'remote routes require --kind review' 3
-  [[ -n "$repository" && -n "$pull_request" && -n "$base_sha" && -n "$head_sha" && -n "$correlation_id" ]] || fail 'remote reviews require explicit repository, pull request, base SHA, head SHA, and correlation ID' 2
-  ((${#paths[@]} > 0)) || fail 'remote reviews require at least one explicit --path' 2
-  [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
+  [[ "$kind" == "review" || "$kind" == "implement" ]] || fail 'remote routes require review or implement kind' 3
+  [[ -n "$repository" && -n "$correlation_id" ]] || fail 'remote route requires repository and correlation ID' 2
+  ((${#paths[@]} > 0)) || fail 'remote route requires at least one explicit --path' 2
+  if [[ "$kind" == "review" ]]; then
+    [[ -n "$pull_request" && -n "$base_sha" && -n "$head_sha" ]] || fail 'remote reviews require explicit pull request, base SHA, and head SHA' 2
+    [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
+  else
+    [[ "$harness" == "codex" && "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires codex and fallback policy none' 3
+    [[ "$review_args_supplied" -eq 0 ]] || fail 'remote implement rejects PR, SHA and diff arguments' 2
+  fi
 fi
 
 if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
@@ -165,10 +171,12 @@ if [[ "$route_target" == "remote" ]]; then
   remote_args=(
     --output "$backend_output" --local-backend "$backend" --harness "$harness" --target "$route_target"
     --fallback-policy "${route_fallback_policy:-none}" --model "$model"
-    --workdir "$workdir" --repository "$repository" --pull-request "$pull_request"
-    --base-sha "$base_sha" --head-sha "$head_sha" --correlation-id "$correlation_id"
-    --task "$task" --timeout-seconds "$timeout_seconds"
+    --workdir "$workdir" --repository "$repository" --correlation-id "$correlation_id"
+    --kind "$kind" --task "$task" --timeout-seconds "$timeout_seconds"
   )
+  if [[ "$kind" == "review" ]]; then
+    remote_args+=(--pull-request "$pull_request" --base-sha "$base_sha" --head-sha "$head_sha")
+  fi
   [[ -n "$diff" ]] && remote_args+=(--diff "$diff")
   for path in "${paths[@]}"; do remote_args+=(--path "$path"); done
   if [[ -z "${DISPATCH_GATEWAY_URL:-}" || -z "${DISPATCH_GATEWAY_TOKEN:-}" ]]; then

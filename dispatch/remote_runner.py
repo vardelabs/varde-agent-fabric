@@ -11,6 +11,7 @@ import urllib.request
 import ssl
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
+from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError
 
@@ -115,6 +116,27 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
     return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)
 
 
+@dataclass(frozen=True)
+class RemoteImplementMetadata:
+    repository: str
+    correlation_id: str
+    paths: tuple[str, ...]
+    task: str
+    workdir: str
+    output: str
+    harness: str = "codex"
+    target: str = "remote"
+    timeout_seconds: int = 300
+
+
+def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: str) -> ImplementArtifact:
+    if metadata.target != "remote" or metadata.harness != "codex" or fallback_policy != "none":
+        raise GatewayError("remote implementation requires codex and no fallback")
+    request = ImplementRequest(metadata.repository, metadata.harness, metadata.correlation_id,
+                               metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds)
+    return _gateway_client().submit_implementation(request)
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser()
@@ -127,22 +149,33 @@ def main() -> int:
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--diff")
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--pull-request", required=True, type=int)
-    parser.add_argument("--base-sha", required=True)
-    parser.add_argument("--head-sha", required=True)
+    parser.add_argument("--pull-request", type=int)
+    parser.add_argument("--base-sha")
+    parser.add_argument("--head-sha")
     parser.add_argument("--correlation-id", required=True)
     parser.add_argument("--path", action="append", required=True)
     parser.add_argument("--task", required=True)
+    parser.add_argument("--kind", choices=("review", "implement"), default="review")
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args()
-    metadata = RemoteReviewMetadata(
-        args.repository, args.pull_request, args.base_sha, args.head_sha,
-        args.correlation_id, tuple(args.path), args.task, args.diff,
-        args.workdir, args.model, args.local_backend, args.output,
-        args.harness, args.target, args.timeout_seconds,
-    )
+    if args.kind == "review" and (args.pull_request is None or not args.base_sha or not args.head_sha):
+        parser.error("review requires pull request, base SHA and head SHA")
+    if args.kind == "implement" and any(v is not None for v in (args.pull_request, args.base_sha, args.head_sha, args.diff)):
+        parser.error("implement rejects review metadata")
     try:
-        artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
+        if args.kind == "implement":
+            metadata = RemoteImplementMetadata(args.repository, args.correlation_id, tuple(args.path),
+                                               args.task, args.workdir, args.output, args.harness,
+                                               args.target, args.timeout_seconds)
+            artifact = run_remote_implement(metadata, fallback_policy=args.fallback_policy)
+        else:
+            metadata = RemoteReviewMetadata(
+                args.repository, args.pull_request, args.base_sha, args.head_sha,
+                args.correlation_id, tuple(args.path), args.task, args.diff,
+                args.workdir, args.model, args.local_backend, args.output,
+                args.harness, args.target, args.timeout_seconds,
+            )
+            artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
         Path(args.output).write_text(
             json.dumps(artifact.to_dict(), ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import http.client
 import urllib.error
 import urllib.request
 from typing import Callable
 
 from contracts.review_contracts import ContractError, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
+from contracts.implement_contracts import (ContractError as ImplementContractError, ImplementRequest,
+                                           ImplementArtifact, MAX_BYTES as MAX_IMPLEMENT_BYTES)
 
 
 class GatewayError(RuntimeError):
@@ -18,16 +21,55 @@ class GatewayUnavailable(GatewayError):
     """The gateway could not be reached or reported temporary unavailability."""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 class GatewayClient:
-    def __init__(self, base_url: str, token: str, *, opener: Callable = urllib.request.urlopen, max_response_bytes: int = MAX_TRANSPORT_BYTES) -> None:
+    def __init__(self, base_url: str, token: str, *, opener: Callable | None = None, max_response_bytes: int = MAX_TRANSPORT_BYTES) -> None:
         if not base_url.startswith("https://"):
             raise ValueError("gateway must use HTTPS")
         if not token or len(token) > 4096:
             raise ValueError("gateway token is required and bounded")
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.opener = opener
+        self.opener = opener if opener is not None else urllib.request.build_opener(_NoRedirect()).open
         self.max_response_bytes = max_response_bytes
+
+    def submit_implementation(self, request: ImplementRequest) -> ImplementArtifact:
+        body = json.dumps(request.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(body) > MAX_IMPLEMENT_BYTES:
+            raise GatewayError("request exceeds transport limit")
+        http_request = urllib.request.Request(
+            self.base_url + "/v1/implementations", data=body, method="POST",
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json",
+                     "Accept": "application/json", "Content-Length": str(len(body))},
+        )
+        try:
+            with self.opener(http_request, timeout=request.timeout_seconds) as response:
+                if getattr(response, "status", 200) != 200:
+                    raise GatewayError(f"gateway returned HTTP {response.status}")
+                raw = response.read(MAX_IMPLEMENT_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
+        except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
+            raise GatewayUnavailable("gateway unavailable") from exc
+        if len(raw) > MAX_IMPLEMENT_BYTES:
+            raise GatewayError("gateway response exceeds transport limit")
+        try:
+            artifact = ImplementArtifact.from_dict(json.loads(raw.decode("utf-8")))
+        except (UnicodeError, json.JSONDecodeError, ImplementContractError) as exc:
+            raise GatewayError("gateway returned malformed implementation artifact") from exc
+        if any(getattr(artifact, field) != getattr(request, field) for field in
+               ("repository", "worker_kind", "correlation_id", "snapshot_sha256")):
+            raise GatewayError("gateway implementation artifact does not match request identity")
+        source = {item["path"]: item["content"] for item in request.files}
+        for change in artifact.changes:
+            before = source.get(change["path"])
+            expected = hashlib.sha256(before.encode("utf-8")).hexdigest() if before is not None else None
+            if change["before_sha256"] != expected or (before is None and change["after_text"] is None):
+                raise GatewayError("gateway implementation change does not match snapshot")
+        return artifact
 
     def submit(self, request: ReviewRequest) -> ReviewArtifact:
         body = json.dumps(request.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
