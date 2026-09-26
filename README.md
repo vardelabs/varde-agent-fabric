@@ -127,6 +127,8 @@ contributor checklist and portable versus deployment-owned boundary are in
 ## Contributing
 
 Run the skeleton and relevant component tests before opening a pull request.
+Cluster CI runs the full suite as the `Skeleton validation` check. The job
+lives in `vardelabs/toolkits`; see `ci/README.md` there.
 Changes that affect contracts, routing, adapters, security boundaries, or
 migration dependencies should update the relevant issue and include focused
 regression coverage.
