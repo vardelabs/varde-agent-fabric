@@ -8,8 +8,6 @@ for path in \
   README.md \
   CONTRIBUTING.md \
   .gitignore \
-  .github/WORKFLOWS.md \
-  .github/workflows/skeleton.yml \
   dispatch/README.md \
   contracts/README.md \
   inference/README.md \
@@ -27,7 +25,14 @@ for path in \
 done
 
 if [[ -e .github/README.md || -L .github/README.md ]]; then
-  printf 'GitHub homepage override is forbidden: use .github/WORKFLOWS.md instead of .github/README.md\n' >&2
+  printf 'GitHub homepage override is forbidden: keep the homepage in README.md, not .github/README.md\n' >&2
+  exit 1
+fi
+
+# CI runs as the cluster Skeleton validation job, defined outside this
+# repository. A workflow here would be a second gate nothing validates.
+if [[ -e .github/workflows || -L .github/workflows ]]; then
+  printf 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job\n' >&2
   exit 1
 fi
 
@@ -71,16 +76,6 @@ grep -Fqx -- '- `eval/audit/`, `eval/runtime/`, `eval/sockets/`, `eval/logs/`, `
   exit 1
 }
 
-grep -Fqx -- '- Keep workflows read-only by default and pin third-party actions to reviewed commit SHAs.' .github/WORKFLOWS.md || {
-  printf 'workflow documentation is missing read-only rule\n' >&2
-  exit 1
-}
-
-grep -Fqx -- '- Do not use `pull_request_target` for untrusted pull-request code.' .github/WORKFLOWS.md || {
-  printf 'workflow documentation is missing pull_request_target rule\n' >&2
-  exit 1
-}
-
 for rule in \
   '.env' '.env.*' '!.env.example' '.envrc' '.secrets' \
   '*.gguf' '*.safetensors' '*.onnx' '*.pt' '*.ckpt' '*.bin' \
@@ -98,130 +93,6 @@ env_pattern_line=$(grep -n -F -x '.env.*' .gitignore | cut -d: -f1)
 env_example_line=$(grep -n -F -x '!.env.example' .gitignore | cut -d: -f1)
 if (( env_example_line <= env_pattern_line )); then
   printf 'gitignore .env.example exception must follow .env.*\n' >&2
-  exit 1
-fi
-
-workflow=.github/workflows/skeleton.yml
-grep -Fqx -- 'on:' "$workflow" || {
-  printf 'workflow is missing the event block\n' >&2
-  exit 1
-}
-if grep -Fq 'pull_request_target:' "$workflow"; then
-  printf 'workflow must not use pull_request_target\n' >&2
-  exit 1
-fi
-grep -Fqx -- 'permissions:' "$workflow" || {
-  printf 'workflow permissions are not read-only\n' >&2
-  exit 1
-}
-if grep -Eq '^[[:space:]]+permissions[[:space:]]*:' "$workflow"; then
-  printf 'workflow contains a job-level permissions block\n' >&2
-  exit 1
-fi
-if grep -Eq '^[[:space:]]+if[[:space:]]*:' "$workflow"; then
-  printf 'workflow gate contains a conditional\n' >&2
-  exit 1
-fi
-if grep -Eq '^[[:space:]]+continue-on-error[[:space:]]*:' "$workflow"; then
-  printf 'workflow gate allows continue-on-error\n' >&2
-  exit 1
-fi
-
-grep -Fqx -- 'jobs:' "$workflow" || {
-  printf 'workflow jobs block is missing\n' >&2
-  exit 1
-}
-
-workflow_section_has_line() {
-  local section=$1
-  local expected=$2
-  local message=$3
-  awk -v section="$section" -v expected="$expected" '
-    $0 == section { in_section=1; next }
-    in_section && $0 ~ /^[^[:space:]][^:]*:/ { in_section=0 }
-    in_section && $0 == expected { found=1 }
-    END { exit found ? 0 : 1 }
-  ' "$workflow" || {
-    printf '%s\n' "$message" >&2
-    exit 1
-  }
-}
-
-workflow_permissions_are_read_only() {
-  awk '
-    $0 == "permissions:" { in_permissions=1; next }
-    in_permissions && $0 ~ /^[^[:space:]][^:]*:/ { in_permissions=0 }
-    in_permissions && $0 ~ /^  [^[:space:]][^:]*:/ {
-      if ($0 == "  contents: read") { found=1 } else { invalid=1 }
-    }
-    END { exit (found && !invalid) ? 0 : 1 }
-  ' "$workflow" || {
-    printf 'workflow permissions are not read-only\n' >&2
-    exit 1
-  }
-}
-
-workflow_pull_request_is_unfiltered() {
-  awk '
-    $0 == "on:" { in_on=1; next }
-    in_on && $0 ~ /^[^[:space:]][^:]*:/ { in_on=0 }
-    in_on && $0 == "  pull_request:" { in_pull_request=1; next }
-    in_pull_request && $0 ~ /^  [^[:space:]][^:]*:/ { in_pull_request=0 }
-    in_pull_request && $0 ~ /^    / { invalid=1 }
-    END { exit invalid ? 1 : 0 }
-  ' "$workflow"
-}
-
-workflow_steps_have_line() {
-  local expected=$1
-  local message=$2
-  awk -v expected="$expected" '
-    $0 == "  validate:" { in_validate=1; next }
-    in_validate && $0 ~ /^  [^[:space:]][^:]*:/ { in_validate=0; in_steps=0 }
-    in_validate && $0 == "    steps:" { in_steps=1; next }
-    in_steps && $0 ~ /^    [^[:space:]][^:]*:/ { in_steps=0 }
-    in_steps && $0 == expected { found=1 }
-    END { exit found ? 0 : 1 }
-  ' "$workflow" || {
-    printf '%s\n' "$message" >&2
-    exit 1
-  }
-}
-
-workflow_section_has_line 'on:' '  pull_request:' 'workflow does not declare pull_request under on'
-workflow_section_has_line 'on:' '  push:' 'workflow does not declare push under on'
-if ! workflow_pull_request_is_unfiltered; then
-  printf 'workflow pull_request trigger must not have filters\n' >&2
-  exit 1
-fi
-workflow_permissions_are_read_only
-workflow_section_has_line 'jobs:' '  validate:' 'workflow validate job is missing'
-workflow_section_has_line '  validate:' '    runs-on: ubuntu-latest' 'workflow validate job is missing its runner'
-workflow_section_has_line '  validate:' '    steps:' 'workflow validate job is missing its steps'
-workflow_steps_have_line '      - run: ./scripts/validate-skeleton.sh' 'workflow does not run the skeleton validator'
-workflow_steps_have_line '      - run: ./tests/test-skeleton.sh' 'workflow does not run the skeleton test suite'
-grep -Fq 'git cat-file -e "$PR_BASE_SHA^{commit}"' "$workflow" || {
-  printf 'workflow does not guard missing pull request bases\n' >&2
-  exit 1
-}
-grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
-  printf 'workflow does not guard missing push bases\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$PR_BASE_SHA" HEAD' "$workflow" || {
-  printf 'workflow does not check pull request changes\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$EVENT_BEFORE" HEAD' "$workflow" || {
-  printf 'workflow does not check push changes\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
-  printf 'workflow fallback does not check against the empty tree\n' >&2
-  exit 1
-}
-if grep -Fq 'git diff --check --root HEAD' "$workflow"; then
-  printf 'workflow fallback uses the ineffective --root form\n' >&2
   exit 1
 fi
 
@@ -246,14 +117,6 @@ while IFS= read -r -d '' script; do
     exit 1
   }
 done < <(find scripts -maxdepth 1 \( -type f -o -type l \) ! -name README.md -print0)
-
-while IFS= read -r -d '' workflow; do
-  basename=${workflow##*/}
-  grep -Fq "\`$basename\`" .github/WORKFLOWS.md || {
-    printf 'CI index is missing entry: %s\n' "$basename" >&2
-    exit 1
-  }
-done < <(find .github/workflows -maxdepth 1 \( -type f -o -type l \) -print0)
 
 if [[ -n "$(find scripts -mindepth 1 -type d -print -quit)" ]]; then
   printf 'scripts directory must remain flat\n' >&2

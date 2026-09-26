@@ -150,44 +150,6 @@ expect_trackable 'eval/fixtures/weights/tiny.json'
 expect_trackable 'tests/fixtures/logs/sample.txt'
 expect_trackable 'eval/fixtures/models/config.json'
 
-workflow=$root/.github/workflows/skeleton.yml
-grep -Fq '      - run: ./scripts/validate-skeleton.sh' "$workflow" || {
-  printf 'workflow does not run the skeleton validator\n' >&2
-  exit 1
-}
-grep -Fq '      - run: ./tests/test-skeleton.sh' "$workflow" || {
-  printf 'workflow does not run the skeleton test suite\n' >&2
-  exit 1
-}
-grep -Fq 'empty_tree=$(git hash-object -t tree /dev/null)' "$workflow" || {
-  printf 'workflow fallback does not compute the empty tree\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$empty_tree" HEAD' "$workflow" || {
-  printf 'workflow fallback does not check against the empty tree\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$PR_BASE_SHA" HEAD' "$workflow" || {
-  printf 'workflow does not check pull request changes\n' >&2
-  exit 1
-}
-grep -Fq 'git diff --check "$EVENT_BEFORE" HEAD' "$workflow" || {
-  printf 'workflow does not check push changes\n' >&2
-  exit 1
-}
-grep -Fq 'git cat-file -e "$EVENT_BEFORE^{commit}"' "$workflow" || {
-  printf 'workflow does not guard missing push bases\n' >&2
-  exit 1
-}
-grep -Fq 'git cat-file -e "$PR_BASE_SHA^{commit}"' "$workflow" || {
-  printf 'workflow does not guard missing pull request bases\n' >&2
-  exit 1
-}
-if grep -Fq 'git diff --check --root HEAD' "$workflow"; then
-  printf 'workflow fallback uses the ineffective --root form\n' >&2
-  exit 1
-fi
-
 git_hermetic -c init.templateDir= -C "$whitespace_probe" init -q
 git_hermetic -C "$whitespace_probe" config user.name fixture
 git_hermetic -C "$whitespace_probe" config user.email fixture@example.invalid
@@ -270,274 +232,9 @@ make_probe
 (cd "$probe" && ./scripts/validate-skeleton.sh)
 
 make_probe
+mkdir -p "$probe/.github"
 printf '# accidental homepage override\n' > "$probe/.github/README.md"
-expect_rejection 'GitHub homepage override is forbidden: use .github/WORKFLOWS.md instead of .github/README.md'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('      - run: ./scripts/validate-skeleton.sh\n', ''))
-PY
-expect_rejection 'workflow does not run the skeleton validator'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('      - run: ./tests/test-skeleton.sh\n', ''))
-PY
-expect_rejection 'workflow does not run the skeleton test suite'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('git cat-file -e "$EVENT_BEFORE^{commit}"', 'git cat-file -e "$EVENT_BEFORE^{missing}"'))
-PY
-expect_rejection 'workflow does not guard missing push bases'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  pull_request:\n', ''))
-PY
-expect_rejection 'workflow does not declare pull_request under on'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  push:\n', ''))
-PY
-expect_rejection 'workflow does not declare push under on'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  contents: read\n', ''))
-PY
-expect_rejection 'workflow permissions are not read-only'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    '    runs-on: ubuntu-latest\n',
-    '    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      actions: write\n',
-    1,
-))
-PY
-expect_rejection 'workflow contains a job-level permissions block'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-text = p.read_text()
-if 'on:\n' not in text or '  pull_request:\n' not in text:
-    raise SystemExit('workflow trigger fixture did not match')
-text = text.replace('on:\n', 'on:\n  issues:\n', 1)
-text = text.replace('  pull_request:\n', 'unrelated:\n  pull_request:\n', 1)
-p.write_text(text)
-PY
-expect_rejection 'workflow does not declare pull_request under on'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-text = p.read_text()
-old = '  pull_request:\n'
-new = "  pull_request:\n    paths:\n      - '**/never-match'\n"
-if old not in text:
-    raise SystemExit('workflow filter fixture did not match')
-p.write_text(text.replace(old, new, 1))
-PY
-expect_rejection 'workflow pull_request trigger must not have filters'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-text = p.read_text()
-old = 'permissions:\n  contents: read\n\non:'
-new = 'permissions:\n  actions: write\nunrelated:\n  contents: read\n\non:'
-if old not in text:
-    raise SystemExit('workflow permissions fixture did not match')
-p.write_text(text.replace(old, new, 1))
-PY
-expect_rejection 'workflow permissions are not read-only'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('    steps:\n', '    env:\n', 1))
-PY
-expect_rejection 'workflow validate job is missing its steps'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  pull_request:\n', '  pull_request_target:\n'))
-PY
-expect_rejection 'workflow must not use pull_request_target'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  validate:\n', '  validate:\n    if: false\n'))
-PY
-expect_rejection 'workflow gate contains a conditional'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    '  validate:\n',
-    '  validate:\n    if : false\n',
-    1,
-))
-PY
-expect_rejection 'workflow gate contains a conditional'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    '      - run: ./tests/test-skeleton.sh\n',
-    '      - run: ./tests/test-skeleton.sh\n        continue-on-error: true\n',
-))
-PY
-expect_rejection 'workflow gate allows continue-on-error'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    '      - run: ./tests/test-skeleton.sh\n',
-    '      - run: ./tests/test-skeleton.sh\n        continue-on-error : true\n',
-    1,
-))
-PY
-expect_rejection 'workflow gate allows continue-on-error'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('  validate:\n', '  other:\n'))
-PY
-expect_rejection 'workflow validate job is missing'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('git cat-file -e "$EVENT_BEFORE^{commit}"', 'git cat-file -e "$EVENT_BEFORE^{missing}"'))
-PY
-expect_rejection 'workflow does not guard missing push bases'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('git cat-file -e "$PR_BASE_SHA^{commit}"', 'git cat-file -e "$PR_BASE_SHA^{missing}"'))
-PY
-expect_rejection 'workflow does not guard missing pull request bases'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('git diff --check "$PR_BASE_SHA" HEAD', 'git diff --check', 1))
-PY
-expect_rejection 'workflow does not check pull request changes'
-
-make_probe
-python3 - "$probe/.github/workflows/skeleton.yml" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace('git diff --check "$EVENT_BEFORE" HEAD', 'git diff --check', 1))
-PY
-expect_rejection 'workflow does not check push changes'
-
-make_probe
-python3 - "$probe/.github/WORKFLOWS.md" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    'Keep workflows read-only by default and pin third-party actions to reviewed commit SHAs.',
-    'Workflows may request broad permissions.',
-))
-PY
-expect_rejection 'workflow documentation is missing read-only rule'
-
-make_probe
-python3 - "$probe/.github/WORKFLOWS.md" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-p.write_text(p.read_text().replace(
-    'Do not use `pull_request_target` for untrusted pull-request code.',
-    'Use any pull request trigger.',
-))
-PY
-expect_rejection 'workflow documentation is missing pull_request_target rule'
+expect_rejection 'GitHub homepage override is forbidden: keep the homepage in README.md, not .github/README.md'
 
 for rule in \
   '.env' '.env.*' '!.env.example' '.envrc' '.secrets' \
@@ -560,8 +257,7 @@ p.write_text(p.read_text().replace(
 PY
 expect_rejection 'gitignore .env.example exception must follow .env.*'
 for required in \
-  README.md CONTRIBUTING.md .gitignore .github/WORKFLOWS.md \
-  .github/workflows/skeleton.yml dispatch/README.md contracts/README.md \
+  README.md CONTRIBUTING.md .gitignore dispatch/README.md contracts/README.md \
   inference/README.md inference/grammars/README.md inference/systemd/README.md \
   eval/README.md docs/README.md scripts/README.md tests/README.md \
   tests/test-skeleton.sh; do
@@ -682,7 +378,7 @@ import sys
 
 p = Path(sys.argv[1])
 text = p.read_text()
-old = '- `validate-skeleton.sh`: verifies the required skeleton files, boundary markers, required ignore rules, workflow safety invariants, and script indexes. It exits zero only when the checked layout and policy markers are present. It is not a content, secret, or history scanner.\n'
+old = '- `validate-skeleton.sh`: verifies the required skeleton files, boundary markers, required ignore rules, the absence of GitHub Actions workflows, and script indexes. It exits zero only when the checked layout and policy markers are present. It is not a content, secret, or history scanner.\n'
 new = 'The validator is `validate-skeleton.sh`, but it is not indexed.\n'
 if old not in text:
     raise SystemExit('script index fixture did not match')
@@ -696,11 +392,12 @@ printf '#!/usr/bin/env bash\n' > "$probe/scripts/lib/helper.sh"
 expect_rejection 'scripts directory must remain flat'
 
 make_probe
-printf 'name: unindexed\n' > "$probe/.github/workflows/unindexed.yml"
-expect_rejection 'CI index is missing entry: unindexed.yml'
+mkdir -p "$probe/.github/workflows"
+expect_rejection 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job'
 
 make_probe
-ln -s /bin/echo "$probe/.github/workflows/unindexed.yml"
-expect_rejection 'CI index is missing entry: unindexed.yml'
+mkdir -p "$probe/.github"
+ln -s missing-target "$probe/.github/workflows"
+expect_rejection 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job'
 
 printf 'skeleton layout rejection: ok\n'
