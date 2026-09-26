@@ -86,6 +86,11 @@ deployment concern.
 A route with `target: remote`, `kinds: ["implement"]`, default harness `codex`,
 and fallback policy `none` sends only explicitly named relative files:
 
+Implementation tasks are additionally limited to 16 KiB, matching
+`implement-request.v1`. For all remote routes, `DISPATCH_TIMEOUT_SECONDS` must
+be from 1 through 900 seconds, matching the wire contracts. These checks happen
+in the CLI before it opens a gateway connection.
+
 ```text
 varde-agent-dispatch --model example/model --routes /path/to/remote-routes.json \
   --kind implement --task "bounded task" --workdir /path/to/worktree \

@@ -10,6 +10,8 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 BACKENDS_DIR="$SELF_DIR/backends"
 MAX_TASK_BYTES="${DISPATCH_MAX_TASK_BYTES:-120000}"
+# Keep in sync with contracts/implement_contracts.py:MAX_TASK_BYTES.
+MAX_IMPLEMENT_TASK_BYTES=16384
 
 usage() {
   cat >&2 <<'EOF'
@@ -117,7 +119,12 @@ if [[ "$route_target" == "remote" ]]; then
   else
     [[ "$harness" == "codex" && "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires codex and fallback policy none' 3
     [[ "$review_args_supplied" -eq 0 ]] || fail 'remote implement rejects PR, SHA and diff arguments' 2
+    implement_task_bytes="$(LC_ALL=C printf '%s' "$task" | wc -c)"
+    (( implement_task_bytes <= MAX_IMPLEMENT_TASK_BYTES )) || fail "implement task exceeds ${MAX_IMPLEMENT_TASK_BYTES} bytes"
   fi
+  timeout_seconds="${DISPATCH_TIMEOUT_SECONDS:-300}"
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || fail 'DISPATCH_TIMEOUT_SECONDS must be from 1 to 900 for remote routes' 2
+  (( timeout_seconds <= 900 )) || fail 'DISPATCH_TIMEOUT_SECONDS must be from 1 to 900 for remote routes' 2
 fi
 
 if ! [[ "$MAX_TASK_BYTES" =~ ^[1-9][0-9]*$ ]]; then fail 'DISPATCH_MAX_TASK_BYTES must be a positive integer'; fi
@@ -166,8 +173,6 @@ else
 fi
 
 if [[ "$route_target" == "remote" ]]; then
-  timeout_seconds="${DISPATCH_TIMEOUT_SECONDS:-300}"
-  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || fail 'DISPATCH_TIMEOUT_SECONDS must be a positive integer' 2
   remote_args=(
     --output "$backend_output" --local-backend "$backend" --harness "$harness" --target "$route_target"
     --fallback-policy "${route_fallback_policy:-none}" --model "$model"

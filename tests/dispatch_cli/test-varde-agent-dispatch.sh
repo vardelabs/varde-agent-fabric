@@ -44,6 +44,21 @@ cat > "$TMP/routes.json" <<'EOF'
 }
 EOF
 
+cat > "$TMP/remote-routes.json" <<'EOF'
+{
+  "schema": "dispatch-routes.v1",
+  "routes": {
+    "remote/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "remote",
+      "kinds": ["implement"],
+      "fallback": {"policy": "none"}
+    }
+  }
+}
+EOF
+
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
 
@@ -63,6 +78,26 @@ if "$CLI" --harness codex --kind review --task x --workdir "$TMP/work" 2>"$TMP/e
   printf 'review without diff unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -q -- '--diff' "$TMP/err"
+
+oversized_implement_task="$(python3 -c 'print("x" * 16385, end="")')"
+if DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=300 \
+  DISPATCH_GATEWAY_URL=https://127.0.0.1:1 DISPATCH_GATEWAY_TOKEN=not-used \
+  "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind implement \
+  --task "$oversized_implement_task" --workdir "$TMP/work" --repository org/repo \
+  --correlation-id cli-size-test --path source.py --output "$TMP/out-oversized-implement" \
+  >"$TMP/stdout-oversized-implement" 2>"$TMP/err-oversized-implement"; then
+  printf 'oversized remote implement task unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'implement task exceeds 16384 bytes' "$TMP/err-oversized-implement"
+
+if DISPATCH_TIMEOUT_SECONDS=901 DISPATCH_GATEWAY_URL=https://127.0.0.1:1 DISPATCH_GATEWAY_TOKEN=not-used \
+  "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind implement \
+  --task valid --workdir "$TMP/work" --repository org/repo \
+  --correlation-id cli-timeout-test --path source.py --output "$TMP/out-timeout-range" \
+  >"$TMP/stdout-timeout-range" 2>"$TMP/err-timeout-range"; then
+  printf 'remote implement timeout above 900 unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'DISPATCH_TIMEOUT_SECONDS must be from 1 to 900 for remote routes' "$TMP/err-timeout-range"
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/codex" <<'EOF'
@@ -357,6 +392,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         assert self.headers["Authorization"] == "Bearer cli-test-token"
         assert request["worker_kind"] == "codex"
         if self.path == "/v1/implementations":
+            if request["correlation_id"] == "cli-implement-boundary":
+                assert len(request["task"].encode("utf-8")) == 16384
+                assert request["timeout_seconds"] == 900
             files = sorted(request["files"], key=lambda item: item["path"])
             digest = hashlib.sha256(json.dumps(files, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
             changes = [] if request["task"] == "no-op" else [{
@@ -422,5 +460,19 @@ for scenario in change no-op; do
   check grep -qF before "$TMP/work/selected.txt"
 done
 check grep -qF '"changes":[]' "$TMP/out-implement-no-op"
+
+boundary_task="$(python3 -c 'print("x" * 16384, end="")')"
+if ! DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=900 \
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-implement-boundary --path selected.txt \
+  --task "$boundary_task" --workdir "$TMP/work" --output "$TMP/out-implement-boundary" \
+  >"$TMP/stdout-implement-boundary" 2>"$TMP/err-implement-boundary"; then
+  printf 'valid maximum remote implementation limits were rejected\n' >&2
+  cat "$TMP/err-implement-boundary" >&2
+  exit 1
+fi
+check test -s "$TMP/out-implement-boundary"
+check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-boundary"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"
