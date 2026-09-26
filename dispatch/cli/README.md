@@ -81,6 +81,33 @@ for normal CLI runtime behavior, so this boundary does not claim to remove
 credentials stored by a provider CLI. Provider authentication remains a
 deployment concern.
 
+## Remote implementation
+
+A route with `target: remote`, `kinds: ["implement"]`, default harness `codex`,
+and fallback policy `none` sends only explicitly named relative files:
+
+Implementation tasks are additionally limited to 16 KiB, matching
+`implement-request.v1`. For all remote routes, `DISPATCH_TIMEOUT_SECONDS` must
+be from 1 through 900 seconds, matching the wire contracts. These checks happen
+in the CLI before it opens a gateway connection.
+
+```text
+varde-agent-dispatch --model example/model --routes /path/to/remote-routes.json \
+  --kind implement --task "bounded task" --workdir /path/to/worktree \
+  --repository org/repo --correlation-id request-id --path src/file.py \
+  --output /path/to/artifact.json
+```
+
+The route requires `DISPATCH_GATEWAY_URL` (HTTPS) and `DISPATCH_GATEWAY_TOKEN` in
+the caller environment. It rejects review PR, SHA, and diff arguments, unsafe
+or duplicate paths, symlinks anywhere in a file path, and excessive input.
+The response is a validated `implement-artifact.v1` diff proposal, not an
+applied change. Exit 0 means the artifact proposes at least one change. A
+validated empty proposal is still published but exits 6, so callers must not
+mistake successful worker completion for a file modification. Authentication
+failures and unavailability never trigger a local implementation fallback.
+Remote reviews retain their existing route.
+
 ## Public boundary
 
 This directory is intentionally not a deployment service. It does not contain

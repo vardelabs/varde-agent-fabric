@@ -44,6 +44,21 @@ cat > "$TMP/routes.json" <<'EOF'
 }
 EOF
 
+cat > "$TMP/remote-routes.json" <<'EOF'
+{
+  "schema": "dispatch-routes.v1",
+  "routes": {
+    "remote/model": {
+      "default_harness": "codex",
+      "harnesses": ["codex"],
+      "target": "remote",
+      "kinds": ["implement"],
+      "fallback": {"policy": "none"}
+    }
+  }
+}
+EOF
+
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
 
@@ -63,6 +78,26 @@ if "$CLI" --harness codex --kind review --task x --workdir "$TMP/work" 2>"$TMP/e
   printf 'review without diff unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -q -- '--diff' "$TMP/err"
+
+oversized_implement_task="$(python3 -c 'print("x" * 16385, end="")')"
+if DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=300 \
+  DISPATCH_GATEWAY_URL=https://127.0.0.1:1 DISPATCH_GATEWAY_TOKEN=not-used \
+  "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind implement \
+  --task "$oversized_implement_task" --workdir "$TMP/work" --repository org/repo \
+  --correlation-id cli-size-test --path source.py --output "$TMP/out-oversized-implement" \
+  >"$TMP/stdout-oversized-implement" 2>"$TMP/err-oversized-implement"; then
+  printf 'oversized remote implement task unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'implement task exceeds 16384 bytes' "$TMP/err-oversized-implement"
+
+if DISPATCH_TIMEOUT_SECONDS=901 DISPATCH_GATEWAY_URL=https://127.0.0.1:1 DISPATCH_GATEWAY_TOKEN=not-used \
+  "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind implement \
+  --task valid --workdir "$TMP/work" --repository org/repo \
+  --correlation-id cli-timeout-test --path source.py --output "$TMP/out-timeout-range" \
+  >"$TMP/stdout-timeout-range" 2>"$TMP/err-timeout-range"; then
+  printf 'remote implement timeout above 900 unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'DISPATCH_TIMEOUT_SECONDS must be from 1 to 900 for remote routes' "$TMP/err-timeout-range"
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/codex" <<'EOF'
@@ -349,22 +384,37 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
   -addext subjectAltName=DNS:localhost -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
   >/dev/null 2>&1
 cat > "$TMP/https-gateway.py" <<'PY'
-import http.server, json, ssl, sys
+import hashlib, http.server, json, ssl, sys
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
-        assert self.path == "/v1/reviews"
         assert self.headers["Authorization"] == "Bearer cli-test-token"
         assert request["worker_kind"] == "codex"
-        body = json.dumps({
+        if self.path == "/v1/implementations":
+            if request["correlation_id"] == "cli-implement-boundary":
+                assert len(request["task"].encode("utf-8")) == 16384
+                assert request["timeout_seconds"] == 900
+            files = sorted(request["files"], key=lambda item: item["path"])
+            digest = hashlib.sha256(json.dumps(files, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            changes = [] if request["task"] == "no-op" else [{
+                "path": files[0]["path"], "before_sha256": hashlib.sha256(files[0]["content"].encode()).hexdigest(),
+                "after_text": "after"}]
+            body = json.dumps({"schema":"implement-artifact.v1", "repository":request["repository"],
+                "worker_kind":"codex", "correlation_id":request["correlation_id"],
+                "snapshot_sha256":digest, "provider":"codex-test", "execution_location":"cluster",
+                "changes":changes, "model_output":"done", "finish_reason":"completed",
+                "fallback":None, "latency_ms":1}).encode()
+        else:
+            assert self.path == "/v1/reviews"
+            body = json.dumps({
             "schema": "review-artifact.v1", "repository": request["repository"],
             "pull_request": request["pull_request"], "base_sha": request["base_sha"],
             "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
             "execution_location": "cluster", "provider": "codex-test",
             "correlation_id": request["correlation_id"], "findings": [],
             "finish_reason": "completed", "fallback": None, "latency_ms": 1,
-        }).encode()
+            }).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
     def log_message(self, *_): pass
@@ -393,5 +443,36 @@ fi
 check test -s "$TMP/out-remote"
 check grep -qF '"execution_location":"cluster"' "$TMP/out-remote"
 check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
+
+printf 'before' > "$TMP/work/selected.txt"
+cat > "$TMP/implement-routes.json" <<'EOF'
+{"schema":"dispatch-routes.v1","routes":{"remote/model":{"default_harness":"codex","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}}}}
+EOF
+for scenario in change no-op; do
+  status=0
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+    PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
+    --repository vardelabs/example --correlation-id cli-implement --path selected.txt --task "$scenario" \
+    --workdir "$TMP/work" --output "$TMP/out-implement-$scenario" >"$TMP/stdout-implement-$scenario" 2>"$TMP/err-implement-$scenario" || status=$?
+  if [[ "$scenario" == change ]]; then check test "$status" -eq 0; else check test "$status" -eq 6; fi
+  check test -s "$TMP/out-implement-$scenario"
+  check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-$scenario"
+  check grep -qF before "$TMP/work/selected.txt"
+done
+check grep -qF '"changes":[]' "$TMP/out-implement-no-op"
+
+boundary_task="$(python3 -c 'print("x" * 16384, end="")')"
+if ! DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=900 \
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-implement-boundary --path selected.txt \
+  --task "$boundary_task" --workdir "$TMP/work" --output "$TMP/out-implement-boundary" \
+  >"$TMP/stdout-implement-boundary" 2>"$TMP/err-implement-boundary"; then
+  printf 'valid maximum remote implementation limits were rejected\n' >&2
+  cat "$TMP/err-implement-boundary" >&2
+  exit 1
+fi
+check test -s "$TMP/out-implement-boundary"
+check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-boundary"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"

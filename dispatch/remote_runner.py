@@ -7,10 +7,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import urllib.request
 import ssl
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
+from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError
 
@@ -95,13 +95,11 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
 
 
 def _gateway_client() -> GatewayClient:
-    opener = urllib.request.urlopen
+    context = None
     ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
     if ca_file:
         context = ssl.create_default_context(cafile=ca_file)
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context)).open
-        return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"], opener=opener)
-    return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"])
+    return GatewayClient(os.environ["DISPATCH_GATEWAY_URL"], os.environ["DISPATCH_GATEWAY_TOKEN"], ssl_context=context)
 
 
 def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -> ReviewArtifact:
@@ -113,6 +111,31 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
     if fallback_policy == "remote-unavailable" and metadata.harness == "codex":
         local_fallback = lambda: _run_local_codex(metadata, request)
     return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)
+
+
+@dataclass(frozen=True)
+class RemoteImplementMetadata:
+    repository: str
+    correlation_id: str
+    paths: tuple[str, ...]
+    task: str
+    workdir: str
+    output: str
+    harness: str = "codex"
+    target: str = "remote"
+    timeout_seconds: int = 300
+
+
+def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: str) -> ImplementArtifact:
+    if metadata.target != "remote" or metadata.harness != "codex" or fallback_policy != "none":
+        raise GatewayError("remote implementation requires codex and no fallback")
+    request = ImplementRequest(metadata.repository, metadata.harness, metadata.correlation_id,
+                               metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds)
+    artifact = _gateway_client().submit_implementation(request)
+    for change in artifact.changes:
+        if change["before_sha256"] is None and os.path.lexists(Path(metadata.workdir) / change["path"]):
+            raise GatewayError("created path already exists outside the selected snapshot")
+    return artifact
 
 
 def main() -> int:
@@ -127,29 +150,42 @@ def main() -> int:
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--diff")
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--pull-request", required=True, type=int)
-    parser.add_argument("--base-sha", required=True)
-    parser.add_argument("--head-sha", required=True)
+    parser.add_argument("--pull-request", type=int)
+    parser.add_argument("--base-sha")
+    parser.add_argument("--head-sha")
     parser.add_argument("--correlation-id", required=True)
     parser.add_argument("--path", action="append", required=True)
     parser.add_argument("--task", required=True)
+    parser.add_argument("--kind", choices=("review", "implement"), default="review")
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args()
-    metadata = RemoteReviewMetadata(
-        args.repository, args.pull_request, args.base_sha, args.head_sha,
-        args.correlation_id, tuple(args.path), args.task, args.diff,
-        args.workdir, args.model, args.local_backend, args.output,
-        args.harness, args.target, args.timeout_seconds,
-    )
+    if args.kind == "review" and (args.pull_request is None or not args.base_sha or not args.head_sha):
+        parser.error("review requires pull request, base SHA and head SHA")
+    if args.kind == "implement" and any(v is not None for v in (args.pull_request, args.base_sha, args.head_sha, args.diff)):
+        parser.error("implement rejects review metadata")
     try:
-        artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
+        if args.kind == "implement":
+            metadata = RemoteImplementMetadata(args.repository, args.correlation_id, tuple(args.path),
+                                               args.task, args.workdir, args.output, args.harness,
+                                               args.target, args.timeout_seconds)
+            artifact = run_remote_implement(metadata, fallback_policy=args.fallback_policy)
+        else:
+            metadata = RemoteReviewMetadata(
+                args.repository, args.pull_request, args.base_sha, args.head_sha,
+                args.correlation_id, tuple(args.path), args.task, args.diff,
+                args.workdir, args.model, args.local_backend, args.output,
+                args.harness, args.target, args.timeout_seconds,
+            )
+            artifact = run_remote_review(metadata, fallback_policy=args.fallback_policy)
         Path(args.output).write_text(
             json.dumps(artifact.to_dict(), ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
     except Exception as exc:
-        print(f"varde-agent-dispatch: remote review failed: {exc}", file=sys.stderr)
+        print(f"varde-agent-dispatch: remote {args.kind} failed: {exc}", file=sys.stderr)
         return 4
+    if isinstance(artifact, ImplementArtifact) and not artifact.changes:
+        return 6
     return 0
 
 
