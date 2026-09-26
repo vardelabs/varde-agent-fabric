@@ -96,7 +96,7 @@ class RemoteEntrypointTests(unittest.TestCase):
                 client_type.return_value.submit.return_value = expected
                 result = run_remote_review(self.metadata(), fallback_policy="none")
         self.assertEqual(result, expected)
-        client_type.assert_called_once_with("https://private.example", "token")
+        client_type.assert_called_once_with("https://private.example", "token", ssl_context=None)
         client_type.return_value.submit.assert_called_once_with(req)
 
     def test_only_gateway_unavailable_uses_local_codex_and_preserves_identity(self):
