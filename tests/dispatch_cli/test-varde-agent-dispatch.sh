@@ -163,11 +163,19 @@ check grep -qF 'sandbox=workspace-write' "$TMP/out-codex-implement"
 cat > "$TMP/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+version="$(cat "$(dirname "$0")/opencode-version")"
+if [[ "${1:-}" == --version ]]; then printf '%s\n' "$version"; exit 0; fi
 [[ "${1:-}" == run ]] || exit 91
 shift
 prompt="${1:-}"
 shift
-[[ "${1:-}" == --pure ]] || exit 92
+if [[ "$version" == *v2.* ]]; then
+  [[ "${1:-}" == --standalone ]] || exit 92
+  [[ "${OPENCODE_DISABLE_PROJECT_CONFIG:-}" == 1 ]] || exit 89
+else
+  [[ "${1:-}" == --pure ]] || exit 92
+  [[ -z "${OPENCODE_DISABLE_PROJECT_CONFIG:-}" ]] || exit 89
+fi
 shift
 [[ "${1:-}" == --format && "${2:-}" == json ]] || exit 93
 shift 2
@@ -177,22 +185,28 @@ shift 2
 [[ "${1:-}" == --model ]] || exit 95
 model="$2"
 shift 2
-[[ "${1:-}" == --dir ]] || exit 96
-workdir="$2"
-shift 2
+workdir="$PWD"
+if [[ "$version" != *v2.* ]]; then
+  [[ "${1:-}" == --dir ]] || exit 96
+  workdir="$2"
+  shift 2
+fi
 diff=''
 if [[ "${1:-}" == --file ]]; then diff="$2"; shift 2; fi
 [[ $# -eq 0 ]] || exit 97
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}${OPENCODE_GO_API_KEY:-}" ]] || exit 90
 [[ -n "$diff" && -f "$diff" ]] || [[ -z "$diff" ]] || exit 98
-printf '{"type":"text","agent":"%s","model":"%s","workdir":"%s","kind":"%s","diff":"%s","home":"%s","text":"%s"}\n' "$agent" "$model" "$workdir" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$prompt"
+printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$prompt"
 printf '{"type":"step_finish","reason":"stop"}\n'
 EOF
 chmod +x "$TMP/bin/opencode"
+printf '1.18.32\n' > "$TMP/bin/opencode-version"
 
 if [[ -n "$REAL_OPENCODE" ]]; then
   real_help="$($REAL_OPENCODE run --help 2>&1)"
-  for flag in --pure --format --agent --model --dir --file; do
+  real_flags=(--pure --format --agent --model --dir --file)
+  [[ "$($REAL_OPENCODE --version 2>&1)" != *v2.* ]] || real_flags=(--standalone --format --agent --model --file)
+  for flag in "${real_flags[@]}"; do
     check grep -q -- "$flag" <<<"$real_help"
   done
 fi
@@ -212,6 +226,41 @@ check grep -qF '"kind":"review"' "$TMP/out-opencode-review"
 check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-review"
 check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-review"
 check grep -qF '"type":"step_finish"' "$TMP/out-opencode-review"
+check grep -qF '"workdir":"'"$TMP/work"'"' "$TMP/out-opencode-review"
+
+printf 'opencode v2.0.18\n' > "$TMP/bin/opencode-version"
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task opencode-v2-review \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-v2-review" >"$TMP/stdout-opencode-v2-review" 2>"$TMP/err-opencode-v2-review"; then
+  printf 'fake opencode v2 review dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-v2-review" >&2
+  exit 1
+fi
+check grep -qF '"agent":"plan"' "$TMP/out-opencode-v2-review"
+check grep -qF '"cwd":"'"$TMP/work"'"' "$TMP/out-opencode-v2-review"
+check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-v2-review"
+check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-v2-review"
+
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind implement \
+  --model test/model --routes "$TMP/routes.json" --task opencode-v2-implement --workdir "$TMP/work" \
+  --output "$TMP/out-opencode-v2-implement" >"$TMP/stdout-opencode-v2-implement" 2>"$TMP/err-opencode-v2-implement"; then
+  printf 'fake opencode v2 implement dispatch unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-v2-implement" >&2
+  exit 1
+fi
+check grep -qF '"agent":"build"' "$TMP/out-opencode-v2-implement"
+check grep -qF '"cwd":"'"$TMP/work"'"' "$TMP/out-opencode-v2-implement"
+
+printf 'unknown\n' > "$TMP/bin/opencode-version"
+if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --harness opencode --kind review --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" \
+  --task x --workdir "$TMP/work" --output "$TMP/out-opencode-bad-version" >"$TMP/stdout-opencode-bad-version" 2>"$TMP/err-opencode-bad-version"; then
+  printf 'opencode with an unparseable version unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'could not determine the opencode CLI version' "$TMP/err-opencode-bad-version"
+printf '1.18.32\n' > "$TMP/bin/opencode-version"
 
 if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENCODE_GO_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind passthrough \
