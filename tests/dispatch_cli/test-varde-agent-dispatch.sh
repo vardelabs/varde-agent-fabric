@@ -196,7 +196,9 @@ if [[ "${1:-}" == --file ]]; then diff="$2"; shift 2; fi
 [[ $# -eq 0 ]] || exit 97
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}${OPENCODE_GO_API_KEY:-}" ]] || exit 90
 [[ -n "$diff" && -f "$diff" ]] || [[ -z "$diff" ]] || exit 98
-printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$prompt"
+stdin_text=''
+[[ -t 0 ]] || stdin_text="$(cat)"
+printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","stdin":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$stdin_text" "$prompt"
 printf '{"type":"step_finish","reason":"stop"}\n'
 EOF
 chmod +x "$TMP/bin/opencode"
@@ -229,7 +231,7 @@ check grep -qF '"type":"step_finish"' "$TMP/out-opencode-review"
 check grep -qF '"workdir":"'"$TMP/work"'"' "$TMP/out-opencode-review"
 
 printf 'opencode v2.0.18\n' > "$TMP/bin/opencode-version"
-if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
+if ! printf 'caller-stdin' | HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review \
   --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task opencode-v2-review \
   --workdir "$TMP/work" --output "$TMP/out-opencode-v2-review" >"$TMP/stdout-opencode-v2-review" 2>"$TMP/err-opencode-v2-review"; then
@@ -241,6 +243,7 @@ check grep -qF '"agent":"plan"' "$TMP/out-opencode-v2-review"
 check grep -qF '"cwd":"'"$TMP/work"'"' "$TMP/out-opencode-v2-review"
 check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-v2-review"
 check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-v2-review"
+check grep -qF '"stdin":""' "$TMP/out-opencode-v2-review"
 
 if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind implement \

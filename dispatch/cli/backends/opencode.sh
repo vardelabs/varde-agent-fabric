@@ -108,7 +108,8 @@ fi
 temporary_output="$(mktemp "${DISPATCH_OUTPUT}.opencode.XXXXXX")"
 cleanup() { rm -f -- "$temporary_output"; }
 trap cleanup EXIT
-# v2 has no --dir and resolves the project from the working directory.
-(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") >"$temporary_output"
+# v2 has no --dir and resolves the project from the working directory. Both
+# CLIs append a non-terminal stdin to the prompt and block until it closes.
+(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") </dev/null >"$temporary_output"
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
 trap - EXIT
