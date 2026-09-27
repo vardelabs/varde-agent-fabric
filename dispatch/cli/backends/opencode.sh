@@ -68,7 +68,20 @@ prompt="$DISPATCH_TASK"
   printf 'OpenCode task must not begin with a dash\n' >&2
   exit 2
 }
-args=(opencode run "$prompt" --pure --format json --agent "$agent" --model "$model" --dir "$DISPATCH_WORKDIR")
+opencode_version="$(opencode --version 2>/dev/null)" || opencode_version=''
+[[ "$opencode_version" =~ ([0-9]+)\.[0-9]+ ]] || {
+  printf 'could not determine the opencode CLI version\n' >&2
+  exit 2
+}
+if (( BASH_REMATCH[1] >= 2 )); then
+  # v2 has no --pure: disabling project config is what stops a plugin shipped
+  # in the workdir from loading. Without --standalone the run spawns a shared
+  # background service that outlives this dispatch.
+  export OPENCODE_DISABLE_PROJECT_CONFIG=1
+  args=(opencode run "$prompt" --standalone --format json --agent "$agent" --model "$model")
+else
+  args=(opencode run "$prompt" --pure --format json --agent "$agent" --model "$model" --dir "$DISPATCH_WORKDIR")
+fi
 if [[ "$DISPATCH_KIND" == review ]]; then
   [[ -n "${DISPATCH_DIFF:-}" ]] || {
     printf 'OpenCode review requires a diff file\n' >&2
@@ -95,6 +108,8 @@ fi
 temporary_output="$(mktemp "${DISPATCH_OUTPUT}.opencode.XXXXXX")"
 cleanup() { rm -f -- "$temporary_output"; }
 trap cleanup EXIT
-"${args[@]}" >"$temporary_output"
+# v2 has no --dir and resolves the project from the working directory. Both
+# CLIs append a non-terminal stdin to the prompt and block until it closes.
+(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") </dev/null >"$temporary_output"
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
 trap - EXIT

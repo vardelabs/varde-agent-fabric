@@ -51,8 +51,12 @@ The OpenCode adapter maps `review` to its `plan` agent and
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.
-The adapter invokes `--pure`, `--format json`, `--agent`, `--model`, `--dir`,
-and `--file`; the installed CLI help surface is smoke tested when available.
+The adapter reads `opencode --version` and supports the 1.x and 2.x CLIs. On
+1.x it invokes `--pure`, `--format json`, `--agent`, `--model`, `--dir`, and
+`--file`. On 2.x, which removed `--pure` and `--dir`, it runs from the workdir
+with `--standalone` so no shared background service starts, and sets
+`OPENCODE_DISABLE_PROJECT_CONFIG=1` so plugins and config in the workdir are
+not loaded. The installed CLI help surface is smoke tested when available.
 The adapter output is OpenCode's raw JSONL event stream from `--format json`;
 callers that need the final response must select the final `type=text` event.
 Set `DISPATCH_OPENCODE_HOME` to a dedicated home directory containing only
