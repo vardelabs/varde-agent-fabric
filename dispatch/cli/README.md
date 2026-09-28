@@ -16,8 +16,11 @@ varde-agent-dispatch \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
+
+### Isolated local review
+
 `--workdir` must name an existing absolute directory. For a local review isolated
-from the caller's working copy, create a Git worktree and use that path. The
+from the caller's working copy, create a Git worktree and pass its path. The
 worktree isolates Git changes, it is not a filesystem sandbox. The CLI does not
 create or remove worktrees.
 
@@ -36,7 +39,7 @@ dispatch/cli/varde-agent-dispatch \
 
 Use a route whose target is `local`. Local dispatch invokes the selected backend
 directly, does not contact the gateway, and does not silently fall back to a
-remote target. The removed `--worktree` option is replaced by `--workdir`.
+remote target.
 
 Remote review routes require the configured remote target, gateway credentials,
 and all of the review identity fields and changed paths. The CLI rejects an
@@ -60,8 +63,8 @@ dispatch/cli/varde-agent-dispatch \
   --output /path/to/review-artifact.json
 ```
 
-The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
-runtime contract to a backend:
+The current public backends are `codex` and `opencode`. The OpenCode adapter
+supports CLI v2. The dispatcher passes only an explicit runtime contract to a backend:
 
 - `DISPATCH_TASK`
 - `DISPATCH_WORKDIR`

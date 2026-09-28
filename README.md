@@ -69,23 +69,10 @@ dispatch/cli/varde-agent-dispatch \
 ```
 
 For an isolated local review, create or reuse a Git worktree and pass it with
-`--workdir`. This is the supported replacement for the removed `--worktree`
-spelling. The CLI does not create a worktree. `--workdir` must be an existing
-absolute directory, and the local backend runs in that directory. A route with
-`target: local` stays local and does not call the gateway.
-
-```bash
-# Run from a repository checkout at the exact review head.
-git -C /path/to/repository worktree add --detach /path/to/review-worktree HEAD
-dispatch/cli/varde-agent-dispatch \
-  --model example/model \
-  --routes dispatch/routes.example.json \
-  --kind review \
-  --diff /path/to/review.diff \
-  --task "Review the supplied change packet" \
-  --workdir /path/to/review-worktree \
-  --output /path/to/review-artifact.json
-```
+`--workdir`. This isolates Git changes, not filesystem access. The CLI does not
+create a worktree. `--workdir` must be an existing absolute directory, and a
+`target: local` route does not call the gateway. See the [CLI guide](dispatch/cli/README.md#isolated-local-review)
+for the canonical command example.
 
 The CLI validates inputs, applies size limits, scrubs the backend environment,
 and returns a bounded output artifact. A legacy `--harness`-only form remains
