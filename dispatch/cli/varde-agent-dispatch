@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dispatch one bounded task to a local backend.
+# Dispatch one bounded task through its resolved local or remote route.
 #
 # This public entry point owns transport-neutral validation and invokes a
 # backend through a narrow environment contract. Deployment policy, network
@@ -21,7 +21,7 @@ Options:
   --harness NAME   Backend name, codex or opencode
   --kind KIND      Work contract, review or implement (passthrough is legacy spelling; behavior is harness-specific)
   --task TEXT      Bounded task prompt
-  --workdir DIR    Existing absolute working directory
+  --workdir DIR    Existing absolute directory (use a Git worktree for isolated review)
   --diff FILE      Review input, required for review kind
   --model ID       Explicit model identifier
   --routes FILE    Model route configuration, required with --model

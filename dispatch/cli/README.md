@@ -16,8 +16,55 @@ varde-agent-dispatch \
   --task "bounded task" \
   --workdir /path/to/worktree
 ```
-The current public backends are `codex` and `opencode`. The dispatcher passes only an explicit
-runtime contract to a backend:
+
+### Isolated local review
+
+`--workdir` must name an existing absolute directory. For a local review isolated
+from the caller's working copy, create a Git worktree and pass its path. The
+worktree isolates Git changes, it is not a filesystem sandbox. The CLI does not
+create or remove worktrees.
+
+```bash
+# Run from a repository checkout at the exact review head.
+git -C /path/to/repository worktree add --detach /path/to/review-worktree HEAD
+dispatch/cli/varde-agent-dispatch \
+  --model example/model \
+  --routes dispatch/routes.example.json \
+  --kind review \
+  --diff /path/to/review.diff \
+  --task "Review the supplied change packet" \
+  --workdir /path/to/review-worktree \
+  --output /path/to/review-artifact.json
+```
+
+Use a route whose target is `local`. Local dispatch invokes the selected backend
+directly, does not contact the gateway, and does not silently fall back to a
+remote target.
+
+Remote review routes require the configured remote target, gateway credentials,
+and all of the review identity fields and changed paths. The CLI rejects an
+incomplete remote request before network access. A complete invocation includes:
+
+```bash
+dispatch/cli/varde-agent-dispatch \
+  --model remote/model \
+  --routes /path/to/private-routes.json \
+  --kind review \
+  --diff /path/to/review.diff \
+  --task "Review the supplied change packet" \
+  --workdir /path/to/review-worktree \
+  --repository owner/repository \
+  --pull-request 123 \
+  --base-sha "$BASE_SHA" \
+  --head-sha "$HEAD_SHA" \
+  --correlation-id "$CORRELATION_ID" \
+  --path src/file-a.py \
+  --path tests/test-file-a.py \
+  --output /path/to/review-artifact.json
+```
+
+The current public backends are `codex` and `opencode`. The OpenCode adapter
+supports CLI v2. The dispatcher passes only an explicit runtime contract to a backend:
 
 - `DISPATCH_TASK`
 - `DISPATCH_WORKDIR`

@@ -62,16 +62,25 @@ example registry uses the shipped `codex` backend:
 DISPATCH_CODEX_SANDBOX=workspace-write \
 dispatch/cli/varde-agent-dispatch \
   --model example/model \
-  --routes /path/to/routes.json \
+  --routes dispatch/routes.example.json \
   --kind implement \
   --task "Run the bounded task" \
   --workdir /path/to/workdir
 ```
 
+For an isolated local review, create or reuse a Git worktree and pass it with
+`--workdir`. This isolates Git changes, not filesystem access. The CLI does not
+create a worktree. `--workdir` must be an existing absolute directory, and a
+`target: local` route does not call the gateway. See the [CLI guide](dispatch/cli/README.md#isolated-local-review)
+for the canonical command example.
+
 The CLI validates inputs, applies size limits, scrubs the backend environment,
 and returns a bounded output artifact. A legacy `--harness`-only form remains
-available for callers that do not use model routing. Remote service integration
-and private deployment policy remain outside this public CLI.
+available for callers that do not use model routing. Remote review routes are
+supported when a private deployment route and credentials are configured. They
+require repository, pull request, base SHA, head SHA, correlation ID, and at
+least one changed path. Remote and local targets remain distinct and do not
+silently fall back to one another.
 
 ### Contracts
 
