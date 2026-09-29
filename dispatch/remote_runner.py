@@ -51,6 +51,7 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
         correlation_id=metadata.correlation_id,
         packet=packet,
         timeout_seconds=metadata.timeout_seconds,
+        model=metadata.model,
     )
 
 

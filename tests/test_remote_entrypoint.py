@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contracts.review_contracts import ContractError, ReviewArtifact
+from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayError, GatewayUnavailable
 from dispatch.remote_runner import RemoteReviewMetadata, build_review_request, run_remote_review
 
@@ -53,7 +53,29 @@ class RemoteEntrypointTests(unittest.TestCase):
             "correlation_id": "corr-19",
             "packet": "Review this change",
             "timeout_seconds": 30,
+            "model": "codex-model",
         })
+
+    def test_remote_request_carries_model_separately_from_harness(self):
+        model = "opencode-go/kimi-k2.7-code"
+        request = build_review_request(self.metadata(model=model, harness="opencode", target="remote"))
+
+        self.assertEqual(request.worker_kind, "opencode")
+        self.assertEqual(request.to_dict()["model"], model)
+        self.assertEqual(ReviewRequest.from_dict(request.to_dict()).model, model)
+
+    def test_model_field_is_optional_for_legacy_requests_and_validated_when_present(self):
+        model = "opencode-go/kimi-k3"
+        request = build_review_request(self.metadata(model=model, harness="opencode", target="remote"))
+        payload = request.to_dict()
+        self.assertEqual(ReviewRequest.from_dict(payload).model, model)
+        legacy_payload = dict(payload)
+        legacy_payload.pop("model")
+        self.assertIsNone(ReviewRequest.from_dict(legacy_payload).model)
+
+        for invalid in ("", "opencode-go/kimi k3", "x" * 129):
+            with self.subTest(model=invalid), self.assertRaises(ContractError):
+                ReviewRequest.from_dict({**legacy_payload, "model": invalid})
 
     def test_unknown_harness_is_rejected_by_request_allowlist(self):
         with self.assertRaises(ContractError):
