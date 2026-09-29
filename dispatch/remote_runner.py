@@ -9,7 +9,7 @@ import subprocess
 import sys
 import ssl
 
-from contracts.review_contracts import ReviewArtifact, ReviewRequest
+from contracts.review_contracts import MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
 from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError
@@ -95,6 +95,125 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         local_output.unlink(missing_ok=True)
 
 
+_LOCAL_OPENCODE_REVIEW_CONTRACT = (
+    "Review the supplied pull request packet and diff. Return only a JSON array of findings. "
+    "Each finding must be an object with severity red, yellow, or green and a non-empty message string. "
+    "Optional keys are file, line, category, confidence, and reproduction. "
+    "Return [] when there are no findings. Do not include prose or code fences."
+)
+
+
+def _opencode_findings(raw: bytes) -> tuple[dict[str, object], ...]:
+    text_parts: list[str] = []
+    try:
+        for line in raw.decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise RuntimeError("local OpenCode output event is not an object")
+            if event.get("type") == "text":
+                part = event.get("part")
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("local OpenCode output is malformed JSONL") from exc
+    if not text_parts:
+        raise RuntimeError("local OpenCode returned no final text event")
+
+    def extract(value: object) -> list[object] | None:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and isinstance(value.get("findings"), list):
+            return value["findings"]
+        return None
+
+    candidate = text_parts[-1]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as last_exc:
+        try:
+            parsed = json.loads("".join(text_parts))
+        except json.JSONDecodeError:
+            raise RuntimeError("local OpenCode final text is not valid JSON") from last_exc
+    final_findings = extract(parsed)
+    if final_findings is None:
+        raise RuntimeError("local OpenCode final text is not a findings array")
+
+    prior_findings: list[object] = []
+    for text in text_parts[:-1]:
+        try:
+            prior = extract(json.loads(text))
+        except json.JSONDecodeError:
+            continue
+        if prior:
+            prior_findings.extend(prior)
+    if prior_findings and not all(item in final_findings for item in prior_findings):
+        raise RuntimeError("local OpenCode final snapshot dropped earlier findings")
+    findings: list[dict[str, object]] = []
+    for item in final_findings:
+        if not isinstance(item, dict):
+            raise RuntimeError("local OpenCode returned a non-object finding")
+        findings.append(item)
+    return tuple(findings)
+
+
+def _run_local_opencode(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
+    opencode_home = os.environ.get("DISPATCH_OPENCODE_HOME")
+    if not opencode_home:
+        raise RuntimeError("local OpenCode fallback requires DISPATCH_OPENCODE_HOME")
+    if metadata.diff is None:
+        raise RuntimeError("local OpenCode fallback requires a review diff")
+
+    local_output = Path(f"{metadata.output}.local")
+    fallback_task = f"{_LOCAL_OPENCODE_REVIEW_CONTRACT}\n\n{metadata.task}"
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", ""),
+        "TMPDIR": metadata.workdir,
+        "DISPATCH_TASK": fallback_task,
+        "DISPATCH_WORKDIR": metadata.workdir,
+        "DISPATCH_OUTPUT": str(local_output),
+        "DISPATCH_KIND": "review",
+        "DISPATCH_MODEL": metadata.model,
+        "DISPATCH_DIFF": metadata.diff,
+        "DISPATCH_OPENCODE_HOME": opencode_home,
+    }
+    try:
+        result = subprocess.run(
+            [metadata.local_backend],
+            cwd=metadata.workdir,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=request.timeout_seconds + 5,
+            check=False,
+        )
+        if result.returncode != 0 or not local_output.is_file():
+            raise RuntimeError("local OpenCode fallback backend failed")
+        with local_output.open("rb") as stream:
+            raw = stream.read(MAX_TRANSPORT_BYTES + 1)
+        if len(raw) > MAX_TRANSPORT_BYTES:
+            raise RuntimeError("local OpenCode output exceeds the review artifact limit")
+        findings = _opencode_findings(raw)
+        return ReviewArtifact(
+            request.repository,
+            request.pull_request,
+            request.base_sha,
+            request.head_sha,
+            request.worker_kind,
+            "requester",
+            request.model or metadata.model,
+            request.correlation_id,
+            findings,
+            "completed",
+        )
+    finally:
+        local_output.unlink(missing_ok=True)
+
+
 def _gateway_client() -> GatewayClient:
     context = None
     ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
@@ -109,8 +228,11 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
         raise GatewayError("remote runner requires a remote target")
     client = _gateway_client()
     local_fallback = None
-    if fallback_policy == "remote-unavailable" and metadata.harness == "codex":
-        local_fallback = lambda: _run_local_codex(metadata, request)
+    if fallback_policy == "remote-unavailable":
+        if metadata.harness == "codex":
+            local_fallback = lambda: _run_local_codex(metadata, request)
+        elif metadata.harness == "opencode":
+            local_fallback = lambda: _run_local_opencode(metadata, request)
     return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)
 
 

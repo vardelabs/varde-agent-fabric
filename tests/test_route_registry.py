@@ -58,7 +58,7 @@ class RouteRegistryTests(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(RouteConfigError, "local codex"):
+        with self.assertRaisesRegex(RouteConfigError, "fallback must target"):
             RouteRegistry.from_dict(invalid)
 
     def test_registry_routes_are_immutable(self) -> None:
@@ -103,7 +103,7 @@ class RouteRegistryTests(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(RouteConfigError, "local codex"):
+        with self.assertRaisesRegex(RouteConfigError, "fallback must target"):
             RouteRegistry.from_dict(invalid)
 
     def test_route_names_reject_control_characters(self) -> None:
@@ -137,6 +137,7 @@ class RouteRegistryTests(unittest.TestCase):
             "openai/gpt-5.6-luna": {
                 **BASE_CONFIG["routes"]["openai/gpt-5.6-luna"],
                 "harnesses": ["codex", "opencode"],
+                "fallback": {"policy": "none"},
             },
         }
         route = RouteRegistry.from_dict(config).resolve(
@@ -144,6 +145,24 @@ class RouteRegistryTests(unittest.TestCase):
         )
         self.assertEqual(route.harness, "opencode")
         self.assertTrue(route.harness_overridden)
+
+    def test_fallback_route_rejects_harness_override_without_matching_fallback(self) -> None:
+        config = {**BASE_CONFIG}
+        config["routes"] = {
+            **BASE_CONFIG["routes"],
+            "openai/gpt-5.6-luna": {
+                **BASE_CONFIG["routes"]["openai/gpt-5.6-luna"],
+                "harnesses": ["codex", "opencode"],
+            },
+        }
+        try:
+            RouteRegistry.from_dict(config).resolve(
+                "openai/gpt-5.6-luna", "review", harness="opencode"
+            )
+        except RouteConfigError as exc:
+            self.assertIn("fallback harness must match resolved harness", str(exc))
+        else:
+            self.fail("harness override must not bypass the configured fallback harness")
 
     def test_incompatible_harness_override_fails_closed(self) -> None:
         with self.assertRaisesRegex(RouteConfigError, "not approved"):
@@ -193,7 +212,54 @@ class RouteRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(RouteConfigError, "target must be local or remote"):
             RouteRegistry.from_dict(invalid)
 
-    def test_remote_unavailable_requires_remote_primary_and_local_codex_fallback(self) -> None:
+    def test_remote_unavailable_allows_same_harness_local_opencode_fallback(self) -> None:
+        config = {
+            "schema": "dispatch-routes.v1",
+            "routes": {"opencode-go/kimi-k3": {
+                "default_harness": "opencode",
+                "target": "remote",
+                "harnesses": ["opencode"],
+                "kinds": ["review"],
+                "fallback": {
+                    "policy": "remote-unavailable",
+                    "harness": "opencode",
+                    "target": "local",
+                },
+            }},
+        }
+        try:
+            route = RouteRegistry.from_dict(config).resolve("opencode-go/kimi-k3", "review")
+        except RouteConfigError as exc:
+            self.fail(f"OpenCode Go route should permit same-harness local fallback: {exc}")
+        self.assertEqual(route.harness, "opencode")
+        self.assertEqual(route.model, "opencode-go/kimi-k3")
+        self.assertEqual(route.fallback.to_dict(), {
+            "policy": "remote-unavailable", "harness": "opencode", "target": "local"
+        })
+
+    def test_remote_fallback_harness_must_match_primary_harness(self) -> None:
+        mismatched = {
+            "schema": "dispatch-routes.v1",
+            "routes": {"model": {
+                "default_harness": "opencode",
+                "target": "remote",
+                "harnesses": ["opencode", "codex"],
+                "kinds": ["review"],
+                "fallback": {
+                    "policy": "remote-unavailable",
+                    "harness": "codex",
+                    "target": "local",
+                },
+            }},
+        }
+        try:
+            RouteRegistry.from_dict(mismatched)
+        except RouteConfigError as exc:
+            self.assertIn("fallback harness must match", str(exc))
+        else:
+            self.fail("fallback must preserve the primary harness")
+
+    def test_remote_unavailable_requires_remote_primary_and_supported_local_fallback(self) -> None:
         local_primary = {
             "schema": "dispatch-routes.v1",
             "routes": {"model": {
@@ -224,8 +290,24 @@ class RouteRegistryTests(unittest.TestCase):
                 },
             }},
         }
-        with self.assertRaisesRegex(RouteConfigError, "local codex"):
+        with self.assertRaisesRegex(RouteConfigError, "fallback"):
             RouteRegistry.from_dict(remote_non_codex_fallback)
+
+        unsupported_harness = {
+            "schema": "dispatch-routes.v1",
+            "routes": {"model": {
+                "default_harness": "llama-broker",
+                "target": "remote",
+                "kinds": ["review"],
+                "fallback": {
+                    "policy": "remote-unavailable",
+                    "harness": "llama-broker",
+                    "target": "local",
+                },
+            }},
+        }
+        with self.assertRaisesRegex(RouteConfigError, "fallback"):
+            RouteRegistry.from_dict(unsupported_harness)
 
 
 if __name__ == "__main__":

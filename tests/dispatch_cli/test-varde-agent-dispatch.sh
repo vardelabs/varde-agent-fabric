@@ -39,6 +39,13 @@ cat > "$TMP/routes.json" <<'EOF'
       "target": "remote",
       "kinds": ["review"],
       "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"}
+    },
+    "opencode-go/qwen3.8-flash": {
+      "default_harness": "opencode",
+      "harnesses": ["opencode"],
+      "target": "remote",
+      "kinds": ["review"],
+      "fallback": {"policy": "remote-unavailable", "harness": "opencode", "target": "local"}
     }
   }
 }
@@ -202,6 +209,10 @@ if [[ "${1:-}" == --file ]]; then diff="$2"; shift 2; fi
 [[ -n "$diff" && -f "$diff" ]] || [[ -z "$diff" ]] || exit 98
 stdin_text=''
 [[ -t 0 ]] || stdin_text="$(cat)"
+if [[ "$model" == "opencode-go/qwen3.8-flash" ]]; then
+  printf '%s\n' '{"type":"text","part":{"text":"[]"}}' '{"type":"step_finish","reason":"stop"}'
+  exit 0
+fi
 printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","stdin":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$stdin_text" "$prompt"
 printf '{"type":"step_finish","reason":"stop"}\n'
 EOF
@@ -446,6 +457,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
         assert self.headers["Authorization"] == "Bearer cli-test-token"
+        if request["worker_kind"] == "opencode":
+            assert request["model"] == "opencode-go/qwen3.8-flash"
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         assert request["worker_kind"] == "codex"
         if self.path == "/v1/implementations":
             if request["correlation_id"] == "cli-implement-boundary":
@@ -495,7 +512,7 @@ SERVER_PID=$!
 for _ in $(seq 1 50); do [[ -s "$TMP/port" ]] && break; sleep 0.02; done
 [[ -s "$TMP/port" ]] || { printf 'HTTPS gateway did not start\n' >&2; exit 1; }
 cat > "$TMP/remote-routes.json" <<'EOF'
-{"schema":"dispatch-routes.v1","routes":{"remote/model":{"default_harness":"codex","harnesses":["codex"],"target":"remote","kinds":["review"],"fallback":{"policy":"none"}}}}
+{"schema":"dispatch-routes.v1","routes":{"remote/model":{"default_harness":"codex","harnesses":["codex"],"target":"remote","kinds":["review"],"fallback":{"policy":"none"}},"opencode-go/qwen3.8-flash":{"default_harness":"opencode","harnesses":["opencode"],"target":"remote","kinds":["review"],"fallback":{"policy":"remote-unavailable","harness":"opencode","target":"local"}}}}
 EOF
 remote_port="$(<"$TMP/port")"
 if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
@@ -508,6 +525,25 @@ fi
 check test -s "$TMP/out-remote"
 check grep -qF '"execution_location":"cluster"' "$TMP/out-remote"
 check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
+
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" \
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token \
+  DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" PATH="$TMP/bin:/usr/bin:/bin" \
+  "$CLI" --model opencode-go/qwen3.8-flash --routes "$TMP/remote-routes.json" --kind review \
+  --diff "$TMP/change.diff" --repository vardelabs/example --pull-request 21 \
+  --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+  --correlation-id cli-qwen-fallback --path src/app.py --task qwen-local-fallback \
+  --workdir "$TMP/work" --output "$TMP/out-opencode-fallback" \
+  >"$TMP/stdout-opencode-fallback" 2>"$TMP/err-opencode-fallback"; then
+  printf 'remote Qwen fallback dispatch unexpectedly failed\\n' >&2
+  cat "$TMP/err-opencode-fallback" >&2
+  exit 1
+fi
+check test -s "$TMP/out-opencode-fallback"
+check grep -qF '"provider":"opencode-go/qwen3.8-flash"' "$TMP/out-opencode-fallback"
+check grep -qF '"worker_kind":"opencode"' "$TMP/out-opencode-fallback"
+check grep -qF '"execution_location":"requester"' "$TMP/out-opencode-fallback"
+check grep -qF '"fallback":"cluster-unavailable-local-opencode"' "$TMP/out-opencode-fallback"
 
 printf 'before' > "$TMP/work/selected.txt"
 cat > "$TMP/implement-routes.json" <<'EOF'
