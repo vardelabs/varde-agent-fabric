@@ -33,6 +33,14 @@ def _text(value: Any, field: str, *, max_length: int = _MAX_TEXT) -> str:
     return value
 
 
+def _model(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 128:
+        raise ContractError("model must be a non-empty string of at most 128 characters")
+    if any(character.isspace() or not character.isprintable() for character in value):
+        raise ContractError("model must contain printable non-whitespace characters")
+    return value
+
+
 def _sha(value: Any, field: str) -> str:
     value = _text(value, field, max_length=64)
     if len(value) != 40 or any(c not in "0123456789abcdef" for c in value.lower()):
@@ -89,6 +97,7 @@ class ReviewRequest:
     correlation_id: str
     packet: str
     timeout_seconds: int = 300
+    model: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.repository, "repository")
@@ -113,12 +122,14 @@ class ReviewRequest:
             raise ContractError("packet must be non-empty and at most 262144 UTF-8 bytes")
         if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 900:
             raise ContractError("timeout_seconds must be an integer from 1 to 900")
+        if self.model is not None:
+            object.__setattr__(self, "model", _model(self.model))
         body = json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(body) > MAX_TRANSPORT_BYTES:
             raise ContractError("serialized request exceeds transport limit")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema": "review-request.v1",
             "repository": self.repository,
             "pull_request": self.pull_request,
@@ -131,16 +142,24 @@ class ReviewRequest:
             "packet": self.packet,
             "timeout_seconds": self.timeout_seconds,
         }
+        if self.model is not None:
+            value["model"] = self.model
+        return value
 
     @classmethod
     def from_dict(cls, data: Any) -> "ReviewRequest":
         data = _mapping(data, "review request")
-        _keys(data, {"schema", "repository", "pull_request", "base_sha", "head_sha", "paths", "kind", "worker_kind", "correlation_id", "packet", "timeout_seconds"}, "review request")
+        required = {"schema", "repository", "pull_request", "base_sha", "head_sha", "paths", "kind", "worker_kind", "correlation_id", "packet", "timeout_seconds"}
+        expected = required | ({"model"} if "model" in data else set())
+        _keys(data, expected, "review request")
         if data["schema"] != "review-request.v1":
             raise ContractError("unsupported review request schema")
         if not isinstance(data["paths"], list):
             raise ContractError("paths must be a list")
-        return cls(paths=tuple(data["paths"]), **{k: data[k] for k in ("repository", "pull_request", "base_sha", "head_sha", "kind", "worker_kind", "correlation_id", "packet", "timeout_seconds")})
+        values = {key: data[key] for key in required - {"schema", "paths"}}
+        if "model" in data:
+            values["model"] = _model(data["model"])
+        return cls(paths=tuple(data["paths"]), **values)
 
 
 @dataclass(frozen=True)
