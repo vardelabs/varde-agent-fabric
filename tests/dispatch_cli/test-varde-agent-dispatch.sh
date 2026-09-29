@@ -68,6 +68,7 @@ check test -x "$CLI"
 check test -x "$ROOT/dispatch/cli/backends/codex.sh"
 help_text="$($CLI --help 2>&1 || true)"
 check grep -qF 'review or implement' <<<"$help_text"
+check grep -qF 'use a Git worktree for isolated review' <<<"$help_text"
 
 if "$CLI" --harness missing --kind passthrough --task x --workdir "$TMP/work" 2>"$TMP/err"; then
   printf 'unsupported harness unexpectedly succeeded\n' >&2; exit 1
@@ -105,11 +106,13 @@ cat > "$TMP/bin/codex" <<'EOF'
 set -euo pipefail
 output=''
 prompt=''
+working_dir=''
 for arg in "$@"; do
   [[ "$arg" != *'diff body'* && "$arg" != *'private-task-sentinel'* ]] || exit 94
 done
 while (($#)); do
   if [[ "$1" == '-o' ]]; then output="$2"; shift 2
+  elif [[ "$1" == '-C' ]]; then working_dir="$2"; shift 2
   elif [[ "$1" == '--' ]]; then
     shift
     [[ $# -eq 1 && "$1" == '-' ]] || exit 92
@@ -120,7 +123,7 @@ while (($#)); do
 done
 [[ "$(printenv)" != *'diff body'* && "$(printenv)" != *'private-task-sentinel'* ]] || exit 93
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\ncwd=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" "$working_dir" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
@@ -138,6 +141,7 @@ check grep -qF "$TMP/out" "$TMP/stdout"
 check grep -qF 'model=test/model' "$TMP/out"
 check grep -qF 'sandbox=workspace-write' "$TMP/out"
 check grep -qF 'target=local' "$TMP/out"
+check grep -qF "cwd=$TMP/work" "$TMP/out"
 check grep -qF 'overridden=false' "$TMP/out"
 check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
@@ -459,6 +463,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "fallback":None, "latency_ms":1}).encode()
         else:
             assert self.path == "/v1/reviews"
+            assert request["schema"] == "review-request.v1"
+            assert request["repository"] == "vardelabs/example"
+            assert request["pull_request"] == 20
+            assert request["base_sha"] == "a" * 40
+            assert request["head_sha"] == "b" * 40
+            assert request["correlation_id"] == "cli-corr"
+            assert request["paths"] == ["src/app.py"]
+            assert request["kind"] == "reviewer"
+            assert "remote-task" in request["packet"] and "diff body" in request["packet"]
             body = json.dumps({
             "schema": "review-artifact.v1", "repository": request["repository"],
             "pull_request": request["pull_request"], "base_sha": request["base_sha"],

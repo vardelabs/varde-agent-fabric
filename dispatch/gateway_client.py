@@ -26,6 +26,20 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
+
+HTTP_400_DIAGNOSTIC_BYTES = 512
+
+
+def _bad_request_error(body: bytes) -> GatewayError:
+    excerpt = body[:HTTP_400_DIAGNOSTIC_BYTES].decode("utf-8", "replace")
+    excerpt = " ".join(
+        "".join(char if char.isprintable() else " " for char in excerpt).split()
+    )
+    suffix = "…" if len(body) > HTTP_400_DIAGNOSTIC_BYTES else ""
+    detail = f"; gateway diagnostic: {excerpt[:HTTP_400_DIAGNOSTIC_BYTES]}{suffix}" if excerpt else ""
+    return GatewayError(f"gateway rejected review request (HTTP 400){detail}")
+
+
 class GatewayClient:
     def __init__(self, base_url: str, token: str, *, opener: Callable | None = None,
                  max_response_bytes: int = MAX_TRANSPORT_BYTES, ssl_context: "_ssl.SSLContext | None" = None) -> None:
@@ -100,11 +114,15 @@ class GatewayClient:
                     status = response.status
                     if status in {502, 503, 504}:
                         raise GatewayUnavailable(f"gateway returned HTTP {status}")
+                    if status == 400:
+                        raise _bad_request_error(response.read(HTTP_400_DIAGNOSTIC_BYTES + 1))
                     raise GatewayError(f"gateway returned HTTP {status}")
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             if exc.code in {502, 503, 504}:
                 raise GatewayUnavailable(f"gateway returned HTTP {exc.code}") from exc
+            if exc.code == 400:
+                raise _bad_request_error(exc.read(HTTP_400_DIAGNOSTIC_BYTES + 1)) from exc
             raise GatewayError(f"gateway returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             raise GatewayUnavailable("gateway unavailable") from exc

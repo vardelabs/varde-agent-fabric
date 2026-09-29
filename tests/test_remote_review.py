@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import io
 import multiprocessing
 import sys
 import time
@@ -185,6 +186,34 @@ class RemoteReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(GatewayError, "HTTP 503"): client.submit(req)
         client = GatewayClient("https://gateway.example", "secret", opener=lambda *args, **kwargs: Response(b"not-json"))
         with self.assertRaisesRegex(GatewayError, "malformed"): client.submit(req)
+
+        error = urllib.error.HTTPError(
+            "https://gateway.example/v1/reviews", 400, "bad request", Message(),
+            io.BytesIO(b'{"error":"review schema mismatch"}'),
+        )
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaises(GatewayError) as raised:
+            client.submit(req)
+        self.assertIn("HTTP 400", str(raised.exception))
+        self.assertIn("review schema mismatch", str(raised.exception))
+        self.assertNotIn("required identity/path metadata", str(raised.exception))
+
+        error = urllib.error.HTTPError(
+            "https://gateway.example/v1/reviews", 400, "bad request", Message(),
+            io.BytesIO(b"x" * 4096),
+        )
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaises(GatewayError) as raised:
+            client.submit(req)
+        self.assertLessEqual(len(str(raised.exception)), 600)
+
+        class BadRequest(Response): status = 400
+        client = GatewayClient(
+            "https://gateway.example", "secret",
+            opener=lambda *args, **kwargs: BadRequest(b"invalid request contract"),
+        )
+        with self.assertRaisesRegex(GatewayError, "invalid request contract"):
+            client.submit(req)
 
         error = urllib.error.HTTPError("https://gateway.example/v1/reviews", 401, "unauthorized", Message(), None)
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
