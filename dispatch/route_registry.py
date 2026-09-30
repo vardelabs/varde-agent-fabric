@@ -120,8 +120,16 @@ class RouteDefinition:
         if fallback.policy == "remote-unavailable":
             if target != "remote":
                 raise RouteConfigError("remote-unavailable policy requires a remote primary route")
-            if fallback.target != "local" or fallback.harness != "codex":
-                raise RouteConfigError("remote-unavailable fallback must target the local codex backend")
+            if fallback.target != "local":
+                raise RouteConfigError("remote-unavailable fallback must target local")
+            if fallback.harness != default_harness:
+                raise RouteConfigError(
+                    "remote-unavailable fallback harness must match default_harness"
+                )
+            if default_harness not in {"codex", "opencode"}:
+                raise RouteConfigError(
+                    f"local fallback is not supported for harness {default_harness!r}"
+                )
         return cls(model, default_harness, harnesses, target, kinds, fallback)
 
 
@@ -182,6 +190,11 @@ class RouteRegistry:
             raise RouteConfigError(
                 f"harness {effective_harness!r} is not approved for model {model!r}"
             )
+        if (
+            definition.fallback.policy == "remote-unavailable"
+            and definition.fallback.harness != effective_harness
+        ):
+            raise RouteConfigError("fallback harness must match resolved harness")
         return ResolvedRoute(
             model=model,
             kind=kind,

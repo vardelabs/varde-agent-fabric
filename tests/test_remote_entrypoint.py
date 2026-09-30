@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contracts.review_contracts import ContractError, ReviewArtifact
+from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayError, GatewayUnavailable
 from dispatch.remote_runner import RemoteReviewMetadata, build_review_request, run_remote_review
 
@@ -53,7 +53,28 @@ class RemoteEntrypointTests(unittest.TestCase):
             "correlation_id": "corr-19",
             "packet": "Review this change",
             "timeout_seconds": 30,
+            "model": "codex-model",
         })
+
+    def test_remote_request_carries_model_separately_from_harness(self):
+        model = "opencode-go/kimi-k2.7-code"
+        request = build_review_request(self.metadata(model=model, harness="opencode", target="remote"))
+
+        self.assertEqual(request.worker_kind, "opencode")
+        self.assertEqual(request.to_dict()["model"], model)
+        self.assertEqual(ReviewRequest.from_dict(request.to_dict()).model, model)
+
+    def test_model_field_is_optional_for_legacy_requests_and_validated_when_present(self):
+        model = "opencode-go/kimi-k3"
+        request = build_review_request(self.metadata(model=model, harness="opencode", target="remote"))
+        payload = request.to_dict()
+        legacy_payload = dict(payload)
+        legacy_payload.pop("model")
+        self.assertIsNone(ReviewRequest.from_dict(legacy_payload).model)
+
+        for invalid in ("", "opencode-go/kimi k3", "x" * 129):
+            with self.subTest(model=invalid), self.assertRaises(ContractError):
+                ReviewRequest.from_dict({**legacy_payload, "model": invalid})
 
     def test_unknown_harness_is_rejected_by_request_allowlist(self):
         with self.assertRaises(ContractError):
@@ -88,6 +109,161 @@ class RemoteEntrypointTests(unittest.TestCase):
             self.assertEqual(environment["HOME"], "/caller-home")
             self.assertNotIn("DISPATCH_GATEWAY_TOKEN", environment)
 
+    def test_opencode_remote_unavailable_uses_same_model_local_harness(self):
+        model = "opencode-go/kimi-k3"
+        with tempfile.TemporaryDirectory() as workdir:
+            caller_home = Path(workdir) / "caller-home"
+            opencode_home = Path(workdir) / "opencode-home"
+            caller_home.mkdir()
+            opencode_home.mkdir()
+            diff = Path(workdir) / "change.diff"
+            diff.write_text("diff --git a/app.py b/app.py" + chr(10), encoding="utf-8")
+            metadata = self.metadata(
+                harness="opencode", model=model, local_backend="/bin/opencode",
+                workdir=workdir, diff=str(diff), output=f"{workdir}/review.json",
+            )
+            stream = json.dumps({"type": "text", "part": {"text": json.dumps([
+                {"severity": "red", "message": "verified finding"}
+            ])}}) + chr(10) + json.dumps({"type": "step_finish"}) + chr(10)
+            with mock.patch.dict(os.environ, {
+                "DISPATCH_GATEWAY_URL": "https://private.example",
+                "DISPATCH_GATEWAY_TOKEN": "must-not-forward",
+                "PATH": "/custom/bin:/usr/bin",
+                "HOME": str(caller_home),
+                "DISPATCH_OPENCODE_HOME": str(opencode_home),
+            }, clear=False):
+                with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                    client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
+                    with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                        def execute(*args, **kwargs):
+                            Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(stream, encoding="utf-8")
+                            return mock.Mock(returncode=0)
+                        run.side_effect = execute
+                        try:
+                            result = run_remote_review(metadata, fallback_policy="remote-unavailable")
+                        except GatewayUnavailable as exc:
+                            self.fail(f"expected local OpenCode fallback, got remote failure: {exc}")
+            env = run.call_args.kwargs["env"]
+
+        self.assertEqual(result.provider, model)
+        self.assertEqual(result.worker_kind, "opencode")
+        self.assertEqual(result.execution_location, "requester")
+        self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
+        self.assertEqual(result.fallback, "cluster-unavailable-local-opencode")
+        self.assertEqual(env["DISPATCH_MODEL"], model)
+        self.assertEqual(env["DISPATCH_OPENCODE_HOME"], str(opencode_home))
+        self.assertEqual(env["HOME"], str(caller_home))
+        self.assertEqual(env["DISPATCH_DIFF"], str(diff))
+        self.assertNotIn("DISPATCH_GATEWAY_TOKEN", env)
+
+    def test_opencode_local_fallback_runs_real_adapter_with_same_model_and_home(self):
+        model = "opencode-go/kimi-k3"
+        with tempfile.TemporaryDirectory() as workdir:
+            root = Path(workdir)
+            caller_home = root / "caller-home"
+            opencode_home = root / "opencode-home"
+            fake_bin = root / "bin"
+            caller_home.mkdir()
+            opencode_home.mkdir()
+            fake_bin.mkdir()
+            events = json.dumps({"type": "text", "part": {"text": json.dumps([
+                {"severity": "red", "message": "verified finding"}
+            ])}}) + "\n" + json.dumps({"type": "step_finish"}) + "\n"
+            (opencode_home / "events.jsonl").write_text(events, encoding="utf-8")
+            fake_cli = fake_bin / "opencode"
+            fake_cli.write_text(
+                f'''#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "--version" ]]; then echo "opencode v2.0.0"; exit 0; fi
+[[ "$HOME" == "$DISPATCH_OPENCODE_HOME" ]] || exit 31
+[[ "$DISPATCH_MODEL" == "{model}" ]] || exit 32
+[[ " $* " == *"--model {model}"* ]] || exit 33
+[[ " $* " == *"--file $DISPATCH_DIFF"* ]] || exit 34
+[[ " $* " == *"JSON array of findings"* ]] || exit 36
+[[ -z "${{DISPATCH_GATEWAY_TOKEN:-}}${{DISPATCH_GATEWAY_URL:-}}${{OPENAI_API_KEY:-}}${{OPENCODE_GO_API_KEY:-}}" ]] || exit 37
+[[ -f "$DISPATCH_DIFF" ]] || exit 35
+cat "$HOME/events.jsonl"
+''',
+                encoding="utf-8",
+            )
+            fake_cli.chmod(0o700)
+            diff = root / "change.diff"
+            diff.write_text("diff --git a/app.py b/app.py\n", encoding="utf-8")
+            backend = Path(__file__).resolve().parents[1] / "dispatch" / "cli" / "backends" / "opencode.sh"
+            metadata = self.metadata(
+                harness="opencode", model=model, local_backend=str(backend),
+                workdir=workdir, diff=str(diff), output=f"{workdir}/review.json",
+            )
+            with mock.patch.dict(os.environ, {
+                "DISPATCH_GATEWAY_URL": "https://private.example",
+                "DISPATCH_GATEWAY_TOKEN": "must-not-forward",
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "HOME": str(caller_home),
+                "DISPATCH_OPENCODE_HOME": str(opencode_home),
+            }, clear=False):
+                with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                    client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
+                    try:
+                        result = run_remote_review(metadata, fallback_policy="remote-unavailable")
+                    except GatewayUnavailable as exc:
+                        self.fail(f"expected local OpenCode fallback, got remote failure: {exc}")
+        self.assertEqual(result.provider, model)
+        self.assertEqual(result.worker_kind, "opencode")
+        self.assertEqual(result.execution_location, "requester")
+        self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
+        self.assertEqual(result.fallback, "cluster-unavailable-local-opencode")
+
+    def test_opencode_fallback_does_not_run_for_http_400(self):
+        metadata = self.metadata(harness="opencode", model="opencode-go/qwen3.8-flash")
+        with mock.patch.dict(os.environ, {
+            "DISPATCH_GATEWAY_URL": "https://private.example",
+            "DISPATCH_GATEWAY_TOKEN": "must-not-forward",
+        }, clear=False):
+            with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                client_type.return_value.submit.side_effect = GatewayError("gateway returned HTTP 400")
+                with mock.patch("dispatch.remote_runner._run_local_opencode", create=True) as local:
+                    with self.assertRaisesRegex(GatewayError, "HTTP 400"):
+                        run_remote_review(metadata, fallback_policy="remote-unavailable")
+                    local.assert_not_called()
+
+    def test_opencode_fallback_rejects_missing_final_text_event(self):
+        model = "opencode-go/qwen3.8-flash"
+        with tempfile.TemporaryDirectory() as workdir:
+            root = Path(workdir)
+            caller_home = root / "caller-home"
+            opencode_home = root / "opencode-home"
+            caller_home.mkdir()
+            opencode_home.mkdir()
+            diff = root / "change.diff"
+            diff.write_text("diff --git a/app.py b/app.py\n", encoding="utf-8")
+            metadata = self.metadata(
+                harness="opencode", model=model, workdir=workdir,
+                diff=str(diff), output=f"{workdir}/review.json",
+            )
+            with mock.patch.dict(os.environ, {
+                "DISPATCH_GATEWAY_URL": "https://private.example",
+                "DISPATCH_GATEWAY_TOKEN": "must-not-forward",
+                "DISPATCH_OPENCODE_HOME": str(opencode_home),
+                "HOME": str(caller_home),
+            }, clear=False):
+                with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                    client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
+                    with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                        def execute(*args, **kwargs):
+                            Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(
+                                json.dumps({"type": "step_finish"}) + "\n", encoding="utf-8"
+                            )
+                            return mock.Mock(returncode=0)
+                        run.side_effect = execute
+                        try:
+                            run_remote_review(metadata, fallback_policy="remote-unavailable")
+                        except GatewayUnavailable as exc:
+                            self.fail(f"expected local artifact validation, got remote failure: {exc}")
+                        except RuntimeError as exc:
+                            self.assertIn("no final text event", str(exc))
+                        else:
+                            self.fail("expected incomplete OpenCode output to be rejected")
+
     def test_remote_route_calls_gateway_without_local_fallback(self):
         req = build_review_request(self.metadata())
         expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "cluster", "codex", "corr-19", (), "completed")
@@ -101,7 +277,7 @@ class RemoteEntrypointTests(unittest.TestCase):
 
     def test_only_gateway_unavailable_uses_local_codex_and_preserves_identity(self):
         metadata = self.metadata(local_backend="/bin/local")
-        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex", "corr-19", (), "completed")
+        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
@@ -113,7 +289,7 @@ class RemoteEntrypointTests(unittest.TestCase):
 
     def test_http_503_response_status_uses_local_fallback(self):
         metadata = self.metadata(local_backend="/bin/local")
-        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex", "corr-19", (), "completed")
+        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
         class UnavailableResponse:
             status = 503
             def __enter__(self): return self
@@ -124,6 +300,31 @@ class RemoteEntrypointTests(unittest.TestCase):
                 with mock.patch("dispatch.remote_runner._run_local_codex", return_value=expected):
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+
+    def test_fallback_artifact_provider_must_match_selected_model(self):
+        model = "opencode-go/kimi-k3"
+        request = build_review_request(self.metadata(harness="opencode", model=model))
+        artifact = ReviewArtifact(
+            "vardelabs/example", 19, BASE, HEAD, "opencode", "requester",
+            "opencode-go/qwen3.8-flash", "corr-19", (), "completed",
+        )
+        from dispatch.fallback_policy import validate_fallback_artifact
+        with self.assertRaisesRegex(RuntimeError, "selected model"):
+            validate_fallback_artifact(artifact, request)
+
+    def test_opencode_worker_errors_never_fall_back(self):
+        metadata = self.metadata(harness="opencode", model="opencode-go/qwen3.8-flash")
+        error = GatewayError("worker returned a rejected-artifact response")
+        with mock.patch.dict(os.environ, {
+            "DISPATCH_GATEWAY_URL": "https://private.example",
+            "DISPATCH_GATEWAY_TOKEN": "token",
+        }, clear=False):
+            with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
+                client_type.return_value.submit.side_effect = error
+                with mock.patch("dispatch.remote_runner._run_local_opencode", create=True) as local:
+                    with self.assertRaises(GatewayError):
+                        run_remote_review(metadata, fallback_policy="remote-unavailable")
+                    local.assert_not_called()
 
     def test_contract_or_worker_errors_never_fallback(self):
         for error in (GatewayError("bad artifact"), RuntimeError("worker failed")):
