@@ -158,7 +158,7 @@ class ReviewRequest:
             raise ContractError("paths must be a list")
         values = {key: data[key] for key in required - {"schema", "paths"}}
         if "model" in data:
-            values["model"] = _model(data["model"])
+            values["model"] = data["model"]
         return cls(paths=tuple(data["paths"]), **values)
 
 

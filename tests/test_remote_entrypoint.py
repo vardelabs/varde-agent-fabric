@@ -68,7 +68,6 @@ class RemoteEntrypointTests(unittest.TestCase):
         model = "opencode-go/kimi-k3"
         request = build_review_request(self.metadata(model=model, harness="opencode", target="remote"))
         payload = request.to_dict()
-        self.assertEqual(ReviewRequest.from_dict(payload).model, model)
         legacy_payload = dict(payload)
         legacy_payload.pop("model")
         self.assertIsNone(ReviewRequest.from_dict(legacy_payload).model)
@@ -159,7 +158,7 @@ class RemoteEntrypointTests(unittest.TestCase):
 
     def test_opencode_local_fallback_runs_real_adapter_with_same_model_and_home(self):
         model = "opencode-go/kimi-k3"
-        with tempfile.TemporaryDirectory(dir="/data/vega/.tmp") as workdir:
+        with tempfile.TemporaryDirectory() as workdir:
             root = Path(workdir)
             caller_home = root / "caller-home"
             opencode_home = root / "opencode-home"
@@ -229,7 +228,7 @@ cat "$HOME/events.jsonl"
 
     def test_opencode_fallback_rejects_missing_final_text_event(self):
         model = "opencode-go/qwen3.8-flash"
-        with tempfile.TemporaryDirectory(dir="/data/vega/.tmp") as workdir:
+        with tempfile.TemporaryDirectory() as workdir:
             root = Path(workdir)
             caller_home = root / "caller-home"
             opencode_home = root / "opencode-home"

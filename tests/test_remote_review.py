@@ -27,8 +27,8 @@ BASE = "a" * 40
 HEAD = "b" * 40
 
 
-def request(worker: str = "local-gemma") -> ReviewRequest:
-    return ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", worker, "corr-7", "bounded packet")
+def request(worker: str = "local-gemma", model: str | None = None) -> ReviewRequest:
+    return ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", worker, "corr-7", "bounded packet", model=model)
 
 
 def artifact(req: ReviewRequest, **changes: object) -> dict:
@@ -134,6 +134,21 @@ class RemoteReviewTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req, **changes)))
                 with self.assertRaises(GatewayError): client.submit(req)
+
+    def test_remote_artifact_model_identity_is_bound(self):
+        req = request("opencode", model="opencode-go/kimi-k3")
+        client = GatewayClient(
+            "https://gateway.example", "secret",
+            opener=self.opener(artifact(req, provider="opencode-go/kimi-k2.7-code")),
+        )
+        with self.assertRaisesRegex(GatewayError, "does not match"):
+            client.submit(req)
+
+        client = GatewayClient(
+            "https://gateway.example", "secret",
+            opener=self.opener(artifact(req, provider=req.model)),
+        )
+        self.assertEqual(client.submit(req).provider, req.model)
 
     def test_request_rejects_combined_serialized_transport_overflow(self):
         paths = tuple("漢" * 512 for _ in range(100))

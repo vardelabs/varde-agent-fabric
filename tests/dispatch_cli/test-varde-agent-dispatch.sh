@@ -488,12 +488,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             assert request["correlation_id"] == "cli-corr"
             assert request["paths"] == ["src/app.py"]
             assert request["kind"] == "reviewer"
+            assert request["model"] == "remote/model"
             assert "remote-task" in request["packet"] and "diff body" in request["packet"]
             body = json.dumps({
             "schema": "review-artifact.v1", "repository": request["repository"],
             "pull_request": request["pull_request"], "base_sha": request["base_sha"],
             "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
-            "execution_location": "cluster", "provider": "codex-test",
+            "execution_location": "cluster", "provider": request["model"],
             "correlation_id": request["correlation_id"], "findings": [],
             "finish_reason": "completed", "fallback": None, "latency_ms": 1,
             }).encode()
