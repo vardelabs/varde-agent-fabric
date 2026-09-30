@@ -23,7 +23,12 @@ Each route keeps these axes separate:
 - `target`: the execution location, either `local` or `remote`
 - `kinds`: the bounded work contracts allowed for the route
 - `fallback`: either `none`, or `remote-unavailable` for a remote primary route
-  with the local `codex` fallback
+  with a local fallback using the same model and primary harness (`codex` or
+  `opencode`)
+
+Only typed remote-unavailable failures activate a fallback. HTTP 400, contract
+rejections, and worker failures remain hard failures. OpenCode fallback keeps the
+`opencode-go/...` model identity; it does not substitute another model or provider.
 
 The shipped local adapters are `codex` and `opencode`. `opencode` means the
 OpenCode CLI harness; its provider and exact model remain runtime route policy,

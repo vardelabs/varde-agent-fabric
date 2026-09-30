@@ -134,6 +134,7 @@ class GatewayClient:
             raise GatewayError("gateway returned malformed artifact") from exc
         if (artifact.repository != request.repository or artifact.pull_request != request.pull_request or
                 artifact.base_sha != request.base_sha or artifact.head_sha != request.head_sha or
-                artifact.correlation_id != request.correlation_id or artifact.worker_kind != request.worker_kind):
+                artifact.correlation_id != request.correlation_id or artifact.worker_kind != request.worker_kind or
+                (request.model is not None and artifact.provider != request.model)):
             raise GatewayError("gateway artifact does not match request identity")
         return artifact
