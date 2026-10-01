@@ -90,8 +90,8 @@ class GatewayClient:
         if any(getattr(artifact, field) != getattr(request, field) for field in
                ("repository", "worker_kind", "correlation_id", "snapshot_sha256", "model")):
             raise GatewayError("gateway implementation artifact does not match request identity")
-        if artifact.execution_location != "cluster" or (request.model is not None and artifact.provider != request.model):
-            raise GatewayError("gateway implementation model or location mismatch")
+        if artifact.execution_location != "cluster":
+            raise GatewayError("gateway implementation execution location mismatch")
         source = {item["path"]: item["content"] for item in request.files}
         for change in artifact.changes:
             before = source.get(change["path"])
