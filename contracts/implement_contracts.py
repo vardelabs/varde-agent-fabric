@@ -17,6 +17,15 @@ class ContractError(ValueError):
 
 MAX_BYTES = 320 * 1024
 MAX_TASK_BYTES = 16 * 1024
+OPENCODE_IMPLEMENT_MODELS = frozenset({"opencode-go/kimi-k2.7-code", "opencode-go/kimi-k3"})
+
+def _worker_model(worker_kind, model):
+    if worker_kind not in {"codex", "opencode"}:
+        raise ContractError("unsupported implement worker")
+    if model is not None:
+        _text(model, "model", 256)
+    if worker_kind == "opencode" and model not in OPENCODE_IMPLEMENT_MODELS:
+        raise ContractError("unsupported OpenCode implement model")
 
 
 def _encoded(value: Any) -> bytes:
@@ -99,11 +108,12 @@ class ImplementRequest:
     task: str
     files: tuple[dict, ...]
     timeout_seconds: int
+    model: str | None = None
 
     def __post_init__(self):
         _text(self.repository, "repository", 256)
         _text(self.correlation_id, "correlation_id", 128)
-        if self.worker_kind != "codex": raise ContractError("worker_kind must be codex")
+        _worker_model(self.worker_kind, self.model)
         _text(self.task, "task", MAX_TASK_BYTES)
         if not isinstance(self.files, tuple): raise ContractError("files must be a tuple")
         object.__setattr__(self, "files", _files(self.files))
@@ -117,16 +127,17 @@ class ImplementRequest:
         return hashlib.sha256(_encoded(canonical)).hexdigest()
 
     def to_dict(self) -> dict:
-        return dict(schema="implement-request.v1", repository=self.repository, worker_kind=self.worker_kind,
+        return dict(**({"model": self.model} if self.model is not None else {}), schema="implement-request.v2" if self.model is not None else "implement-request.v1", repository=self.repository, worker_kind=self.worker_kind,
                     correlation_id=self.correlation_id, task=self.task, files=list(self.files), timeout_seconds=self.timeout_seconds)
 
     @classmethod
     def from_dict(cls, data: Any) -> ImplementRequest:
-        _keys(data, {"schema", "repository", "worker_kind", "correlation_id", "task", "files", "timeout_seconds"})
-        if data["schema"] != "implement-request.v1" or not isinstance(data["files"], list):
+        if not isinstance(data, dict): raise ContractError("invalid object")
+        _keys(data, {"schema", "repository", "worker_kind", "correlation_id", "task", "files", "timeout_seconds"} | ({"model"} if data.get("schema") == "implement-request.v2" else set()))
+        if data["schema"] not in {"implement-request.v1", "implement-request.v2"} or not isinstance(data["files"], list) or (data["schema"] == "implement-request.v2" and not isinstance(data.get("model"), str)):
             raise ContractError("invalid implement request schema")
         _bounded(data)
-        return cls(data["repository"], data["worker_kind"], data["correlation_id"], data["task"], tuple(data["files"]), data["timeout_seconds"])
+        return cls(data["repository"], data["worker_kind"], data["correlation_id"], data["task"], tuple(data["files"]), data["timeout_seconds"], data.get("model"))
 
 
 @dataclass(frozen=True)
@@ -142,13 +153,16 @@ class ImplementArtifact:
     finish_reason: str
     fallback: None
     latency_ms: int
+    model: str | None = None
 
     def __post_init__(self):
         _text(self.repository, "repository", 256)
         _text(self.correlation_id, "correlation_id", 128)
-        if self.worker_kind != "codex": raise ContractError("worker_kind must be codex")
+        _worker_model(self.worker_kind, self.model)
         _sha(self.snapshot_sha256)
         _text(self.provider, "provider", 256)
+        if self.model is not None and self.provider != self.model:
+            raise ContractError("provider does not match requested model")
         _text(self.execution_location, "execution_location", 256)
         if not isinstance(self.changes, tuple): raise ContractError("changes must be tuple")
         if self.changes:
@@ -160,18 +174,19 @@ class ImplementArtifact:
         _bounded(self.to_dict())
 
     def to_dict(self) -> dict:
-        return dict(schema="implement-artifact.v1", repository=self.repository, worker_kind=self.worker_kind,
+        return dict(**({"model": self.model} if self.model is not None else {}), schema="implement-artifact.v2" if self.model is not None else "implement-artifact.v1", repository=self.repository, worker_kind=self.worker_kind,
                     correlation_id=self.correlation_id, snapshot_sha256=self.snapshot_sha256, provider=self.provider,
                     execution_location=self.execution_location, changes=list(self.changes), model_output=self.model_output,
                     finish_reason=self.finish_reason, fallback=self.fallback, latency_ms=self.latency_ms)
 
     @classmethod
     def from_dict(cls, data: Any) -> ImplementArtifact:
-        _keys(data, {"schema", "repository", "worker_kind", "correlation_id", "snapshot_sha256", "provider", "execution_location", "changes", "model_output", "finish_reason", "fallback", "latency_ms"})
-        if data["schema"] != "implement-artifact.v1" or not isinstance(data["changes"], list):
+        if not isinstance(data, dict): raise ContractError("invalid object")
+        _keys(data, {"schema", "repository", "worker_kind", "correlation_id", "snapshot_sha256", "provider", "execution_location", "changes", "model_output", "finish_reason", "fallback", "latency_ms"} | ({"model"} if data.get("schema") == "implement-artifact.v2" else set()))
+        if data["schema"] not in {"implement-artifact.v1", "implement-artifact.v2"} or not isinstance(data["changes"], list) or (data["schema"] == "implement-artifact.v2" and not isinstance(data.get("model"), str)):
             raise ContractError("invalid implement artifact schema")
         _bounded(data)
-        return cls(data["repository"], data["worker_kind"], data["correlation_id"], data["snapshot_sha256"], data["provider"], data["execution_location"], tuple(data["changes"]), data["model_output"], data["finish_reason"], data["fallback"], data["latency_ms"])
+        return cls(data["repository"], data["worker_kind"], data["correlation_id"], data["snapshot_sha256"], data["provider"], data["execution_location"], tuple(data["changes"]), data["model_output"], data["finish_reason"], data["fallback"], data["latency_ms"], data.get("model"))
 
 
 def collect_files(workdir: str | Path, paths: tuple[str, ...]) -> tuple[dict, ...]:
