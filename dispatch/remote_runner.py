@@ -247,13 +247,14 @@ class RemoteImplementMetadata:
     harness: str = "codex"
     target: str = "remote"
     timeout_seconds: int = 300
+    model: str | None = None
 
 
 def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: str) -> ImplementArtifact:
-    if metadata.target != "remote" or metadata.harness != "codex" or fallback_policy != "none":
-        raise GatewayError("remote implementation requires codex and no fallback")
+    if metadata.target != "remote" or metadata.harness not in {"codex", "opencode"} or fallback_policy != "none":
+        raise GatewayError("remote implementation requires a supported worker and no fallback")
     request = ImplementRequest(metadata.repository, metadata.harness, metadata.correlation_id,
-                               metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds)
+                               metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds, model=metadata.model)
     artifact = _gateway_client().submit_implementation(request)
     for change in artifact.changes:
         if change["before_sha256"] is None and os.path.lexists(Path(metadata.workdir) / change["path"]):
@@ -290,7 +291,7 @@ def main() -> int:
         if args.kind == "implement":
             metadata = RemoteImplementMetadata(args.repository, args.correlation_id, tuple(args.path),
                                                args.task, args.workdir, args.output, args.harness,
-                                               args.target, args.timeout_seconds)
+                                               args.target, args.timeout_seconds, args.model)
             artifact = run_remote_implement(metadata, fallback_policy=args.fallback_policy)
         else:
             metadata = RemoteReviewMetadata(

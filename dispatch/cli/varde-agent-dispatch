@@ -117,7 +117,7 @@ if [[ "$route_target" == "remote" ]]; then
     [[ -n "$pull_request" && -n "$base_sha" && -n "$head_sha" ]] || fail 'remote reviews require explicit pull request, base SHA, and head SHA' 2
     [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
   else
-    [[ "$harness" == "codex" && "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires codex and fallback policy none' 3
+    [[ ( "$harness" == "codex" || "$harness" == "opencode" ) && "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires supported harness and fallback policy none' 3
     [[ "$review_args_supplied" -eq 0 ]] || fail 'remote implement rejects PR, SHA and diff arguments' 2
     implement_task_bytes="$(LC_ALL=C printf '%s' "$task" | wc -c)"
     (( implement_task_bytes <= MAX_IMPLEMENT_TASK_BYTES )) || fail "implement task exceeds ${MAX_IMPLEMENT_TASK_BYTES} bytes"

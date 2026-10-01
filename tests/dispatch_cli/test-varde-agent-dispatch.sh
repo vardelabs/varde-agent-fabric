@@ -457,13 +457,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
         assert self.headers["Authorization"] == "Bearer cli-test-token"
-        if request["worker_kind"] == "opencode":
+        if request["worker_kind"] == "opencode" and self.path == "/v1/reviews":
             assert request["model"] == "opencode-go/qwen3.8-flash"
             self.send_response(503)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        assert request["worker_kind"] == "codex"
+        if request["worker_kind"] == "opencode":
+            assert self.path == "/v1/implementations"
+            assert request["model"] in ("opencode-go/kimi-k2.7-code", "opencode-go/kimi-k3")
+            assert request["schema"] == "implement-request.v2"
+        else:
+            assert request["worker_kind"] == "codex"
         if self.path == "/v1/implementations":
             if request["correlation_id"] == "cli-implement-boundary":
                 assert len(request["task"].encode("utf-8")) == 16384
@@ -473,10 +478,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             changes = [] if request["task"] == "no-op" else [{
                 "path": files[0]["path"], "before_sha256": hashlib.sha256(files[0]["content"].encode()).hexdigest(),
                 "after_text": "after"}]
-            body = json.dumps({"schema":"implement-artifact.v1", "repository":request["repository"],
-                "worker_kind":"codex", "correlation_id":request["correlation_id"],
-                "snapshot_sha256":digest, "provider":"codex-test", "execution_location":"cluster",
-                "changes":changes, "model_output":"done", "finish_reason":"completed",
+            provider = request["model"]
+            finish = "completed"
+            if request["correlation_id"] == "cli-mismatch":
+                provider = "opencode-go/kimi-k2.7-code" if request["model"] == "opencode-go/kimi-k3" else "opencode-go/kimi-k3"
+            if request["correlation_id"] == "cli-incomplete":
+                finish = "incomplete"
+            body = json.dumps({"schema":"implement-artifact.v2", "repository":request["repository"],
+                "worker_kind":request["worker_kind"], "correlation_id":request["correlation_id"],
+                "snapshot_sha256":digest, "provider":provider, "model":request["model"],
+                "execution_location":"cluster",
+                "changes":changes, "model_output":"done", "finish_reason":finish,
                 "fallback":None, "latency_ms":1}).encode()
         else:
             assert self.path == "/v1/reviews"
@@ -558,10 +570,61 @@ for scenario in change no-op; do
     --workdir "$TMP/work" --output "$TMP/out-implement-$scenario" >"$TMP/stdout-implement-$scenario" 2>"$TMP/err-implement-$scenario" || status=$?
   if [[ "$scenario" == change ]]; then check test "$status" -eq 0; else check test "$status" -eq 6; fi
   check test -s "$TMP/out-implement-$scenario"
-  check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-$scenario"
+  check grep -qF '"schema":"implement-artifact.v2"' "$TMP/out-implement-$scenario"
+  check grep -qF '"model":"remote/model"' "$TMP/out-implement-$scenario"
   check grep -qF before "$TMP/work/selected.txt"
 done
 check grep -qF '"changes":[]' "$TMP/out-implement-no-op"
+
+cat > "$TMP/kimi-implement-routes.json" <<'EOF'
+{"schema":"dispatch-routes.v1","routes":{
+  "opencode-go/kimi-k2.7-code":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
+  "opencode-go/kimi-k3":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
+  "opencode-go/other-model":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
+  "opencode-go/kimi-fallback":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"remote-unavailable","harness":"opencode","target":"local"}}}}
+EOF
+for kimi_model in opencode-go/kimi-k2.7-code opencode-go/kimi-k3; do
+  safe="${kimi_model##*/}"
+  if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+    PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model "$kimi_model" --routes "$TMP/kimi-implement-routes.json" --kind implement \
+    --repository vardelabs/example --correlation-id "cli-$safe" --path selected.txt --task change \
+    --workdir "$TMP/work" --output "$TMP/out-$safe" >"$TMP/stdout-$safe" 2>"$TMP/err-$safe"; then
+    printf 'kimi remote implement dispatch unexpectedly failed\n' >&2
+    cat "$TMP/err-$safe" >&2
+    exit 1
+  fi
+  check grep -qF '"schema":"implement-artifact.v2"' "$TMP/out-$safe"
+  check grep -qF "\"model\":\"$kimi_model\"" "$TMP/out-$safe"
+  check grep -qF '"worker_kind":"opencode"' "$TMP/out-$safe"
+done
+if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/other-model --routes "$TMP/kimi-implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-bad-model --path selected.txt --task change \
+  --workdir "$TMP/work" --output "$TMP/out-bad-model" >"$TMP/stdout-bad-model" 2>"$TMP/err-bad-model"; then
+  printf 'unapproved OpenCode implement model unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'unsupported OpenCode implement model' "$TMP/err-bad-model"
+if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-fallback --routes "$TMP/kimi-implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-fallback --path selected.txt --task change \
+  --workdir "$TMP/work" --output "$TMP/out-fallback" >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
+  printf 'OpenCode implement fallback unexpectedly succeeded\n' >&2; exit 1
+fi
+check grep -qF 'fallback policy none' "$TMP/err-fallback"
+if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-k3 --routes "$TMP/kimi-implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-mismatch --path selected.txt --task mismatch \
+  --workdir "$TMP/work" --output "$TMP/out-mismatch" >"$TMP/stdout-mismatch" 2>"$TMP/err-mismatch"; then
+  printf 'wrong-model artifact unexpectedly accepted\n' >&2; exit 1
+fi
+check grep -qF 'malformed implementation artifact' "$TMP/err-mismatch"
+if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-k3 --routes "$TMP/kimi-implement-routes.json" --kind implement \
+  --repository vardelabs/example --correlation-id cli-incomplete --path selected.txt --task incomplete \
+  --workdir "$TMP/work" --output "$TMP/out-incomplete" >"$TMP/stdout-incomplete" 2>"$TMP/err-incomplete"; then
+  printf 'incomplete artifact unexpectedly accepted\n' >&2; exit 1
+fi
+check grep -qF 'malformed implementation artifact' "$TMP/err-incomplete"
 
 boundary_task="$(python3 -c 'print("x" * 16384, end="")')"
 if ! DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=900 \
@@ -575,6 +638,6 @@ if ! DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=900 \
   exit 1
 fi
 check test -s "$TMP/out-implement-boundary"
-check grep -qF '"schema":"implement-artifact.v1"' "$TMP/out-implement-boundary"
+check grep -qF '"schema":"implement-artifact.v2"' "$TMP/out-implement-boundary"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"
