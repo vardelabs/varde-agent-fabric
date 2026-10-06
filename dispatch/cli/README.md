@@ -118,6 +118,23 @@ sandbox; the provider auth in it remains readable by the OpenCode process and
 its tools. Use this local harness only for trusted bounded tasks until a
 stronger worker sandbox is supplied by deployment policy.
 
+The two CLI versions store provider authentication differently. A 1.x home
+holds it in `auth.json`. A 2.x home keeps it in its own database and ignores
+`auth.json`, so a home set up for 1.x lists no models under 2.x and runs fail
+with `Model unavailable`. To set up a 2.x home, run the login as the worker
+user, from an interactive terminal, and paste the key at the masked prompt.
+Scrub the environment as the adapter does: an exported `XDG_DATA_HOME` would
+otherwise send the credential outside the home, and the list check would still
+pass.
+
+```text
+env -i HOME=/path/to/opencode-home PATH="$PATH" TERM="$TERM" opencode auth login <provider> --standalone
+env -i HOME=/path/to/opencode-home PATH="$PATH" opencode auth list --standalone
+```
+
+The prompt refuses a non-interactive stdin. Do not use `--answer` for a key:
+it puts the key in the process arguments, where other local users can read it.
+
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
 oversized input before the backend reads it. The default Codex sandbox is
