@@ -107,7 +107,7 @@ not loaded. The installed CLI help surface is smoke tested when available.
 The adapter output is OpenCode's raw JSONL event stream from `--format json`;
 callers that need the final response must select the final `type=text` event.
 When `opencode run` exits non-zero, the adapter writes no output file. It
-prints only the run's `type=error` events to stderr, capped at 4 KiB, because
+prints only the run's top-level `type=error` events to stderr, capped at 4 KiB, because
 other events can carry model text, and exits with OpenCode's status.
 Set `DISPATCH_OPENCODE_HOME` to a dedicated home directory containing only
 the OpenCode configuration and authentication needed for this worker. The
