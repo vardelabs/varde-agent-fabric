@@ -106,6 +106,9 @@ with `--standalone` so no shared background service starts, and sets
 not loaded. The installed CLI help surface is smoke tested when available.
 The adapter output is OpenCode's raw JSONL event stream from `--format json`;
 callers that need the final response must select the final `type=text` event.
+When `opencode run` exits non-zero, the adapter writes no output file. It
+prints the run's `type=error` events, or the last 20 lines when there are none,
+to stderr, capped at 4 KiB, and exits with OpenCode's status.
 Set `DISPATCH_OPENCODE_HOME` to a dedicated home directory containing only
 the OpenCode configuration and authentication needed for this worker. The
 adapter refuses to use the caller's general home directory, because an
