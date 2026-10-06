@@ -209,6 +209,14 @@ if [[ "${1:-}" == --file ]]; then diff="$2"; shift 2; fi
 [[ -n "$diff" && -f "$diff" ]] || [[ -z "$diff" ]] || exit 98
 stdin_text=''
 [[ -t 0 ]] || stdin_text="$(cat)"
+fail_mode="$(cat "$(dirname "$0")/opencode-fail" 2>/dev/null || true)"
+if [[ "$fail_mode" == event ]]; then
+  printf '%s\n' '{"type":"step_start"}' '{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found: test/model"}}}'
+  exit 3
+elif [[ "$fail_mode" == plain ]]; then
+  printf 'plain failure line\n'
+  exit 4
+fi
 if [[ "$model" == "opencode-go/qwen3.8-flash" ]]; then
   printf '%s\n' '{"type":"text","part":{"text":"[]"}}' '{"type":"step_finish","reason":"stop"}'
   exit 0
@@ -244,6 +252,22 @@ check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-review"
 check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-review"
 check grep -qF '"type":"step_finish"' "$TMP/out-opencode-review"
 check grep -qF '"workdir":"'"$TMP/work"'"' "$TMP/out-opencode-review"
+
+for fail_mode in event plain; do
+  printf '%s\n' "$fail_mode" > "$TMP/bin/opencode-fail"
+  if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" PATH="$TMP/bin:/usr/bin:/bin" \
+    "$CLI" --harness opencode --kind review --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" \
+    --task x --workdir "$TMP/work" --output "$TMP/out-opencode-fail-$fail_mode" >"$TMP/stdout-opencode-fail-$fail_mode" 2>"$TMP/err-opencode-fail-$fail_mode"; then
+    printf 'failing opencode run (%s) unexpectedly succeeded\n' "$fail_mode" >&2; exit 1
+  fi
+  check test ! -e "$TMP/out-opencode-fail-$fail_mode"
+done
+rm -f "$TMP/bin/opencode-fail"
+check grep -qF 'opencode run failed with exit status 3' "$TMP/err-opencode-fail-event"
+check grep -qF 'Model not found: test/model' "$TMP/err-opencode-fail-event"
+check test "$(grep -c 'step_start' "$TMP/err-opencode-fail-event")" -eq 0
+check grep -qF 'opencode run failed with exit status 4' "$TMP/err-opencode-fail-plain"
+check grep -qF 'plain failure line' "$TMP/err-opencode-fail-plain"
 
 printf 'opencode v2.0.18\n' > "$TMP/bin/opencode-version"
 if ! printf 'caller-stdin' | HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_UNSAFE_SENTINEL=must-not-forward OPENAI_API_KEY=must-not-forward \

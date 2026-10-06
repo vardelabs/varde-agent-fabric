@@ -110,6 +110,14 @@ cleanup() { rm -f -- "$temporary_output"; }
 trap cleanup EXIT
 # v2 has no --dir and resolves the project from the working directory. Both
 # CLIs append a non-terminal stdin to the prompt and block until it closes.
-(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") </dev/null >"$temporary_output"
+status=0
+(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") </dev/null >"$temporary_output" || status=$?
+if ((status != 0)); then
+  # `--format json` reports failures as error events on stdout, so stderr alone
+  # is empty. Surface them, bounded, before the cleanup trap deletes the file.
+  printf 'opencode run failed with exit status %d\n' "$status" >&2
+  { grep -F '"type":"error"' -- "$temporary_output" || tail -n 20 -- "$temporary_output"; } | tail -c 4096 >&2 || true
+  exit "$status"
+fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
 trap - EXIT
