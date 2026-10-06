@@ -211,7 +211,7 @@ stdin_text=''
 [[ -t 0 ]] || stdin_text="$(cat)"
 fail_mode="$(cat "$(dirname "$0")/opencode-fail" 2>/dev/null || true)"
 if [[ "$fail_mode" == event ]]; then
-  printf '%s\n' '{"type":"step_start"}' '{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found: test/model"}}}'
+  printf '%s\n' '{"type":"step_start"}' '{"type":"tool_use","part":{"state":{"type":"error","output":"quoted-file-text"}}}' '{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found: test/model"}}}'
   exit 3
 elif [[ "$fail_mode" == plain ]]; then
   printf 'plain failure line\n'
@@ -268,6 +268,7 @@ check test "$(cat "$TMP/status-opencode-fail-event")" -eq 3
 check grep -qF 'opencode run failed with exit status 3' "$TMP/err-opencode-fail-event"
 check grep -qF 'Model not found: test/model' "$TMP/err-opencode-fail-event"
 check test "$(grep -c 'step_start' "$TMP/err-opencode-fail-event")" -eq 0
+check test "$(grep -c 'quoted-file-text' "$TMP/err-opencode-fail-event")" -eq 0
 check test "$(cat "$TMP/status-opencode-fail-plain")" -eq 4
 check grep -qF 'opencode reported no error event' "$TMP/err-opencode-fail-plain"
 check test "$(grep -c 'plain failure line' "$TMP/err-opencode-fail-plain")" -eq 0
