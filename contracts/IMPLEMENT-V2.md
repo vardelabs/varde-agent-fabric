@@ -5,8 +5,11 @@
 `provider`. All other key sets, UTF-8 path restrictions, snapshot digest,
 completed-only results, no-fallback and aggregate limits remain unchanged.
 
-OpenCode implementation accepts exactly `opencode-go/kimi-k2.7-code` and
-`opencode-go/kimi-k3`, bound to worker kind `opencode`. Codex may use v2 too.
+OpenCode implementation accepts any model shaped `opencode-go/<name>`, where
+`<name>` is 1 to 64 characters of lowercase letters, digits, `.` and `-`, starting
+with a letter or digit, bound to worker kind `opencode`. The contract bounds only
+the shape: the receiving deployment grants exact models, so a new OpenCode Go model
+needs no fabric release. Codex may use v2 too.
 Receivers continue to accept legacy Codex v1 envelopes without a requested-model
 field. OpenCode cannot use v1. The public remote CLI emits v2 whenever `--model`
 is supplied, for either harness. Consequently, a Codex caller using v2 must use a
