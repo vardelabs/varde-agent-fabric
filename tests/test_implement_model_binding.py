@@ -41,5 +41,12 @@ class ModelBindingTests(unittest.TestCase):
                         'cluster', (), 'done', 'completed', None, 0, model=model)
                 wrong = req.to_dict(); wrong['schema'] = 'implement-request.v1'
                 with self.assertRaises(ContractError): ImplementRequest.from_dict(wrong)
-        with self.assertRaises(ContractError):
-            ImplementRequest('o/r', 'opencode', 'id', 'edit', legacy.files, 3, model='other/model')
+        for bad in ('other/model', 'opencode-go/', 'opencode-go/Kimi', 'opencode-go/kimi k3',
+                    'opencode-go/../x', 'opencode-go/-x', 'opencode-go/' + 'a' * 65, None):
+            with self.subTest(bad=bad), self.assertRaises(ContractError):
+                ImplementRequest('o/r', 'opencode', 'id', 'edit', legacy.files, 3, model=bad)
+
+    def test_a_new_opencode_go_model_needs_no_fabric_release(self):
+        legacy = ImplementRequest('o/r', 'codex', 'id', 'edit', ({'path':'a', 'content':'old'},), 3)
+        req = ImplementRequest('o/r', 'opencode', 'id', 'edit', legacy.files, 3, model='opencode-go/glm-5.1')
+        self.assertEqual(ImplementRequest.from_dict(req.to_dict()).model, 'opencode-go/glm-5.1')
