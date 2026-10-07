@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import unicodedata
 from typing import Any
@@ -17,14 +18,16 @@ class ContractError(ValueError):
 
 MAX_BYTES = 320 * 1024
 MAX_TASK_BYTES = 16 * 1024
-OPENCODE_IMPLEMENT_MODELS = frozenset({"opencode-go/kimi-k2.7-code", "opencode-go/kimi-k3"})
+# The deployment's broker and gateway allowlists grant exact models; the contract only
+# bounds the shape, so a new OpenCode Go model needs no fabric release.
+OPENCODE_IMPLEMENT_MODEL = re.compile(r"opencode-go/[a-z0-9][a-z0-9.-]{0,63}")
 
 def _worker_model(worker_kind, model):
     if worker_kind not in {"codex", "opencode"}:
         raise ContractError("unsupported implement worker")
     if model is not None:
         _text(model, "model", 256)
-    if worker_kind == "opencode" and model not in OPENCODE_IMPLEMENT_MODELS:
+    if worker_kind == "opencode" and (not isinstance(model, str) or not OPENCODE_IMPLEMENT_MODEL.fullmatch(model)):
         raise ContractError("unsupported OpenCode implement model")
 
 

@@ -608,7 +608,7 @@ cat > "$TMP/kimi-implement-routes.json" <<'EOF'
 {"schema":"dispatch-routes.v1","routes":{
   "opencode-go/kimi-k2.7-code":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
   "opencode-go/kimi-k3":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
-  "opencode-go/other-model":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
+  "opencode-go/Other_Model":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"none"}},
   "opencode-go/kimi-fallback":{"default_harness":"opencode","target":"remote","kinds":["implement"],"fallback":{"policy":"remote-unavailable","harness":"opencode","target":"local"}}}}
 EOF
 for kimi_model in opencode-go/kimi-k2.7-code opencode-go/kimi-k3; do
@@ -626,7 +626,7 @@ for kimi_model in opencode-go/kimi-k2.7-code opencode-go/kimi-k3; do
   check grep -qF '"worker_kind":"opencode"' "$TMP/out-$safe"
 done
 if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
-  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/other-model --routes "$TMP/kimi-implement-routes.json" --kind implement \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/Other_Model --routes "$TMP/kimi-implement-routes.json" --kind implement \
   --repository vardelabs/example --correlation-id cli-bad-model --path selected.txt --task change \
   --workdir "$TMP/work" --output "$TMP/out-bad-model" >"$TMP/stdout-bad-model" 2>"$TMP/err-bad-model"; then
   printf 'unapproved OpenCode implement model unexpectedly succeeded\n' >&2; exit 1
