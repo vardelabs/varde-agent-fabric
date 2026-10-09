@@ -55,16 +55,16 @@ class ReadScopeTests(unittest.TestCase):
 
         # Set up test fixtures
         self.config = self.temp_root / "private-overlay.json"
-        self.corvus = self.temp_root / "corvus"
-        self.north = self.temp_root / "north"
+        self.agent_a = self.temp_root / "example-agent-a"
+        self.agent_b = self.temp_root / "example-agent-b"
         self.work = self.temp_root / "work"
 
-        self.corvus.mkdir(mode=0o700)
-        self.north.mkdir(mode=0o700)
+        self.agent_a.mkdir(mode=0o700)
+        self.agent_b.mkdir(mode=0o700)
         self.work.mkdir(mode=0o700)
 
         self.config.write_text(
-            json.dumps({"private_roots": [str(self.north), str(self.corvus), str(self.north)]})
+            json.dumps({"private_roots": [str(self.agent_b), str(self.agent_a), str(self.agent_b)]})
         )
         self.config.chmod(0o600)
 
@@ -78,23 +78,23 @@ class ReadScopeTests(unittest.TestCase):
                 pass
 
     def test_loads_deduplicated_sorted_roots(self) -> None:
-        self.assertEqual(load_private_roots(self.config), (str(self.corvus), str(self.north)))
+        self.assertEqual(load_private_roots(self.config), (str(self.agent_a), str(self.agent_b)))
 
     def test_emits_systemd_properties_deterministically(self) -> None:
         self.assertEqual(
-            systemd_inaccessible_paths((str(self.north), str(self.corvus)), str(self.work)),
+            systemd_inaccessible_paths((str(self.agent_b), str(self.agent_a)), str(self.work)),
             (
-                f"--property=InaccessiblePaths={self.corvus}",
-                f"--property=InaccessiblePaths={self.north}",
+                f"--property=InaccessiblePaths={self.agent_a}",
+                f"--property=InaccessiblePaths={self.agent_b}",
             ),
         )
 
     def test_emits_one_property_for_nested_roots(self) -> None:
-        nested = self.corvus / "nested"
+        nested = self.agent_a / "nested"
         nested.mkdir(mode=0o700)
         self.assertEqual(
-            systemd_inaccessible_paths((str(nested), str(self.corvus)), str(self.work)),
-            (f"--property=InaccessiblePaths={self.corvus}",),
+            systemd_inaccessible_paths((str(nested), str(self.agent_a)), str(self.work)),
+            (f"--property=InaccessiblePaths={self.agent_a}",),
         )
 
     def test_rejects_fifo_without_blocking(self) -> None:
@@ -117,7 +117,7 @@ class ReadScopeTests(unittest.TestCase):
         target = self.temp_root / "config-target"
         target.mkdir()
         target_config = target / "overlay.json"
-        target_config.write_text(json.dumps({"private_roots": [str(self.corvus)]}))
+        target_config.write_text(json.dumps({"private_roots": [str(self.agent_a)]}))
         target_config.chmod(0o600)
         link = self.temp_root / "config-link"
         link.symlink_to(target, target_is_directory=True)
@@ -125,7 +125,7 @@ class ReadScopeTests(unittest.TestCase):
             load_private_roots(link / "overlay.json")
 
     def test_task_cannot_supply_relative_or_non_normalized_root(self) -> None:
-        for root in ("relative", "/data/../corvus", "/"):
+        for root in ("relative", "/data/../example-agent-a", "/"):
             self.config.write_text(json.dumps({"private_roots": [root]}))
             with self.subTest(root=root), self.assertRaises(ReadScopeError):
                 load_private_roots(self.config)
@@ -136,13 +136,13 @@ class ReadScopeTests(unittest.TestCase):
             load_private_roots(self.config)
 
     def test_rejects_invalid_roots_at_property_boundary(self) -> None:
-        for root in ("relative", "/data/../corvus", "/", str(self.temp_root / "missing")):
+        for root in ("relative", "/data/../example-agent-a", "/", str(self.temp_root / "missing")):
             with self.subTest(root=root), self.assertRaises(ReadScopeError):
                 systemd_inaccessible_paths((root,), str(self.work))
 
     def test_rejects_symlinked_private_root(self) -> None:
         link = self.temp_root / "link"
-        link.symlink_to(self.corvus, target_is_directory=True)
+        link.symlink_to(self.agent_a, target_is_directory=True)
         with self.assertRaises(ReadScopeError):
             systemd_inaccessible_paths((str(link),), str(self.work))
 
@@ -150,13 +150,13 @@ class ReadScopeTests(unittest.TestCase):
         link = self.temp_root / "work-link"
         link.symlink_to(self.work, target_is_directory=True)
         with self.assertRaises(ReadScopeError):
-            systemd_inaccessible_paths((str(self.corvus),), str(link))
+            systemd_inaccessible_paths((str(self.agent_a),), str(link))
 
     def test_rejects_workdir_inside_private_root(self) -> None:
-        nested_workdir = self.corvus / "review"
+        nested_workdir = self.agent_a / "review"
         nested_workdir.mkdir(mode=0o700)
         with self.assertRaisesRegex(ReadScopeError, "would hide"):
-            systemd_inaccessible_paths((str(self.corvus),), str(nested_workdir))
+            systemd_inaccessible_paths((str(self.agent_a),), str(nested_workdir))
 
     def test_rejects_deeply_nested_json_with_read_scope_error(self) -> None:
         document = "[" * 20000 + "]" * 20000
@@ -165,14 +165,14 @@ class ReadScopeTests(unittest.TestCase):
             load_private_roots(self.config)
 
     def test_rejects_empty_or_malformed_policy(self) -> None:
-        for document in ({}, {"private_roots": []}, {"private_roots": "/data/corvus"}):
+        for document in ({}, {"private_roots": []}, {"private_roots": "/data/example-agent-a"}):
             self.config.write_text(json.dumps(document))
             with self.subTest(document=document), self.assertRaises(ReadScopeError):
                 load_private_roots(self.config)
 
     def test_config_symlink_is_rejected(self) -> None:
         target = self.temp_root / "real.json"
-        target.write_text(json.dumps({"private_roots": [str(self.corvus)]}))
+        target.write_text(json.dumps({"private_roots": [str(self.agent_a)]}))
         target.chmod(0o600)
         self.config.unlink()
         self.config.symlink_to(target)
@@ -193,7 +193,7 @@ class ReadScopeTests(unittest.TestCase):
             load_private_roots(self.config)
 
     def test_rejects_oversized_valid_config(self) -> None:
-        document = {"private_roots": [str(self.corvus)], "padding": "x" * (64 * 1024)}
+        document = {"private_roots": [str(self.agent_a)], "padding": "x" * (64 * 1024)}
         self.config.write_text(json.dumps(document))
         with self.assertRaisesRegex(ReadScopeError, "exceeds"):
             load_private_roots(self.config)
@@ -262,18 +262,18 @@ class ReadScopeTests(unittest.TestCase):
     def test_accepts_version_key(self) -> None:
         """Forward compatibility: version key should be accepted."""
         self.config.write_text(json.dumps({
-            "private_roots": [str(self.corvus)],
+            "private_roots": [str(self.agent_a)],
             "version": 1
         }))
         # Should not raise
         result = load_private_roots(self.config)
-        self.assertEqual(result, (str(self.corvus),))
+        self.assertEqual(result, (str(self.agent_a),))
 
     def test_rejects_invalid_version_type(self) -> None:
         """Version must be the supported version 1 if present."""
         for version in (0, -1, 2, 99, "1", 1.5, None, True):
             self.config.write_text(json.dumps({
-                "private_roots": [str(self.corvus)],
+                "private_roots": [str(self.agent_a)],
                 "version": version
             }))
             with self.subTest(version=version), self.assertRaises(ReadScopeError):
