@@ -59,6 +59,6 @@ normalization aliases within one file set.
 
 `scheduled-job-enablement.v1` is one file per tenant. Each entry in `jobs` either uses a shipped job (`use: "<plugin>/<job-id>"`, with `values`, optional `overrides`, and `enabled`) or declares a tenant-only job under `inline`, written in the definition's job keys without placeholders.
 
-`resolve_job` merges a definition and a tenant entry into the flat job a runner executes. It refuses a missing or unknown value and an override the definition does not offer. A value placed into `command` is shell-quoted, so a tenant value can never add shell syntax to a shipped command.
+`resolve_job` merges a definition and a tenant entry into the flat job a runner executes. It refuses a missing or unknown value and an override the definition does not offer. A value placed into `command` is shell-quoted, so a tenant value can never add shell syntax to a shipped command. Write a `command` placeholder bare, never inside quotes, or the quotes become part of the argument.
 
 The contracts carry no host paths or credentials. A tenant's values, which may name its own paths and credential files, live only in that tenant's enablement file. The runner, not the contract, owns posting, repository writes, and run state.
