@@ -68,15 +68,19 @@ def _timezone(value: Any, field: str) -> None:
 
 
 def _command(value: Any, field: str) -> None:
-    # A placeholder is quoted on fill, and a second layer of quotes from the
-    # template would reopen the shell inside it, so it must stand alone.
-    try:
-        tokens = shlex.split(_text(value, field, 4096), posix=False)
-    except ValueError as exc:
-        raise ContractError(f"{field} has unbalanced quotes") from exc
-    for token in tokens:
-        if "{{" in token and not _PLACEHOLDER.fullmatch(token):
-            raise ContractError(f"{field} placeholder {token!r} must be a whole unquoted word")
+    # Shell text cannot hold a placeholder safely: whether a quote applies
+    # depends on shell grammar the contract does not parse. A templated
+    # command is an argument list, and each placeholder is a whole argument.
+    if isinstance(value, str):
+        if "{{" in _text(value, field, 4096):
+            raise ContractError(f"{field} as shell text cannot hold a placeholder; use an argument list")
+        return
+    if not isinstance(value, list) or not 1 <= len(value) <= 64:
+        raise ContractError(f"{field} must be shell text or a list of 1 to 64 arguments")
+    for index, argument in enumerate(value):
+        _text(argument, f"{field}[{index}]", 4096)
+        if "{{" in argument and not _PLACEHOLDER.fullmatch(argument):
+            raise ContractError(f"{field}[{index}] must be a whole placeholder or hold none")
 
 
 def _vault_sync(value: Any, field: str) -> None:
@@ -128,11 +132,11 @@ _FIELDS: dict[str, Callable[[Any, str], object]] = {
 }
 # Only a prompt job produces output for the runner to post.
 _PROMPT_ONLY = {"model", "post_mode", "post_to", "mcp_config", "max_post_chars", "expected_stdout_start", "plain_bullets"}
-# The tenant decides whether a shipped job runs and whether it is a one-off.
+# A tenant turns a shipped job on or off; one_shot belongs to inline jobs only.
 _TENANT_ONLY = {"enabled", "one_shot"}
 _OVERRIDABLE = {"cron", "timezone", "model", "timeout_seconds", "post_mode", "post_to",
                 "mcp_config", "dream", "dream_mode", "max_post_chars", "agent_log"}
-_TEMPLATED = ("prompt", "command", "post_to", "working_dir", "vault_sync")
+_TEMPLATED = ("prompt", "post_to", "working_dir", "vault_sync")
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -160,6 +164,7 @@ def _job_fields(data: Mapping[str, Any], field: str, extra: set[str]) -> dict[st
 
 def _template_strings(fields: Mapping[str, Any]) -> list[str]:
     strings = [fields[key] for key in _TEMPLATED if isinstance(fields.get(key), str)]
+    strings += fields["command"] if isinstance(fields.get("command"), list) else []
     return strings + list((fields.get("env") or {}).values())
 
 
@@ -270,15 +275,15 @@ class JobEnablement:
         return cls(entries)
 
 
-def _fill(text: str, values: Mapping[str, str], quote: bool) -> str:
-    return _PLACEHOLDER.sub(lambda m: shlex.quote(values[m.group(1)]) if quote else values[m.group(1)], text)
+def _fill(text: str, values: Mapping[str, str]) -> str:
+    return _PLACEHOLDER.sub(lambda m: values[m.group(1)], text)
 
 
 def resolve_job(plugin: str, definition: JobDefinition, entry: JobEntry) -> dict[str, Any]:
     """Merge a shipped definition with a tenant entry into the job a runner executes.
 
-    A value placed into `command` is shell-quoted, so it reaches the program as
-    exactly one argument.
+    An argument-list `command` is joined with `shlex.join`, so each filled
+    placeholder reaches the program as exactly one argument.
     """
     if entry.use != (plugin, definition.job_id):
         raise ContractError("entry does not use this definition")
@@ -289,16 +294,29 @@ def resolve_job(plugin: str, definition: JobDefinition, entry: JobEntry) -> dict
     refused = set(entry.overrides) - definition.overridable
     if refused:
         raise ContractError(f"the definition does not allow overriding {sorted(refused)}")
-    job ={key: value for key, value in definition.fields.items() if key != "description"}
+    job = {key: value for key, value in definition.fields.items() if key != "description"}
     for key in _TEMPLATED:
         if isinstance(job.get(key), str):
-            job[key] = _fill(job[key], entry.values, quote=key == "command")
+            job[key] = _fill(job[key], entry.values)
+    if isinstance(job.get("command"), list):
+        job["command"] = shlex.join(_fill(argument, entry.values) for argument in job["command"])
     if "env" in job:
-        job["env"] = {name: _fill(value, entry.values, quote=False) for name, value in job["env"].items()}
+        job["env"] = {name: _fill(value, entry.values) for name, value in job["env"].items()}
     job.update(entry.overrides)
     for key, value in job.items():
-        # A filled command holds quoted tenant text, which the placeholder rule would misread.
+        # The joined command holds tenant text, which may legitimately contain "{{".
         check = _FIELDS[key] if key != "command" else (lambda v, f: _text(v, f, 4096))
         check(value, f"resolved {key}")
+    job["enabled"] = entry.enabled
+    return job
+
+
+def inline_job(entry: JobEntry) -> dict[str, Any]:
+    """Return a tenant-only job in the same flat shape `resolve_job` produces."""
+    if entry.inline is None:
+        raise ContractError("entry is not an inline job")
+    job = {key: value for key, value in entry.inline.items() if key != "description"}
+    if isinstance(job.get("command"), list):
+        job["command"] = shlex.join(job["command"])
     job["enabled"] = entry.enabled
     return job

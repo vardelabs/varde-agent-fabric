@@ -14,6 +14,7 @@ from contracts.scheduled_job_contracts import (
     ContractError,
     JobDefinition,
     JobEnablement,
+    inline_job,
     resolve_job,
 )
 
@@ -43,7 +44,7 @@ COMMAND_DEFINITION = {
     "cron": "30 3 * * *",
     "timezone": "UTC",
     "timeout_seconds": 600,
-    "command": "fetch-mail --env-file {{env_file}}",
+    "command": ["fetch-mail", "--env-file", "{{env_file}}"],
     "env": {"MAIL_ENV": "{{env_file}}"},
     "requires": {"env_file": "Credential env file for the mailbox."},
 }
@@ -120,9 +121,15 @@ class DefinitionTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "IANA"):
             JobDefinition.from_dict(definition(PROMPT_DEFINITION, timezone="Not/AZone"))
 
-    def test_rejects_command_placeholder_that_is_not_a_whole_word(self) -> None:
-        for command in ('sh -c "echo {{env_file}}"', "fetch '{{env_file}}'", "fetch --env={{env_file}}"):
-            with self.subTest(command=command), self.assertRaisesRegex(ContractError, "whole unquoted word"):
+    def test_rejects_placeholder_in_shell_text_command(self) -> None:
+        for command in ("fetch-mail {{env_file}}", 'echo --msg="run {{env_file}} now"', 'sh -c "echo {{env_file}}"'):
+            with self.subTest(command=command), self.assertRaisesRegex(ContractError, "argument list"):
+                JobDefinition.from_dict(definition(COMMAND_DEFINITION, command=command))
+
+    def test_rejects_placeholder_sharing_an_argument(self) -> None:
+        for argument in ("run {{env_file}} now", "--env={{env_file}}", '"{{env_file}}"'):
+            command = ["fetch-mail", argument]
+            with self.subTest(argument=argument), self.assertRaisesRegex(ContractError, "whole placeholder"):
                 JobDefinition.from_dict(definition(COMMAND_DEFINITION, command=command))
 
     def test_unhashable_values_raise_contract_error(self) -> None:
@@ -186,15 +193,25 @@ class ResolveTests(unittest.TestCase):
             resolve_job("example-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), entry)
 
     def test_command_values_cannot_add_shell_syntax(self) -> None:
-        hostile = "/tmp/env; touch /tmp/owned"
-        data = {
-            "schema": "scheduled-job-enablement.v1",
-            "jobs": {"mail": {"use": "example-plugin/fetch-mail", "values": {"env_file": hostile}}},
-        }
-        entry = JobEnablement.from_dict(data).jobs["mail"]
-        job = resolve_job("example-plugin", JobDefinition.from_dict(COMMAND_DEFINITION), entry)
-        self.assertEqual(shlex.split(job["command"]), ["fetch-mail", "--env-file", hostile])
-        self.assertEqual(job["env"]["MAIL_ENV"], hostile)
+        for hostile in ("/tmp/env; touch /tmp/owned", "$(touch /tmp/owned)", "`id`", "a\"b'c", "{{env_file}}"):
+            data = {
+                "schema": "scheduled-job-enablement.v1",
+                "jobs": {"mail": {"use": "example-plugin/fetch-mail", "values": {"env_file": hostile}}},
+            }
+            entry = JobEnablement.from_dict(data).jobs["mail"]
+            job = resolve_job("example-plugin", JobDefinition.from_dict(COMMAND_DEFINITION), entry)
+            with self.subTest(hostile=hostile):
+                self.assertEqual(shlex.split(job["command"]), ["fetch-mail", "--env-file", hostile])
+                self.assertEqual(job["env"]["MAIL_ENV"], hostile)
+
+    def test_inline_job_joins_an_argument_list(self) -> None:
+        data = copy.deepcopy(ENABLEMENT)
+        inline = data["jobs"]["reminder"]["inline"]
+        del inline["prompt"]
+        inline["command"] = ["notify", "weekly reminder"]
+        job = inline_job(JobEnablement.from_dict(data).jobs["reminder"])
+        self.assertEqual(shlex.split(job["command"]), ["notify", "weekly reminder"])
+        self.assertTrue(job["one_shot"])
 
     def test_resolve_refuses_entry_for_another_plugin(self) -> None:
         with self.assertRaisesRegex(ContractError, "does not use this definition"):
