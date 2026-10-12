@@ -210,8 +210,9 @@ class JobDefinition:
         meta = {"schema", "id", "requires", "overridable"}
         if _TENANT_ONLY & set(data):
             raise ContractError(f"a shipped job cannot set tenant-only keys: {sorted(_TENANT_ONLY & set(data))}")
+        if "description" not in data:
+            raise ContractError("job definition.description is required")
         fields = _job_fields(data, "job definition", meta)
-        _text(fields.get("description"), "job definition.description")
         _refuse_stray_placeholders(fields, "job definition")
         requires = cls._requires(data.get("requires", {}))
         used = _placeholders(fields)
@@ -252,6 +253,8 @@ def _use_entry(data: Mapping[str, Any], field: str) -> JobEntry:
         raise ContractError(f"{field}.use must be <plugin>/<job-id>")
     values = _mapping(data.get("values", {}), f"{field}.values")
     for name, value in values.items():
+        if not isinstance(name, str) or not _VALUE_NAME.fullmatch(name):
+            raise ContractError(f"{field}.values name {name!r} must be lowercase snake case")
         _plain(value, f"{field}.values.{name}")
     overrides = _mapping(data.get("overrides", {}), f"{field}.overrides")
     for key, value in overrides.items():
@@ -267,7 +270,7 @@ def _inline_entry(data: Mapping[str, Any], field: str) -> JobEntry:
     if set(data) != {"inline"}:
         raise ContractError(f"{field} with inline must have no other keys")
     fields = _job_fields(_mapping(data["inline"], f"{field}.inline"), f"{field}.inline", set())
-    if _placeholders(fields):
+    if "{{" in repr(fields):
         raise ContractError(f"{field}.inline cannot use placeholders; write the value directly")
     return JobEntry(None, {}, {}, fields.get("enabled", True), fields)
 

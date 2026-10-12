@@ -178,6 +178,24 @@ class EnablementTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "control characters"):
             JobEnablement.from_dict(data)
 
+    def test_rejects_placeholder_in_any_inline_field(self) -> None:
+        data = copy.deepcopy(ENABLEMENT)
+        data["jobs"]["reminder"]["inline"]["model"] = "{{model}}"
+        with self.assertRaisesRegex(ContractError, "cannot use placeholders"):
+            JobEnablement.from_dict(data)
+
+    def test_rejects_definition_without_description(self) -> None:
+        data = definition(PROMPT_DEFINITION)
+        del data["description"]
+        with self.assertRaisesRegex(ContractError, "description is required"):
+            JobDefinition.from_dict(data)
+
+    def test_rejects_badly_named_value(self) -> None:
+        data = copy.deepcopy(ENABLEMENT)
+        data["jobs"]["digest"]["values"]["Post-To"] = "1"
+        with self.assertRaisesRegex(ContractError, "snake case"):
+            JobEnablement.from_dict(data)
+
     def test_rejects_placeholder_in_inline_job(self) -> None:
         data = copy.deepcopy(ENABLEMENT)
         data["jobs"]["reminder"]["inline"]["prompt"] = "Write to {{vault_path}}."
