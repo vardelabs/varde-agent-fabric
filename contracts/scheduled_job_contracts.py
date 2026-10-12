@@ -60,11 +60,21 @@ def _cron(value: Any, field: str) -> None:
         raise ContractError(f"{field} must have five cron fields")
 
 
+# These load from the tz database but name the host's own setting or a stub,
+# so a schedule using them would depend on the host it runs on.
+_ZONES = zoneinfo.available_timezones() - {"Factory", "localtime", "posixrules"}
+
+
 def _timezone(value: Any, field: str) -> None:
-    try:
-        zoneinfo.ZoneInfo(_text(value, field, 64))
-    except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
-        raise ContractError(f"{field} is not a known IANA time zone") from exc
+    if _text(value, field, 64) not in _ZONES:
+        raise ContractError(f"{field} is not a known IANA time zone")
+
+
+def _plain(value: Any, field: str) -> str:
+    text = _text(value, field, 4096)
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in text):
+        raise ContractError(f"{field} must not contain control characters")
+    return text
 
 
 def _command(value: Any, field: str) -> None:
@@ -81,6 +91,8 @@ def _command(value: Any, field: str) -> None:
         _text(argument, f"{field}[{index}]", 4096)
         if "{{" in argument and not _PLACEHOLDER.fullmatch(argument):
             raise ContractError(f"{field}[{index}] must be a whole placeholder or hold none")
+    if sum(len(argument) for argument in value) > 4096:
+        raise ContractError(f"{field} arguments must total at most 4096 characters")
 
 
 def _vault_sync(value: Any, field: str) -> None:
@@ -103,8 +115,8 @@ def _env(value: Any, field: str) -> None:
     for key, item in value.items():
         if not isinstance(key, str) or not _ENV_NAME.fullmatch(key):
             raise ContractError(f"{field} key {key!r} is not an environment variable name")
-        if not isinstance(item, str) or len(item) > 4096:
-            raise ContractError(f"{field}.{key} must be a string of at most 4096 characters")
+        if item != "":
+            _plain(item, f"{field}.{key}")
 
 
 _FIELDS: dict[str, Callable[[Any, str], object]] = {
@@ -172,6 +184,14 @@ def _placeholders(fields: Mapping[str, Any]) -> set[str]:
     return {name for text in _template_strings(fields) for name in _PLACEHOLDER.findall(text)}
 
 
+def _refuse_stray_placeholders(fields: Mapping[str, Any], field: str) -> None:
+    # Only templated fields are ever filled; a placeholder anywhere else would
+    # reach the runner as literal text.
+    for key, value in fields.items():
+        if key not in (*_TEMPLATED, "command", "env") and "{{" in repr(value):
+            raise ContractError(f"{field}.{key} cannot hold a placeholder")
+
+
 @dataclass(frozen=True)
 class JobDefinition:
     job_id: str
@@ -192,6 +212,7 @@ class JobDefinition:
             raise ContractError(f"a shipped job cannot set tenant-only keys: {sorted(_TENANT_ONLY & set(data))}")
         fields = _job_fields(data, "job definition", meta)
         _text(fields.get("description"), "job definition.description")
+        _refuse_stray_placeholders(fields, "job definition")
         requires = cls._requires(data.get("requires", {}))
         used = _placeholders(fields)
         if used != set(requires):
@@ -231,7 +252,7 @@ def _use_entry(data: Mapping[str, Any], field: str) -> JobEntry:
         raise ContractError(f"{field}.use must be <plugin>/<job-id>")
     values = _mapping(data.get("values", {}), f"{field}.values")
     for name, value in values.items():
-        _text(value, f"{field}.values.{name}", 4096)
+        _plain(value, f"{field}.values.{name}")
     overrides = _mapping(data.get("overrides", {}), f"{field}.overrides")
     for key, value in overrides.items():
         if key not in _OVERRIDABLE:
@@ -303,11 +324,16 @@ def resolve_job(plugin: str, definition: JobDefinition, entry: JobEntry) -> dict
     if "env" in job:
         job["env"] = {name: _fill(value, entry.values) for name, value in job["env"].items()}
     job.update(entry.overrides)
+    return _checked(job, entry.enabled)
+
+
+def _checked(job: dict[str, Any], enabled: bool) -> dict[str, Any]:
     for key, value in job.items():
-        # The joined command holds tenant text, which may legitimately contain "{{".
-        check = _FIELDS[key] if key != "command" else (lambda v, f: _text(v, f, 4096))
+        # A joined command is shell text that may carry "{{" from a tenant value,
+        # so it gets a length bound instead of the template rule.
+        check = _FIELDS[key] if key != "command" else (lambda v, f: _text(v, f, _MAX_PROMPT))
         check(value, f"resolved {key}")
-    job["enabled"] = entry.enabled
+    job["enabled"] = enabled
     return job
 
 
@@ -318,5 +344,4 @@ def inline_job(entry: JobEntry) -> dict[str, Any]:
     job = {key: value for key, value in entry.inline.items() if key != "description"}
     if isinstance(job.get("command"), list):
         job["command"] = shlex.join(job["command"])
-    job["enabled"] = entry.enabled
-    return job
+    return _checked(job, entry.enabled)

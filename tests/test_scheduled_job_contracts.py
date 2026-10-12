@@ -132,6 +132,20 @@ class DefinitionTests(unittest.TestCase):
             with self.subTest(argument=argument), self.assertRaisesRegex(ContractError, "whole placeholder"):
                 JobDefinition.from_dict(definition(COMMAND_DEFINITION, command=command))
 
+    def test_rejects_host_dependent_timezone(self) -> None:
+        for zone in ("localtime", "posixrules", "Factory"):
+            with self.subTest(zone=zone), self.assertRaisesRegex(ContractError, "IANA"):
+                JobDefinition.from_dict(definition(PROMPT_DEFINITION, timezone=zone))
+
+    def test_rejects_placeholder_in_a_field_that_is_never_filled(self) -> None:
+        for key, value in (("model", "{{post_to}}"), ("mcp_config", ["{{post_to}}"])):
+            with self.subTest(key=key), self.assertRaisesRegex(ContractError, f"{key} cannot hold a placeholder"):
+                JobDefinition.from_dict(definition(PROMPT_DEFINITION, **{key: value}))
+
+    def test_rejects_command_arguments_that_could_never_resolve(self) -> None:
+        with self.assertRaisesRegex(ContractError, "total at most 4096"):
+            JobDefinition.from_dict(definition(COMMAND_DEFINITION, command=["a" * 3000, "b" * 3000, "{{env_file}}"]))
+
     def test_unhashable_values_raise_contract_error(self) -> None:
         cases = [definition(PROMPT_DEFINITION, post_mode=[]),
                  definition(PROMPT_DEFINITION, overridable=[["cron"]])]
@@ -156,6 +170,12 @@ class EnablementTests(unittest.TestCase):
         data = copy.deepcopy(ENABLEMENT)
         data["jobs"]["digest"] = {"values": {}}
         with self.assertRaisesRegex(ContractError, "use or inline"):
+            JobEnablement.from_dict(data)
+
+    def test_rejects_control_characters_in_tenant_values(self) -> None:
+        data = copy.deepcopy(ENABLEMENT)
+        data["jobs"]["digest"]["values"]["post_to"] = "12\n3"
+        with self.assertRaisesRegex(ContractError, "control characters"):
             JobEnablement.from_dict(data)
 
     def test_rejects_placeholder_in_inline_job(self) -> None:
