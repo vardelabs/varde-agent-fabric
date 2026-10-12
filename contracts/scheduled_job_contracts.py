@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import zoneinfo
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -25,6 +26,7 @@ _ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _VALUE_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,127}")
 _PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
+_CRON_FIELD = re.compile(r"[0-9A-Za-z*,/-]+")
 _MAX_PROMPT = 64 * 1024
 _MAX_JOBS = 200
 
@@ -47,14 +49,34 @@ def _positive_int(value: Any, field: str) -> None:
 
 def _one_of(allowed: set[str]) -> Callable[[Any, str], None]:
     def check(value: Any, field: str) -> None:
-        if value not in allowed:
+        if not isinstance(value, str) or value not in allowed:
             raise ContractError(f"{field} must be one of {sorted(allowed)}")
     return check
 
 
 def _cron(value: Any, field: str) -> None:
-    if len(_text(value, field, 128).split()) != 5:
-        raise ContractError(f"{field} must have five fields")
+    parts = _text(value, field, 128).split()
+    if len(parts) != 5 or not all(_CRON_FIELD.fullmatch(part) for part in parts):
+        raise ContractError(f"{field} must have five cron fields")
+
+
+def _timezone(value: Any, field: str) -> None:
+    try:
+        zoneinfo.ZoneInfo(_text(value, field, 64))
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
+        raise ContractError(f"{field} is not a known IANA time zone") from exc
+
+
+def _command(value: Any, field: str) -> None:
+    # A placeholder is quoted on fill, and a second layer of quotes from the
+    # template would reopen the shell inside it, so it must stand alone.
+    try:
+        tokens = shlex.split(_text(value, field, 4096), posix=False)
+    except ValueError as exc:
+        raise ContractError(f"{field} has unbalanced quotes") from exc
+    for token in tokens:
+        if "{{" in token and not _PLACEHOLDER.fullmatch(token):
+            raise ContractError(f"{field} placeholder {token!r} must be a whole unquoted word")
 
 
 def _vault_sync(value: Any, field: str) -> None:
@@ -84,10 +106,10 @@ def _env(value: Any, field: str) -> None:
 _FIELDS: dict[str, Callable[[Any, str], object]] = {
     "description": lambda v, f: _text(v, f),
     "cron": _cron,
-    "timezone": lambda v, f: _text(v, f, 64),
+    "timezone": _timezone,
     "timeout_seconds": _positive_int,
     "prompt": lambda v, f: _text(v, f, _MAX_PROMPT),
-    "command": lambda v, f: _text(v, f, 4096),
+    "command": _command,
     "model": lambda v, f: _text(v, f, 128),
     "post_mode": _one_of({"webhook", "direct"}),
     "post_to": lambda v, f: _text(v, f, 128),
@@ -170,7 +192,7 @@ class JobDefinition:
         if used != set(requires):
             raise ContractError(f"placeholders and requires differ, undeclared={sorted(used - set(requires))}, unused={sorted(set(requires) - used)}")
         overridable = data.get("overridable", [])
-        if not isinstance(overridable, list) or not set(overridable) <= _OVERRIDABLE:
+        if not isinstance(overridable, list) or not all(isinstance(key, str) and key in _OVERRIDABLE for key in overridable):
             raise ContractError(f"overridable must be a list drawn from {sorted(_OVERRIDABLE)}")
         if "command" in fields and _PROMPT_ONLY & set(overridable):
             raise ContractError("a command job cannot offer prompt-only overrides")
@@ -252,13 +274,13 @@ def _fill(text: str, values: Mapping[str, str], quote: bool) -> str:
     return _PLACEHOLDER.sub(lambda m: shlex.quote(values[m.group(1)]) if quote else values[m.group(1)], text)
 
 
-def resolve_job(definition: JobDefinition, entry: JobEntry) -> dict[str, Any]:
+def resolve_job(plugin: str, definition: JobDefinition, entry: JobEntry) -> dict[str, Any]:
     """Merge a shipped definition with a tenant entry into the job a runner executes.
 
-    A value placed into `command` is shell-quoted, so a tenant value can never
-    add shell syntax to a shipped command.
+    A value placed into `command` is shell-quoted, so it reaches the program as
+    exactly one argument.
     """
-    if entry.use is None or entry.use[1] != definition.job_id:
+    if entry.use != (plugin, definition.job_id):
         raise ContractError("entry does not use this definition")
     missing = set(definition.requires) - set(entry.values)
     unknown = set(entry.values) - set(definition.requires)
@@ -274,5 +296,9 @@ def resolve_job(definition: JobDefinition, entry: JobEntry) -> dict[str, Any]:
     if "env" in job:
         job["env"] = {name: _fill(value, entry.values, quote=False) for name, value in job["env"].items()}
     job.update(entry.overrides)
+    for key, value in job.items():
+        # A filled command holds quoted tenant text, which the placeholder rule would misread.
+        check = _FIELDS[key] if key != "command" else (lambda v, f: _text(v, f, 4096))
+        check(value, f"resolved {key}")
     job["enabled"] = entry.enabled
     return job

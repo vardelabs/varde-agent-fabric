@@ -112,8 +112,25 @@ class DefinitionTests(unittest.TestCase):
             JobDefinition.from_dict(definition(PROMPT_DEFINITION, enabled=False))
 
     def test_rejects_bad_cron(self) -> None:
-        with self.assertRaisesRegex(ContractError, "five fields"):
-            JobDefinition.from_dict(definition(PROMPT_DEFINITION, cron="0 4 * *"))
+        for cron in ("0 4 * *", "0 4 * * $(x)"):
+            with self.subTest(cron=cron), self.assertRaisesRegex(ContractError, "five cron fields"):
+                JobDefinition.from_dict(definition(PROMPT_DEFINITION, cron=cron))
+
+    def test_rejects_unknown_timezone(self) -> None:
+        with self.assertRaisesRegex(ContractError, "IANA"):
+            JobDefinition.from_dict(definition(PROMPT_DEFINITION, timezone="Not/AZone"))
+
+    def test_rejects_command_placeholder_that_is_not_a_whole_word(self) -> None:
+        for command in ('sh -c "echo {{env_file}}"', "fetch '{{env_file}}'", "fetch --env={{env_file}}"):
+            with self.subTest(command=command), self.assertRaisesRegex(ContractError, "whole unquoted word"):
+                JobDefinition.from_dict(definition(COMMAND_DEFINITION, command=command))
+
+    def test_unhashable_values_raise_contract_error(self) -> None:
+        cases = [definition(PROMPT_DEFINITION, post_mode=[]),
+                 definition(PROMPT_DEFINITION, overridable=[["cron"]])]
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(ContractError):
+                JobDefinition.from_dict(data)
 
 
 class EnablementTests(unittest.TestCase):
@@ -146,7 +163,7 @@ class ResolveTests(unittest.TestCase):
         self.jobs = JobEnablement.from_dict(ENABLEMENT).jobs
 
     def test_resolve_fills_values_and_applies_overrides(self) -> None:
-        job = resolve_job(JobDefinition.from_dict(PROMPT_DEFINITION), self.jobs["digest"])
+        job = resolve_job("example-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), self.jobs["digest"])
         self.assertEqual(job["prompt"], "Write the digest into /srv/example-vault.")
         self.assertEqual(job["vault_sync"], "/srv/example-vault")
         self.assertEqual(job["post_to"], "123")
@@ -159,14 +176,14 @@ class ResolveTests(unittest.TestCase):
         del data["jobs"]["digest"]["values"]["post_to"]
         entry = JobEnablement.from_dict(data).jobs["digest"]
         with self.assertRaisesRegex(ContractError, "missing=\\['post_to'\\]"):
-            resolve_job(JobDefinition.from_dict(PROMPT_DEFINITION), entry)
+            resolve_job("example-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), entry)
 
     def test_resolve_refuses_override_the_definition_does_not_offer(self) -> None:
         data = copy.deepcopy(ENABLEMENT)
         data["jobs"]["digest"]["overrides"] = {"timeout_seconds": 60}
         entry = JobEnablement.from_dict(data).jobs["digest"]
         with self.assertRaisesRegex(ContractError, "does not allow overriding"):
-            resolve_job(JobDefinition.from_dict(PROMPT_DEFINITION), entry)
+            resolve_job("example-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), entry)
 
     def test_command_values_cannot_add_shell_syntax(self) -> None:
         hostile = "/tmp/env; touch /tmp/owned"
@@ -175,13 +192,24 @@ class ResolveTests(unittest.TestCase):
             "jobs": {"mail": {"use": "example-plugin/fetch-mail", "values": {"env_file": hostile}}},
         }
         entry = JobEnablement.from_dict(data).jobs["mail"]
-        job = resolve_job(JobDefinition.from_dict(COMMAND_DEFINITION), entry)
+        job = resolve_job("example-plugin", JobDefinition.from_dict(COMMAND_DEFINITION), entry)
         self.assertEqual(shlex.split(job["command"]), ["fetch-mail", "--env-file", hostile])
         self.assertEqual(job["env"]["MAIL_ENV"], hostile)
 
+    def test_resolve_refuses_entry_for_another_plugin(self) -> None:
+        with self.assertRaisesRegex(ContractError, "does not use this definition"):
+            resolve_job("other-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), self.jobs["digest"])
+
+    def test_resolved_job_keeps_field_bounds(self) -> None:
+        data = copy.deepcopy(ENABLEMENT)
+        data["jobs"]["digest"]["values"]["post_to"] = "9" * 4000
+        entry = JobEnablement.from_dict(data).jobs["digest"]
+        with self.assertRaisesRegex(ContractError, "resolved post_to"):
+            resolve_job("example-plugin", JobDefinition.from_dict(PROMPT_DEFINITION), entry)
+
     def test_resolve_refuses_entry_for_another_job(self) -> None:
         with self.assertRaisesRegex(ContractError, "does not use this definition"):
-            resolve_job(JobDefinition.from_dict(COMMAND_DEFINITION), self.jobs["digest"])
+            resolve_job("example-plugin", JobDefinition.from_dict(COMMAND_DEFINITION), self.jobs["digest"])
 
 
 if __name__ == "__main__":
