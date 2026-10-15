@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import io
 import os
+import shutil
 import sys
 import tempfile
 import json
@@ -336,6 +338,47 @@ cat "$HOME/events.jsonl"
                             with self.assertRaises(type(error)):
                                 run_remote_review(self.metadata(), fallback_policy="remote-unavailable")
                             local.assert_not_called()
+
+    def run_main_with_local_codex(self, backend_body: str) -> tuple[int, str, Path]:
+        from dispatch.remote_runner import main
+        workdir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, workdir)
+        backend = workdir / "backend.sh"
+        backend.write_text("#!/bin/sh\n" + backend_body, encoding="utf-8")
+        backend.chmod(0o755)
+        output = workdir / "review.json"
+        argv = ["remote_runner.py", "--output", str(output), "--local-backend", str(backend),
+                "--harness", "codex", "--target", "remote", "--fallback-policy", "remote-unavailable",
+                "--model", "codex-model", "--workdir", str(workdir), "--repository", "vardelabs/example",
+                "--pull-request", "19", "--base-sha", BASE, "--head-sha", HEAD,
+                "--correlation-id", "corr-19", "--path", "src/app.py", "--task", "Review this diff for bugs."]
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stderr", stderr):
+            with mock.patch("dispatch.remote_runner._gateway_client") as client:
+                client.return_value.submit.side_effect = GatewayUnavailable("offline")
+                status = main()
+        return status, stderr.getvalue(), output
+
+    def test_local_codex_fallback_asks_a_prose_task_for_json_findings(self):
+        # The fake model answers in JSON only when told to, as a prose-prompted model does.
+        status, stderr, output = self.run_main_with_local_codex(
+            'case "$DISPATCH_TASK" in\n'
+            '  *"Return only a JSON array of findings"*) printf "[]" > "$DISPATCH_OUTPUT" ;;\n'
+            '  *) printf "Looks fine to me." > "$DISPATCH_OUTPUT" ;;\n'
+            'esac\n'
+        )
+        self.assertEqual(status, 0, stderr)
+        artifact = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(artifact["fallback"], "cluster-unavailable-local-codex")
+        self.assertEqual(artifact["findings"], [])
+
+    def test_local_codex_prose_output_names_the_local_fallback(self):
+        status, stderr, output = self.run_main_with_local_codex('printf "Looks fine to me." > "$DISPATCH_OUTPUT"\n')
+        self.assertEqual(status, 4)
+        self.assertIn("local review failed", stderr)
+        self.assertIn("local Codex output is not JSON", stderr)
+        self.assertNotIn("remote review failed", stderr)
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
