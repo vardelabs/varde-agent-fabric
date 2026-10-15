@@ -15,6 +15,18 @@ from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError
 
 
+class LocalFallbackError(RuntimeError):
+    """A local fallback ran after the gateway was unavailable and then failed."""
+
+
+_LOCAL_REVIEW_CONTRACT = (
+    "Review the supplied pull request packet and diff. Return only a JSON array of findings. "
+    "Each finding must be an object with severity red, yellow, or green and a non-empty message string. "
+    "Optional keys are file, line, category, confidence, and reproduction. "
+    "Return [] when there are no findings. Do not include prose or code fences."
+)
+
+
 @dataclass(frozen=True)
 class RemoteReviewMetadata:
     repository: str
@@ -61,7 +73,7 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", ""),
         "TMPDIR": metadata.workdir,
-        "DISPATCH_TASK": metadata.task,
+        "DISPATCH_TASK": f"{_LOCAL_REVIEW_CONTRACT}\n\n{metadata.task}",
         "DISPATCH_WORKDIR": metadata.workdir,
         "DISPATCH_OUTPUT": str(local_output),
         "DISPATCH_MODEL": metadata.model,
@@ -78,7 +90,10 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         )
         if result.returncode != 0 or not local_output.is_file():
             raise RuntimeError("local backend failed")
-        payload = json.loads(local_output.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(local_output.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("local Codex output is not JSON") from exc
         if isinstance(payload, dict) and payload.get("schema") == "review-artifact.v1":
             artifact = ReviewArtifact.from_dict(payload)
         else:
@@ -93,14 +108,6 @@ def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         return artifact
     finally:
         local_output.unlink(missing_ok=True)
-
-
-_LOCAL_OPENCODE_REVIEW_CONTRACT = (
-    "Review the supplied pull request packet and diff. Return only a JSON array of findings. "
-    "Each finding must be an object with severity red, yellow, or green and a non-empty message string. "
-    "Optional keys are file, line, category, confidence, and reproduction. "
-    "Return [] when there are no findings. Do not include prose or code fences."
-)
 
 
 def _opencode_findings(raw: bytes) -> tuple[dict[str, object], ...]:
@@ -166,7 +173,7 @@ def _run_local_opencode(metadata: RemoteReviewMetadata, request: ReviewRequest) 
         raise RuntimeError("local OpenCode fallback requires a review diff")
 
     local_output = Path(f"{metadata.output}.local")
-    fallback_task = f"{_LOCAL_OPENCODE_REVIEW_CONTRACT}\n\n{metadata.task}"
+    fallback_task = f"{_LOCAL_REVIEW_CONTRACT}\n\n{metadata.task}"
     environment = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", ""),
@@ -227,12 +234,14 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
     if metadata.target != "remote":
         raise GatewayError("remote runner requires a remote target")
     client = _gateway_client()
+    local_runner = {"codex": _run_local_codex, "opencode": _run_local_opencode}.get(metadata.harness)
     local_fallback = None
-    if fallback_policy == "remote-unavailable":
-        if metadata.harness == "codex":
-            local_fallback = lambda: _run_local_codex(metadata, request)
-        elif metadata.harness == "opencode":
-            local_fallback = lambda: _run_local_opencode(metadata, request)
+    if fallback_policy == "remote-unavailable" and local_runner is not None:
+        def local_fallback() -> ReviewArtifact:
+            try:
+                return local_runner(metadata, request)
+            except Exception as exc:
+                raise LocalFallbackError(f"gateway unavailable; local {metadata.harness} fallback failed: {exc}") from exc
     return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)
 
 
@@ -306,7 +315,8 @@ def main() -> int:
             encoding="utf-8",
         )
     except Exception as exc:
-        print(f"varde-agent-dispatch: remote {args.kind} failed: {exc}", file=sys.stderr)
+        route = "local" if isinstance(exc, LocalFallbackError) else "remote"
+        print(f"varde-agent-dispatch: {route} {args.kind} failed: {exc}", file=sys.stderr)
         return 4
     if isinstance(artifact, ImplementArtifact) and not artifact.changes:
         return 6
