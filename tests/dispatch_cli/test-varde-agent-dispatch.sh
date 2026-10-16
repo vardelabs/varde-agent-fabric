@@ -114,12 +114,14 @@ set -euo pipefail
 output=''
 prompt=''
 working_dir=''
+config=''
 for arg in "$@"; do
   [[ "$arg" != *'diff body'* && "$arg" != *'private-task-sentinel'* ]] || exit 94
 done
 while (($#)); do
   if [[ "$1" == '-o' ]]; then output="$2"; shift 2
   elif [[ "$1" == '-C' ]]; then working_dir="$2"; shift 2
+  elif [[ "$1" == '-c' ]]; then config+="$2;"; shift 2
   elif [[ "$1" == '--' ]]; then
     shift
     [[ $# -eq 1 && "$1" == '-' ]] || exit 92
@@ -130,7 +132,7 @@ while (($#)); do
 done
 [[ "$(printenv)" != *'diff body'* && "$(printenv)" != *'private-task-sentinel'* ]] || exit 93
 [[ -z "${DISPATCH_UNSAFE_SENTINEL:-}${OPENAI_API_KEY:-}" ]] || exit 90
-printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\ncwd=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" "$working_dir" > "$output"
+printf 'model=%s\nsandbox=%s\ntarget=%s\noverridden=%s\nfallback=%s\nfallback_harness=%s\nfallback_target=%s\ncwd=%s\nconfig=%s\n' "${DISPATCH_MODEL:-}" "${DISPATCH_CODEX_SANDBOX:-}" "${DISPATCH_TARGET:-}" "${DISPATCH_HARNESS_OVERRIDDEN:-}" "${DISPATCH_FALLBACK_POLICY:-}" "${DISPATCH_FALLBACK_HARNESS:-}" "${DISPATCH_FALLBACK_TARGET:-}" "$working_dir" "$config" > "$output"
 printf '%s\n' "$prompt" >> "$output"
 EOF
 chmod +x "$TMP/bin/codex"
@@ -154,6 +156,7 @@ check grep -qF 'fallback=none' "$TMP/out"
 check grep -qF 'BEGIN DIFF' "$TMP/out"
 check grep -qF 'diff body' "$TMP/out"
 check grep -qF 'private-task-sentinel' "$TMP/out"
+check grep -qxF 'config=model_reasoning_effort=high;' "$TMP/out"
 
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
   --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
@@ -170,6 +173,7 @@ if ! DISPATCH_CODEX_SANDBOX=workspace-write PATH="$TMP/bin:/usr/bin:/bin" "$CLI"
   exit 1
 fi
 check grep -qF 'sandbox=workspace-write' "$TMP/out-codex-implement"
+check grep -qxF 'config=' "$TMP/out-codex-implement"
 
 cat > "$TMP/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
