@@ -1,0 +1,5 @@
+# Known false positives from the 2026-10-17 full-history secret scan. Each
+# entry names one commit, so it hides nothing else.
+
+# test fixture with a fake value
+bc06fa4a746a7c22f913bae738cbb76e671302df:tests/test-public-safety.sh:private-key:18
