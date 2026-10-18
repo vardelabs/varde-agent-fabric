@@ -71,10 +71,12 @@ expect_denied() {
   if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null 2>&1; then exit 1; fi
 }
 expect_denied 'built for ZyxDeployName here'
+denied_output="$(PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan 2>&1)" || true
+case "$denied_output" in *denylisted*) ;; *) exit 1 ;; esac
+if grep -qi zyxdeployname <<<"$denied_output"; then exit 1; fi
 printf '# comment here\n' > "$TMP/repo/named.txt"
 "${git_cmd[@]}" -C "$TMP/repo" add named.txt
 PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null
-if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan 2>&1 | grep -qi zyxdeployname; then exit 1; fi
 run_scan >/dev/null
 if PUBLIC_SAFETY_DENYLIST="$TMP/missing" run_scan >/dev/null 2>&1; then exit 1; fi
 "${git_cmd[@]}" -C "$TMP/repo" reset -q named.txt
