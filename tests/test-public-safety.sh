@@ -52,17 +52,33 @@ aws_prefix='AKIA'
 aws_suffix='0000000000000000'
 expect_rejected aws.txt "${aws_prefix}${aws_suffix}"
 private_root='/data/'
-private_agent='corvus'
+private_agent='example-agent'
 expect_rejected path.txt "${private_root}${private_agent}/state"
 runtime_root='/run/user/'
 runtime_id='1003/'
 expect_rejected runtime.txt "${runtime_root}${runtime_id}socket"
-webhook_host='discord.com/api/webhooks/'
+webhook_host='discord.com/api/web''hooks/'
 webhook_id='1234567890'
 expect_rejected webhook.txt "${webhook_host}${webhook_id}"
+
+printf '# comment\nzyxdeployname\n' > "$TMP/denylist"
+printf 'synthetic content\n' > "$TMP/repo/named.txt"
+"${git_cmd[@]}" -C "$TMP/repo" add named.txt
+PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null
+expect_denied() {
+  printf '%s\n' "$1" > "$TMP/repo/named.txt"
+  "${git_cmd[@]}" -C "$TMP/repo" add named.txt
+  if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null 2>&1; then exit 1; fi
+}
+expect_denied 'built for ZyxDeployName here'
+if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan 2>&1 | grep -qi zyxdeployname; then exit 1; fi
+run_scan >/dev/null
+if PUBLIC_SAFETY_DENYLIST="$TMP/missing" run_scan >/dev/null 2>&1; then exit 1; fi
+"${git_cmd[@]}" -C "$TMP/repo" reset -q named.txt
+rm "$TMP/repo/named.txt"
 
 if PUBLIC_SAFETY_ROOT="$TMP/not-a-repository" "$ROOT/scripts/check-public-safety.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'public safety scanner tests: 9 passed\n'
+printf 'public safety scanner tests: 14 passed\n'
