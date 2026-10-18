@@ -525,7 +525,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             assert self.path == "/v1/reviews"
             assert request["schema"] == "review-request.v1"
-            assert request["repository"] == "vardelabs/example"
+            assert request["repository"] == "example-org/example"
             assert request["pull_request"] == 20
             assert request["base_sha"] == "a" * 40
             assert request["head_sha"] == "b" * 40
@@ -562,7 +562,7 @@ EOF
 remote_port="$(<"$TMP/port")"
 if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind review \
-  --diff "$TMP/change.diff" --repository vardelabs/example --pull-request 20 --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  --diff "$TMP/change.diff" --repository example-org/example --pull-request 20 --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
   --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" --correlation-id cli-corr --path src/app.py \
   --task remote-task --workdir "$TMP/work" --output "$TMP/out-remote" >"$TMP/stdout-remote" 2>"$TMP/err-remote"; then
   printf 'remote CLI dispatch unexpectedly failed\n' >&2; cat "$TMP/err-remote" >&2; exit 1
@@ -575,7 +575,7 @@ if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" \
   DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token \
   DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" PATH="$TMP/bin:/usr/bin:/bin" \
   "$CLI" --model opencode-go/qwen3.8-flash --routes "$TMP/remote-routes.json" --kind review \
-  --diff "$TMP/change.diff" --repository vardelabs/example --pull-request 21 \
+  --diff "$TMP/change.diff" --repository example-org/example --pull-request 21 \
   --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
   --correlation-id cli-qwen-fallback --path src/app.py --task qwen-local-fallback \
   --workdir "$TMP/work" --output "$TMP/out-opencode-fallback" \
@@ -598,7 +598,7 @@ for scenario in change no-op; do
   status=0
   DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
     PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
-    --repository vardelabs/example --correlation-id cli-implement --path selected.txt --task "$scenario" \
+    --repository example-org/example --correlation-id cli-implement --path selected.txt --task "$scenario" \
     --workdir "$TMP/work" --output "$TMP/out-implement-$scenario" >"$TMP/stdout-implement-$scenario" 2>"$TMP/err-implement-$scenario" || status=$?
   if [[ "$scenario" == change ]]; then check test "$status" -eq 0; else check test "$status" -eq 6; fi
   check test -s "$TMP/out-implement-$scenario"
@@ -619,7 +619,7 @@ for kimi_model in opencode-go/kimi-k2.7-code opencode-go/kimi-k3; do
   safe="${kimi_model##*/}"
   if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
     PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model "$kimi_model" --routes "$TMP/kimi-implement-routes.json" --kind implement \
-    --repository vardelabs/example --correlation-id "cli-$safe" --path selected.txt --task change \
+    --repository example-org/example --correlation-id "cli-$safe" --path selected.txt --task change \
     --workdir "$TMP/work" --output "$TMP/out-$safe" >"$TMP/stdout-$safe" 2>"$TMP/err-$safe"; then
     printf 'kimi remote implement dispatch unexpectedly failed\n' >&2
     cat "$TMP/err-$safe" >&2
@@ -631,28 +631,28 @@ for kimi_model in opencode-go/kimi-k2.7-code opencode-go/kimi-k3; do
 done
 if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/Other_Model --routes "$TMP/kimi-implement-routes.json" --kind implement \
-  --repository vardelabs/example --correlation-id cli-bad-model --path selected.txt --task change \
+  --repository example-org/example --correlation-id cli-bad-model --path selected.txt --task change \
   --workdir "$TMP/work" --output "$TMP/out-bad-model" >"$TMP/stdout-bad-model" 2>"$TMP/err-bad-model"; then
   printf 'unapproved OpenCode implement model unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'unsupported OpenCode implement model' "$TMP/err-bad-model"
 if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-fallback --routes "$TMP/kimi-implement-routes.json" --kind implement \
-  --repository vardelabs/example --correlation-id cli-fallback --path selected.txt --task change \
+  --repository example-org/example --correlation-id cli-fallback --path selected.txt --task change \
   --workdir "$TMP/work" --output "$TMP/out-fallback" >"$TMP/stdout-fallback" 2>"$TMP/err-fallback"; then
   printf 'OpenCode implement fallback unexpectedly succeeded\n' >&2; exit 1
 fi
 check grep -qF 'fallback policy none' "$TMP/err-fallback"
 if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-k3 --routes "$TMP/kimi-implement-routes.json" --kind implement \
-  --repository vardelabs/example --correlation-id cli-mismatch --path selected.txt --task mismatch \
+  --repository example-org/example --correlation-id cli-mismatch --path selected.txt --task mismatch \
   --workdir "$TMP/work" --output "$TMP/out-mismatch" >"$TMP/stdout-mismatch" 2>"$TMP/err-mismatch"; then
   printf 'wrong-model artifact unexpectedly accepted\n' >&2; exit 1
 fi
 check grep -qF 'malformed implementation artifact' "$TMP/err-mismatch"
 if DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model opencode-go/kimi-k3 --routes "$TMP/kimi-implement-routes.json" --kind implement \
-  --repository vardelabs/example --correlation-id cli-incomplete --path selected.txt --task incomplete \
+  --repository example-org/example --correlation-id cli-incomplete --path selected.txt --task incomplete \
   --workdir "$TMP/work" --output "$TMP/out-incomplete" >"$TMP/stdout-incomplete" 2>"$TMP/err-incomplete"; then
   printf 'incomplete artifact unexpectedly accepted\n' >&2; exit 1
 fi
@@ -662,7 +662,7 @@ boundary_task="$(python3 -c 'print("x" * 16384, end="")')"
 if ! DISPATCH_MAX_TASK_BYTES=120000 DISPATCH_TIMEOUT_SECONDS=900 \
   DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/implement-routes.json" --kind implement \
-  --repository vardelabs/example --correlation-id cli-implement-boundary --path selected.txt \
+  --repository example-org/example --correlation-id cli-implement-boundary --path selected.txt \
   --task "$boundary_task" --workdir "$TMP/work" --output "$TMP/out-implement-boundary" \
   >"$TMP/stdout-implement-boundary" 2>"$TMP/err-implement-boundary"; then
   printf 'valid maximum remote implementation limits were rejected\n' >&2

@@ -24,7 +24,7 @@ HEAD = "b" * 40
 class RemoteEntrypointTests(unittest.TestCase):
     def metadata(self, **changes):
         values = dict(
-            repository="vardelabs/example",
+            repository="example-org/example",
             pull_request=19,
             base_sha=BASE,
             head_sha=HEAD,
@@ -45,7 +45,7 @@ class RemoteEntrypointTests(unittest.TestCase):
         request = build_review_request(self.metadata())
         self.assertEqual(request.to_dict(), {
             "schema": "review-request.v1",
-            "repository": "vardelabs/example",
+            "repository": "example-org/example",
             "pull_request": 19,
             "base_sha": BASE,
             "head_sha": HEAD,
@@ -268,7 +268,7 @@ cat "$HOME/events.jsonl"
 
     def test_remote_route_calls_gateway_without_local_fallback(self):
         req = build_review_request(self.metadata())
-        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "cluster", "codex", "corr-19", (), "completed")
+        expected = ReviewArtifact("example-org/example", 19, BASE, HEAD, "codex", "cluster", "codex", "corr-19", (), "completed")
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.return_value = expected
@@ -279,19 +279,19 @@ cat "$HOME/events.jsonl"
 
     def test_only_gateway_unavailable_uses_local_codex_and_preserves_identity(self):
         metadata = self.metadata(local_backend="/bin/local")
-        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
+        expected = ReviewArtifact("example-org/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
                 with mock.patch("dispatch.remote_runner._run_local_codex", return_value=expected) as local:
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
-        self.assertEqual((result.repository, result.pull_request, result.base_sha, result.head_sha, result.correlation_id), ("vardelabs/example", 19, BASE, HEAD, "corr-19"))
+        self.assertEqual((result.repository, result.pull_request, result.base_sha, result.head_sha, result.correlation_id), ("example-org/example", 19, BASE, HEAD, "corr-19"))
         local.assert_called_once()
 
     def test_http_503_response_status_uses_local_fallback(self):
         metadata = self.metadata(local_backend="/bin/local")
-        expected = ReviewArtifact("vardelabs/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
+        expected = ReviewArtifact("example-org/example", 19, BASE, HEAD, "codex", "requester", "codex-model", "corr-19", (), "completed")
         class UnavailableResponse:
             status = 503
             def __enter__(self): return self
@@ -307,7 +307,7 @@ cat "$HOME/events.jsonl"
         model = "opencode-go/kimi-k3"
         request = build_review_request(self.metadata(harness="opencode", model=model))
         artifact = ReviewArtifact(
-            "vardelabs/example", 19, BASE, HEAD, "opencode", "requester",
+            "example-org/example", 19, BASE, HEAD, "opencode", "requester",
             "opencode-go/qwen3.8-flash", "corr-19", (), "completed",
         )
         from dispatch.fallback_policy import validate_fallback_artifact
@@ -349,7 +349,7 @@ cat "$HOME/events.jsonl"
         output = workdir / "review.json"
         argv = ["remote_runner.py", "--output", str(output), "--local-backend", str(backend),
                 "--harness", "codex", "--target", "remote", "--fallback-policy", "remote-unavailable",
-                "--model", "codex-model", "--workdir", str(workdir), "--repository", "vardelabs/example",
+                "--model", "codex-model", "--workdir", str(workdir), "--repository", "example-org/example",
                 "--pull-request", "19", "--base-sha", BASE, "--head-sha", HEAD,
                 "--correlation-id", "corr-19", "--path", "src/app.py", "--task", "Review this diff for bugs."]
         stderr = io.StringIO()

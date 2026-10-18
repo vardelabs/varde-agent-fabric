@@ -28,7 +28,7 @@ HEAD = "b" * 40
 
 
 def request(worker: str = "local-gemma", model: str | None = None) -> ReviewRequest:
-    return ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", worker, "corr-7", "bounded packet", model=model)
+    return ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", worker, "corr-7", "bounded packet", model=model)
 
 
 def artifact(req: ReviewRequest, **changes: object) -> dict:
@@ -71,7 +71,7 @@ class RemoteReviewTests(unittest.TestCase):
                     ReviewArtifact.from_dict(artifact(request(), pull_request=value))
 
     def test_contract_normalizes_sha_case(self):
-        value = ReviewRequest("vardelabs/example", 7, BASE.upper(), HEAD.upper(), ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet")
+        value = ReviewRequest("example-org/example", 7, BASE.upper(), HEAD.upper(), ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet")
         self.assertEqual((value.base_sha, value.head_sha), (BASE, HEAD))
         response = artifact(value, base_sha=BASE.upper(), head_sha=HEAD.upper())
         normalized = ReviewArtifact.from_dict(response)
@@ -79,23 +79,23 @@ class RemoteReviewTests(unittest.TestCase):
 
     def test_contract_rejects_surrogate_text(self):
         with self.assertRaises(ContractError):
-            ReviewRequest("vardelabs/\ud800", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "packet")
+            ReviewRequest("example-org/\ud800", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "packet")
         with self.assertRaises(ContractError):
-            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/\ud800.py",), "reviewer", "codex", "corr-7", "packet")
+            ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/\ud800.py",), "reviewer", "codex", "corr-7", "packet")
         with self.assertRaises(ContractError):
-            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "\ud800")
+            ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "\ud800")
         with self.assertRaises(ContractError):
             ReviewArtifact(request().repository, 7, BASE, HEAD, "codex", "cluster", "codex", "corr-7", ({"severity": "red", "message": "\ud800"},), "completed")
 
     def test_contract_bounds_path_lengths(self):
         with self.assertRaises(ContractError):
-            ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("x" * 513,), "reviewer", "codex", "corr-7", "packet")
+            ReviewRequest("example-org/example", 7, BASE, HEAD, ("x" * 513,), "reviewer", "codex", "corr-7", "packet")
 
     def test_contract_rejects_unsafe_path_shapes(self):
         for path in ("/etc/passwd", "src/../secret", "src//app.py", "src/./app.py", "src\x00app.py"):
             with self.subTest(path=path):
                 with self.assertRaises(ContractError):
-                    ReviewRequest("vardelabs/example", 7, BASE, HEAD, (path,), "reviewer", "codex", "corr-7", "packet")
+                    ReviewRequest("example-org/example", 7, BASE, HEAD, (path,), "reviewer", "codex", "corr-7", "packet")
 
     def test_findings_require_messages(self):
         req = request()
@@ -154,7 +154,7 @@ class RemoteReviewTests(unittest.TestCase):
         paths = tuple("漢" * 512 for _ in range(100))
         with self.assertRaisesRegex(ContractError, "transport limit"):
             ReviewRequest(
-                "vardelabs/example",
+                "example-org/example",
                 7,
                 BASE,
                 HEAD,
@@ -168,7 +168,7 @@ class RemoteReviewTests(unittest.TestCase):
     def test_request_requires_immutable_paths(self):
         with self.assertRaisesRegex(ContractError, "paths must be a tuple"):
             ReviewRequest(
-                "vardelabs/example", 7, BASE, HEAD, ["src/app.py"],
+                "example-org/example", 7, BASE, HEAD, ["src/app.py"],
                 "reviewer", "codex", "corr-7", "bounded packet",
             )
 
@@ -388,7 +388,7 @@ class RemoteReviewTests(unittest.TestCase):
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
 
     def test_codex_fallback_honors_timeout(self):
-        req = ReviewRequest("vardelabs/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
+        req = ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
         def hung(_request):
             time.sleep(2)
