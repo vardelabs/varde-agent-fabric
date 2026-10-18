@@ -38,9 +38,16 @@ if [ -n "$denylist" ]; then
     printf 'public safety scan could not read the denylist\n' >&2
     exit 2
   fi
+  # grep -F -f reads a comment line as one more name to match.
   set +e
-  git -C "$root" grep --text -n -i -w -F -f "$denylist" -- . >/dev/null
+  names="$(grep -v -E '^[[:space:]]*(#|$)' "$denylist")"
   status=$?
+  if [ "$status" -le 1 ] && [ -n "$names" ]; then
+    git -C "$root" grep --text -n -i -w -F -f <(printf '%s\n' "$names") -- . >/dev/null
+    status=$?
+  elif [ "$status" -le 1 ]; then
+    status=1
+  fi
   set -e
   case "$status" in
     0)

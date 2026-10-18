@@ -71,6 +71,9 @@ expect_denied() {
   if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null 2>&1; then exit 1; fi
 }
 expect_denied 'built for ZyxDeployName here'
+printf '# comment here\n' > "$TMP/repo/named.txt"
+"${git_cmd[@]}" -C "$TMP/repo" add named.txt
+PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan >/dev/null
 if PUBLIC_SAFETY_DENYLIST="$TMP/denylist" run_scan 2>&1 | grep -qi zyxdeployname; then exit 1; fi
 run_scan >/dev/null
 if PUBLIC_SAFETY_DENYLIST="$TMP/missing" run_scan >/dev/null 2>&1; then exit 1; fi
@@ -81,4 +84,4 @@ if PUBLIC_SAFETY_ROOT="$TMP/not-a-repository" "$ROOT/scripts/check-public-safety
   exit 1
 fi
 
-printf 'public safety scanner tests: 14 passed\n'
+printf 'public safety scanner tests: 15 passed\n'
