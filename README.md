@@ -115,9 +115,10 @@ It must match the expected schema, request identity, and execution contract.
 
 ### Inference
 
-`inference/` contains generic local-runtime adapters, broker protocols, output
-grammars, and service templates. Inference services are compute boundaries, not
-platform actors.
+`inference/` is the home for local-runtime adapters, a broker protocol, output
+grammars, and service templates. Today it holds only the rules they must follow;
+no adapter, client, grammar, or template has landed yet. Inference services are
+compute boundaries, not platform actors.
 
 ### Evaluation
 
@@ -131,7 +132,7 @@ real source material or operational state.
 | --- | --- |
 | `dispatch/` | Bounded work lifecycle and harness adapters |
 | `contracts/` | Versioned request and artifact contracts |
-| `inference/` | Broker protocols, grammars, clients, and service templates |
+| `inference/` | Rules for broker protocols, grammars, and service templates (no code yet) |
 | `eval/` | Replay evaluation and synthetic fixtures |
 | `docs/` | Design documents |
 | `scripts/` | Repository maintenance and validation scripts |
