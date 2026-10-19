@@ -10,7 +10,9 @@ remain unchanged.
 equals `model`. A receiving deployment may serve a job on a sibling route when
 the requested provider refuses it before doing any work. The artifact then
 carries `fallback` as exactly `{"from": <model>, "reason": "rate-limit"}`, and
-`provider` names the sibling model, which must differ from `model`. Only a v2
+`provider` names the sibling model, which must differ from `model`. The
+sibling may run on another worker kind, so `provider` is bounded only as text,
+like any Codex model id, and not by the OpenCode model shape. Only a v2
 artifact can carry a fallback. `rate-limit` is the only reason. Whether a
 fallback is allowed at all is the receiving deployment's policy. The caller's
 route still uses fallback policy `none`, because the caller never runs a
