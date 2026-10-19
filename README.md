@@ -36,7 +36,7 @@ merely because it can run a model or a harness.
 ## Quickstart
 
 ```bash
-git clone https://github.com/vardelabs/varde-agent-fabric.git
+git clone https://github.com/vardelabs/varde-agent-fabric
 cd varde-agent-fabric
 ./tests/test-skeleton.sh
 ./tests/test-public-safety.sh
