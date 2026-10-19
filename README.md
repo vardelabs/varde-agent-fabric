@@ -1,5 +1,10 @@
 # varde-agent-fabric
 
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Python 3](https://img.shields.io/badge/python-3-blue.svg)
+![Bash 4.4+](https://img.shields.io/badge/bash-4.4%2B-blue.svg)
+![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)
+
 Safe, portable runtime components for bounded multi-agent work.
 
 `varde-agent-fabric` provides the execution layer between an orchestrator and a
@@ -20,6 +25,26 @@ concerns separate:
 
 A worker does not receive repository-write, shell, GitHub, or Discord authority
 merely because it can run a model or a harness.
+
+## Requirements
+
+- Python 3 and Bash 4.4 or newer. The runtime uses the standard library only.
+- Git, for isolated local review in a worktree.
+- A supported backend CLI on `PATH` for a live dispatch: `codex` or `opencode`.
+  The test suite needs neither.
+
+## Quickstart
+
+```bash
+git clone https://github.com/vardelabs/varde-agent-fabric
+cd varde-agent-fabric
+./tests/test-skeleton.sh
+./tests/test-public-safety.sh
+```
+
+Both scripts run hermetic, synthetic checks and need no credentials or network.
+For a first dispatch, copy `dispatch/routes.example.json`, point a route at a
+backend you have installed, and follow the [Dispatch](#dispatch) example below.
 
 ## Architecture
 
@@ -108,22 +133,16 @@ real source material or operational state.
 | `contracts/` | Versioned request and artifact contracts |
 | `inference/` | Broker protocols, grammars, clients, and service templates |
 | `eval/` | Replay evaluation and synthetic fixtures |
-| `docs/` | Architecture, threat model, and operational design |
+| `docs/` | Design documents |
 | `scripts/` | Repository maintenance and validation scripts |
 | `tests/` | Cross-component safety and compatibility tests |
 
 ## Project status
 
-The repository is under active construction. The public boundary and initial
-dispatch core are in place. The next roadmap slices are:
-
-1. Generalize portable dispatch contracts and configuration, [#10](https://github.com/vardelabs/varde-agent-fabric/issues/10)
-2. Resolve model-first routes, [#6](https://github.com/vardelabs/varde-agent-fabric/issues/6)
-3. Define the private deployment overlay, [#11](https://github.com/vardelabs/varde-agent-fabric/issues/11)
-4. Add the authenticated cluster service, [#7](https://github.com/vardelabs/varde-agent-fabric/issues/7)
-5. Integrate remote-first Codex dispatch, [#5](https://github.com/vardelabs/varde-agent-fabric/issues/5)
-6. Add public evaluation and release gates, [#12](https://github.com/vardelabs/varde-agent-fabric/issues/12)
-7. Complete vault caller migration and duplicate cleanup, [#8](https://github.com/vardelabs/varde-agent-fabric/issues/8)
+Pre-1.0. The public boundary, the dispatch core, model-first route resolution,
+the versioned contracts, and the public evaluation and release gates are in
+place. Interfaces can still change between commits. Open work is tracked in
+[issues](https://github.com/vardelabs/varde-agent-fabric/issues).
 
 ## Public-ready rule
 
@@ -136,12 +155,17 @@ contributor checklist and portable versus deployment-owned boundary are in
 ## Contributing
 
 Run the skeleton and relevant component tests before opening a pull request.
-Cluster CI runs the full suite as the `Skeleton validation` check.
+CI runs the full suite on every pull request as the `Skeleton validation` check.
 Changes that affect contracts, routing, adapters, security boundaries, or
 migration dependencies should update the relevant issue and include focused
 regression coverage.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report a vulnerability privately. See [`SECURITY.md`](SECURITY.md).
 
 ## License
 

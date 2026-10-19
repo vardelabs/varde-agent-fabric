@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is intended to remain safe for public publication.
+Treat this repository as public.
 Every reachable commit must be safe to publish.
 
 The fabric is the portable runtime layer, not a deployment repository. Keep

@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a change to a contract, route, adapter, or evaluation.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you need to do that the fabric does not support today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: >-
+        The change you suggest. Name the contract or interface it touches, and
+        say whether it belongs in the portable runtime or in a private
+        deployment overlay.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Authority boundary
+      description: >-
+        Does the change give a worker, adapter, or broker any new authority? If
+        it does, explain why the orchestrator cannot own it.
