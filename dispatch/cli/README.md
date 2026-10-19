@@ -103,7 +103,9 @@ The adapter reads `opencode --version` and supports the 1.x and 2.x CLIs. On
 `--file`. On 2.x, which removed `--pure` and `--dir`, it runs from the workdir
 with `--standalone` so no shared background service starts, and sets
 `OPENCODE_DISABLE_PROJECT_CONFIG=1` so plugins and config in the workdir are
-not loaded. The installed CLI help surface is smoke tested when available.
+not loaded. On both versions it sets `OPENCODE_DISABLE_AUTOUPDATE=1`, so a run
+never replaces the pinned CLI with a downloaded one. The installed CLI help
+surface is smoke tested when available.
 The adapter output is OpenCode's raw JSONL event stream from `--format json`;
 callers that need the final response must select the final `type=text` event.
 When `opencode run` exits non-zero, the adapter writes no output file. It

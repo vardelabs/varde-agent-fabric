@@ -39,6 +39,9 @@ case "$caller_home_real/" in
     ;;
 esac
 export HOME="$DISPATCH_OPENCODE_HOME"
+# A self-update would download a new binary into the writable home, bypassing
+# the pinned install the deployment chose.
+export OPENCODE_DISABLE_AUTOUPDATE=1
 
 command -v opencode >/dev/null 2>&1 || {
   printf 'opencode CLI not found on PATH\n' >&2
