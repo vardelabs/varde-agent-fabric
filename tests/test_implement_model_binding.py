@@ -75,6 +75,9 @@ class RecordedFallbackTests(unittest.TestCase):
         for provider, fallback in (
                 ('sibling-model', {'from': 'other/model', 'reason': 'rate-limit'}),
                 ('sibling-model', {'from': self.MODEL, 'reason': 'timeout'}),
+                ('sibling-model', {'from': self.MODEL, 'reason': ['rate-limit']}),
+                ('sibling-model', {'from': self.MODEL, 'reason': {'rate-limit': 1}}),
+                ('sibling-model', {'from': [self.MODEL], 'reason': 'rate-limit'}),
                 ('sibling-model', {'from': self.MODEL}),
                 ('sibling-model', {'from': self.MODEL, 'reason': 'rate-limit', 'extra': 1}),
                 (self.MODEL, {'from': self.MODEL, 'reason': 'rate-limit'}),

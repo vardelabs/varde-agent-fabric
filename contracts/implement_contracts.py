@@ -154,7 +154,7 @@ def _fallback(fallback, model, provider):
     _keys(fallback, {"from", "reason"})
     if model is None or fallback["from"] != model:
         raise ContractError("fallback must name the requested model")
-    if fallback["reason"] not in FALLBACK_REASONS:
+    if not isinstance(fallback["reason"], str) or fallback["reason"] not in FALLBACK_REASONS:
         raise ContractError("unsupported fallback reason")
     if provider == model:
         raise ContractError("fallback provider must differ from the requested model")
