@@ -16,10 +16,12 @@ fallback is allowed at all is the receiving deployment's policy. The caller's
 route still uses fallback policy `none`, because the caller never runs a
 fallback of its own.
 
-OpenCode implementation accepts any model shaped `<provider>/<name>`, where
-`<provider>` is 1 to 32 characters of lowercase letters, digits and `-`, and
-`<name>` is 1 to 64 characters of lowercase letters, digits, `.` and `-`. Both
-start with a letter or digit, and the model is bound to worker kind `opencode`.
+OpenCode implementation accepts any model shaped `<provider>/<name>`, or
+`<provider>/<vendor>/<name>` for an aggregating provider that also names the
+model's vendor. `<provider>` and `<vendor>` are each 1 to 32 characters of
+lowercase letters, digits and `-`. `<name>` is 1 to 64 characters of lowercase
+letters, digits, `.` and `-`. Each part starts with a letter or digit, and the
+model is bound to worker kind `opencode`.
 The contract bounds only the shape: the receiving deployment grants exact
 models, so a new OpenCode provider or model needs no fabric release. Codex may
 use v2 too.

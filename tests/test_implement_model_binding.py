@@ -43,7 +43,7 @@ class ModelBindingTests(unittest.TestCase):
                 with self.assertRaises(ContractError): ImplementRequest.from_dict(wrong)
         for bad in ('model', 'opencode-go/', 'opencode-go/Kimi', 'opencode-go/kimi k3',
                     'opencode-go/../x', 'opencode-go/-x', 'opencode-go/' + 'a' * 65, None,
-                    '/kimi-k3', 'Provider/kimi-k3', 'a/b/c', 'p' * 33 + '/kimi-k3'):
+                    '/kimi-k3', 'Provider/kimi-k3', 'a/b/c/d', 'p' * 33 + '/kimi-k3', 'p/v//m', 'p/' + 'v' * 33 + '/m'):
             with self.subTest(bad=bad), self.assertRaises(ContractError):
                 ImplementRequest('o/r', 'opencode', 'id', 'edit', legacy.files, 3, model=bad)
 
@@ -56,6 +56,9 @@ class ModelBindingTests(unittest.TestCase):
         req = ImplementRequest('o/r', 'opencode', 'id', 'edit', ({'path':'a', 'content':'old'},), 3,
                                model='other-provider/kimi-k3')
         self.assertEqual(ImplementRequest.from_dict(req.to_dict()).model, 'other-provider/kimi-k3')
+        vendor = ImplementRequest('o/r', 'opencode', 'id', 'edit', ({'path':'a', 'content':'old'},), 3,
+                                  model='aggregator/vendor/model-1.0')
+        self.assertEqual(ImplementRequest.from_dict(vendor.to_dict()).model, 'aggregator/vendor/model-1.0')
 
 
 class RecordedFallbackTests(unittest.TestCase):
