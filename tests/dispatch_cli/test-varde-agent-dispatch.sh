@@ -181,6 +181,7 @@ set -euo pipefail
 version="$(cat "$(dirname "$0")/opencode-version")"
 if [[ "${1:-}" == --version ]]; then printf '%s\n' "$version"; exit 0; fi
 [[ "${1:-}" == run ]] || exit 91
+[[ "${OPENCODE_DISABLE_AUTOUPDATE:-}" == 1 ]] || exit 88
 shift
 prompt="${1:-}"
 shift
