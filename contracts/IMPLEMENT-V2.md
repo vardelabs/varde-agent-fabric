@@ -1,15 +1,32 @@
 # Implementation protocol v2
 
 `implement-request.v2` is the v1 request plus required non-empty `model`.
-`implement-artifact.v2` is the v1 artifact plus required `model` equal to
-`provider`. All other key sets, UTF-8 path restrictions, snapshot digest,
-completed-only results, no-fallback and aggregate limits remain unchanged.
+`implement-artifact.v2` is the v1 artifact plus required `model`, and `provider`
+names the model that served the job. All other key sets, UTF-8 path
+restrictions, snapshot digest, completed-only results and aggregate limits
+remain unchanged.
 
-OpenCode implementation accepts any model shaped `opencode-go/<name>`, where
-`<name>` is 1 to 64 characters of lowercase letters, digits, `.` and `-`, starting
-with a letter or digit, bound to worker kind `opencode`. The contract bounds only
-the shape: the receiving deployment grants exact models, so a new OpenCode Go model
-needs no fabric release. Codex may use v2 too.
+`fallback` is null when the requested model served the job, and then `provider`
+equals `model`. A receiving deployment may serve a job on a sibling route when
+the requested provider refuses it before doing any work. The artifact then
+carries `fallback` as exactly `{"from": <model>, "reason": "rate-limit"}`, and
+`provider` names the sibling model, which must differ from `model`. The
+sibling may run on another worker kind, so `provider` is bounded only as text,
+like any Codex model id, and not by the OpenCode model shape. Only a v2
+artifact can carry a fallback. `rate-limit` is the only reason. Whether a
+fallback is allowed at all is the receiving deployment's policy. The caller's
+route still uses fallback policy `none`, because the caller never runs a
+fallback of its own.
+
+OpenCode implementation accepts any model shaped `<provider>/<name>`, or
+`<provider>/<vendor>/<name>` for an aggregating provider that also names the
+model's vendor. `<provider>` and `<vendor>` are each 1 to 32 characters of
+lowercase letters, digits and `-`. `<name>` is 1 to 64 characters of lowercase
+letters, digits, `.` and `-`. Each part starts with a letter or digit, and the
+model is bound to worker kind `opencode`.
+The contract bounds only the shape: the receiving deployment grants exact
+models, so a new OpenCode provider or model needs no fabric release. Codex may
+use v2 too.
 Receivers continue to accept legacy Codex v1 envelopes without a requested-model
 field. OpenCode cannot use v1. The public remote CLI emits v2 whenever `--model`
 is supplied, for either harness. Consequently, a Codex caller using v2 must use a

@@ -19,8 +19,12 @@ class ContractError(ValueError):
 MAX_BYTES = 320 * 1024
 MAX_TASK_BYTES = 16 * 1024
 # The deployment's broker and gateway allowlists grant exact models; the contract only
-# bounds the shape, so a new OpenCode Go model needs no fabric release.
-OPENCODE_IMPLEMENT_MODEL = re.compile(r"opencode-go/[a-z0-9][a-z0-9.-]{0,63}")
+# bounds the provider/model shape, so a new OpenCode provider or model needs no fabric release.
+# An aggregating provider names a model by its vendor too, as in <provider>/<vendor>/<name>.
+OPENCODE_IMPLEMENT_MODEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}/(?:[a-z0-9][a-z0-9-]{0,31}/)?[a-z0-9][a-z0-9.-]{0,63}")
+# A deployment may serve a job on a sibling route when the requested provider refuses it
+# before doing any work; the artifact then names both, so the caller can see who served it.
+FALLBACK_REASONS = frozenset({"rate-limit"})
 
 def _worker_model(worker_kind, model):
     if worker_kind not in {"codex", "opencode"}:
@@ -143,6 +147,20 @@ class ImplementRequest:
         return cls(data["repository"], data["worker_kind"], data["correlation_id"], data["task"], tuple(data["files"]), data["timeout_seconds"], data.get("model"))
 
 
+def _fallback(fallback, model, provider):
+    if fallback is None:
+        if model is not None and provider != model:
+            raise ContractError("provider does not match requested model")
+        return
+    _keys(fallback, {"from", "reason"})
+    if model is None or fallback["from"] != model:
+        raise ContractError("fallback must name the requested model")
+    if not isinstance(fallback["reason"], str) or fallback["reason"] not in FALLBACK_REASONS:
+        raise ContractError("unsupported fallback reason")
+    if provider == model:
+        raise ContractError("fallback provider must differ from the requested model")
+
+
 @dataclass(frozen=True)
 class ImplementArtifact:
     repository: str
@@ -154,7 +172,7 @@ class ImplementArtifact:
     changes: tuple[dict, ...]
     model_output: str
     finish_reason: str
-    fallback: None
+    fallback: dict | None
     latency_ms: int
     model: str | None = None
 
@@ -164,15 +182,14 @@ class ImplementArtifact:
         _worker_model(self.worker_kind, self.model)
         _sha(self.snapshot_sha256)
         _text(self.provider, "provider", 256)
-        if self.model is not None and self.provider != self.model:
-            raise ContractError("provider does not match requested model")
+        _fallback(self.fallback, self.model, self.provider)
         _text(self.execution_location, "execution_location", 256)
         if not isinstance(self.changes, tuple): raise ContractError("changes must be tuple")
         if self.changes:
             object.__setattr__(self, "changes", _files(self.changes, changes=True))
         _text(self.model_output, "model_output", MAX_BYTES, empty=True)
-        if self.finish_reason != "completed" or self.fallback is not None:
-            raise ContractError("only completed without fallback is supported")
+        if self.finish_reason != "completed":
+            raise ContractError("only completed is supported")
         if type(self.latency_ms) is not int or self.latency_ms < 0: raise ContractError("invalid latency_ms")
         _bounded(self.to_dict())
 
