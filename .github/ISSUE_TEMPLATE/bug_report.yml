@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in the fabric does not behave as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Use synthetic values only. Do not paste credentials, private hostnames,
+        deployment configuration, real source diffs, or operational logs.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - dispatch
+        - contracts
+        - inference
+        - eval
+        - scripts or tests
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The commit you tested (`git rev-parse HEAD`).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The command you ran, with a synthetic route file and inputs.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, Bash version, and backend CLI version.
