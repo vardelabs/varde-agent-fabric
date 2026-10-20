@@ -226,7 +226,7 @@ if [[ "$model" == "opencode-go/qwen3.8-flash" ]]; then
   printf '%s\n' '{"type":"text","part":{"text":"[]"}}' '{"type":"step_finish","reason":"stop"}'
   exit 0
 fi
-printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","stdin":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "$stdin_text" "$prompt"
+printf '{"type":"text","version":"%s","agent":"%s","model":"%s","workdir":"%s","cwd":"%s","kind":"%s","diff":"%s","home":"%s","models":"%s|%s","stdin":"%s","text":"%s"}\n' "$version" "$agent" "$model" "$workdir" "$PWD" "${DISPATCH_KIND:-}" "$diff" "${HOME:-}" "${OPENCODE_MODELS_PATH:-}" "${OPENCODE_DISABLE_MODELS_FETCH:-}" "$stdin_text" "$prompt"
 printf '{"type":"step_finish","reason":"stop"}\n'
 EOF
 chmod +x "$TMP/bin/opencode"
@@ -292,6 +292,31 @@ check grep -qF '"cwd":"'"$TMP/work"'"' "$TMP/out-opencode-v2-review"
 check grep -qF '"diff":"'"$TMP/change.diff"'"' "$TMP/out-opencode-v2-review"
 check grep -qF '"home":"'"$TMP/opencode-home"'"' "$TMP/out-opencode-v2-review"
 check grep -qF '"stdin":""' "$TMP/out-opencode-v2-review"
+check grep -qF '"models":"|"' "$TMP/out-opencode-v2-review"
+
+printf '{}\n' > "$TMP/models.json"
+chmod 644 "$TMP/models.json"
+if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_MODELS_PATH="$TMP/models.json" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review --diff "$TMP/change.diff" --model test/model \
+  --routes "$TMP/routes.json" --task pinned-catalog --workdir "$TMP/work" --output "$TMP/out-opencode-catalog" \
+  >"$TMP/stdout-opencode-catalog" 2>"$TMP/err-opencode-catalog"; then
+  printf 'opencode review with a pinned catalog unexpectedly failed\n' >&2
+  cat "$TMP/err-opencode-catalog" >&2
+  exit 1
+fi
+check grep -qF '"models":"'"$TMP/models.json"'|1"' "$TMP/out-opencode-catalog"
+cp "$TMP/models.json" "$TMP/models-group.json"
+chmod 620 "$TMP/models-group.json"
+chmod 666 "$TMP/models.json"
+for catalog in "$TMP/models-group.json" "$TMP/models.json" relative.json "$TMP/missing.json"; do
+  if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_MODELS_PATH="$catalog" \
+    PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review --diff "$TMP/change.diff" --model test/model \
+    --routes "$TMP/routes.json" --task x --workdir "$TMP/work" --output "$TMP/out-opencode-bad-catalog" \
+    >/dev/null 2>"$TMP/err-opencode-bad-catalog"; then
+    printf 'opencode accepted an unsafe catalog: %s\n' "$catalog" >&2; exit 1
+  fi
+  check grep -qF 'DISPATCH_OPENCODE_MODELS_PATH must' "$TMP/err-opencode-bad-catalog"
+done
 
 if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_ALLOW_WRITE=1 \
   PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind implement \
