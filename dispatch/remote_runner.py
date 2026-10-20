@@ -186,6 +186,8 @@ def _run_local_opencode(metadata: RemoteReviewMetadata, request: ReviewRequest) 
         "DISPATCH_DIFF": metadata.diff,
         "DISPATCH_OPENCODE_HOME": opencode_home,
     }
+    if os.environ.get("DISPATCH_OPENCODE_MODELS_PATH"):
+        environment["DISPATCH_OPENCODE_MODELS_PATH"] = os.environ["DISPATCH_OPENCODE_MODELS_PATH"]
     try:
         result = subprocess.run(
             [metadata.local_backend],

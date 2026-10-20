@@ -42,6 +42,19 @@ export HOME="$DISPATCH_OPENCODE_HOME"
 # A self-update would download a new binary into the writable home, bypassing
 # the pinned install the deployment chose.
 export OPENCODE_DISABLE_AUTOUPDATE=1
+if [[ -n "${DISPATCH_OPENCODE_MODELS_PATH:-}" ]]; then
+  catalog="$DISPATCH_OPENCODE_MODELS_PATH"
+  [[ "$catalog" = /* && -f "$catalog" && ! -L "$catalog" ]] || {
+    printf 'DISPATCH_OPENCODE_MODELS_PATH must be an absolute regular file\n' >&2
+    exit 2
+  }
+  (( ($(stat -c '%a' -- "$catalog") & 8#022) == 0 )) || {
+    printf 'DISPATCH_OPENCODE_MODELS_PATH must not be group or world writable\n' >&2
+    exit 2
+  }
+  # A pinned catalog serves models the public list lacks; a fetch would replace it.
+  export OPENCODE_MODELS_PATH="$catalog" OPENCODE_DISABLE_MODELS_FETCH=1
+fi
 
 command -v opencode >/dev/null 2>&1 || {
   printf 'opencode CLI not found on PATH\n' >&2

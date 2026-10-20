@@ -111,6 +111,12 @@ callers that need the final response must select the final `type=text` event.
 When `opencode run` exits non-zero, the adapter writes no output file. It
 prints only the run's top-level `type=error` events to stderr, capped at 4 KiB, because
 other events can carry model text, and exits with OpenCode's status.
+Set `DISPATCH_OPENCODE_MODELS_PATH` to pin the OpenCode models catalog, for a
+provider that the public models list does not carry. It must be an absolute
+regular file that is not group- or world-writable. When it is set, the adapter
+exports it as `OPENCODE_MODELS_PATH` and sets `OPENCODE_DISABLE_MODELS_FETCH=1`,
+so the run uses exactly that catalog. When it is unset, nothing changes.
+
 Set `DISPATCH_OPENCODE_HOME` to a dedicated home directory containing only
 the OpenCode configuration and authentication needed for this worker. The
 adapter refuses to use the caller's general home directory, because an
