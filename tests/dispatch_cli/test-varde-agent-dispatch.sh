@@ -305,8 +305,10 @@ if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATC
   exit 1
 fi
 check grep -qF '"models":"'"$TMP/models.json"'|1"' "$TMP/out-opencode-catalog"
+cp "$TMP/models.json" "$TMP/models-group.json"
+chmod 620 "$TMP/models-group.json"
 chmod 666 "$TMP/models.json"
-for catalog in "$TMP/models.json" relative.json "$TMP/missing.json"; do
+for catalog in "$TMP/models-group.json" "$TMP/models.json" relative.json "$TMP/missing.json"; do
   if HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" DISPATCH_OPENCODE_MODELS_PATH="$catalog" \
     PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness opencode --kind review --diff "$TMP/change.diff" --model test/model \
     --routes "$TMP/routes.json" --task x --workdir "$TMP/work" --output "$TMP/out-opencode-bad-catalog" \

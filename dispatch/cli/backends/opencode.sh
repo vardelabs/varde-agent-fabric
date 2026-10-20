@@ -48,7 +48,7 @@ if [[ -n "${DISPATCH_OPENCODE_MODELS_PATH:-}" ]]; then
     printf 'DISPATCH_OPENCODE_MODELS_PATH must be an absolute regular file\n' >&2
     exit 2
   }
-  (( ($(stat -c '%a' -- "$catalog") & 8#022) == 0 )) || {
+  (( (8#$(stat -c '%a' -- "$catalog") & 8#022) == 0 )) || {
     printf 'DISPATCH_OPENCODE_MODELS_PATH must not be group or world writable\n' >&2
     exit 2
   }
