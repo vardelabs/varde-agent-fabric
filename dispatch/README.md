@@ -26,8 +26,11 @@ Each route keeps these axes separate:
   with a local fallback using the same model and primary harness (`codex` or
   `opencode`)
 
-Only typed remote-unavailable failures activate a fallback. HTTP 400, contract
-rejections, and worker failures remain hard failures. OpenCode fallback keeps the
+Only typed remote-unavailable failures activate a fallback: no answer from the
+gateway, or HTTP 502, 503, or 504, whatever the gateway's reason. A gateway answers
+503 when it cannot run the review at all, including when its own worker times out
+or fails. HTTP 400, contract rejections, malformed results, and a failure of the
+local worker remain hard failures. OpenCode fallback keeps the
 requested `<provider>/<model>` identity; it does not substitute another model or provider.
 
 The shipped local adapters are `codex` and `opencode`. `opencode` means the
