@@ -208,23 +208,26 @@ dedicated home, trusted, in `auto_edit` mode, and reach the worktree through
 loaded, and the enforced sign-in holds there too. In a trusted folder the CLI
 loads `.gemini/.env` from the folder and every parent, unfiltered. So the run
 refuses when any parent of that folder already holds `.gemini/.env`, or is
-writable by group or others, where another user could plant one. A dedicated
-home under `/tmp` is therefore refused for these kinds; put it under a private
-directory.
+owned by another user or writable by group or others, where another user could
+plant one. A dedicated home under `/tmp` is therefore refused for these kinds;
+put it under a private directory. The CLI splits an included directory on
+commas, so the workdir must be absolute and hold no comma.
 
 The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
 code 429. Either one is enough. The CLI raises these for a 429 from the model
-API, and exits with status 173, which is 429 modulo 256.
+API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
+never a limit, even when stderr logs a 429 that a retry cleared.
 
 The adapter never accepts an answer from a model other than the one requested.
 In headless mode the CLI has no fallback handler, so with an explicit model and
 outside `plan` approval mode it reports a quota error rather than switching
 models. The adapter still reads `stats.models`: if any model other than the
-requested one answered a main turn, or the requested model answered none, the
+requested one answered a main or subagent turn, or the requested model answered
+no main turn, the
 run fails loudly with status 1 and its text is discarded. It is never reported
 as a limit. Calls on other models in utility roles, such as routing or loop
-detection, are normal.
+detection, are normal. Subagents are also turned off in the adapter's settings.
 Any other CLI failure returns the CLI's status with its error type and message.
 
 To sign in, run the CLI once, interactively, as the worker user, with the

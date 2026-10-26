@@ -54,6 +54,10 @@ case "$(cat "$state/scenario")" in
   ok) answer "review text" "$(turn "$model" main 1 0)" ;;
   with-utility) answer "review text" "$(turn "$model" main 1 0),$(turn utility-model utility_router 2 0)" ;;
   retried-main) answer "review text" "$(turn "$model" main 3 2)" ;;
+  retry-logged)
+    printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
+    answer "review text" "$(turn "$model" main 2 1)" ;;
+  subagent-other) answer "relayed text" "$(turn "$model" main 1 0),$(turn fallback-model subagent 1 0)" ;;
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
     quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
@@ -114,6 +118,7 @@ check grep -qF '"enforcedType":"oauth-personal"' "$record"
 check grep -qF '"folderTrust":{"enabled":false}' "$record"
 check grep -qF '"advanced":{"ignoreLocalEnv":true}' "$record"
 check grep -qF '"tools":{"exclude":["google_web_search","web_fetch"]}' "$record"
+check grep -qF '"experimental":{"enableAgents":false}' "$record"
 check grep -qF 'stdin=private-task-sentinel' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
@@ -144,8 +149,9 @@ check test "$status" -eq 1
 check grep -qF 'ModelNotFoundError' "$TMP/out-not-found.stderr"
 check_not grep -qF 'limit reached' "$TMP/out-not-found.stderr"
 
-# Utility calls on other models, and a main turn retried to success, are a normal run.
-for scenario in with-utility retried-main; do
+# Utility calls on other models, and a main turn retried to success, are a normal
+# run, even when the retry logged the 429 it cleared.
+for scenario in with-utility retried-main retry-logged; do
   run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
   check test "$status" -eq 0
   check grep -qxF 'review text' "$TMP/out-$scenario"
@@ -153,7 +159,8 @@ done
 
 # Any main turn answered by another model is refused loudly and is never a limit,
 # whether the requested model failed every turn or only a later one.
-for scenario in swapped later-switch; do
+# A subagent on another model counts too, since the main turn may only relay it.
+for scenario in swapped later-switch subagent-other; do
   run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
   check test "$status" -eq 1
   check grep -qF 'switched main turns' "$TMP/out-$scenario.stderr"
@@ -236,11 +243,11 @@ check_not test -e "$TMP/gemini-home/.gemini/tmp/leaked"
 
 # A trusted folder loads .gemini/.env from every parent, so implement refuses
 # when a parent holds one or could let another user plant one.
-implement_refused() {  # implement_refused <name> <message>
+implement_refused() {  # implement_refused <name> <message> [workdir] [path]
   status=0
-  HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  HOME="$TMP/caller-home" PATH="${4:-$TMP/bin:/usr/bin:/bin}" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
     DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind implement --task t \
-    --workdir "$TMP/work" --output "$TMP/out-$1" >/dev/null 2>"$TMP/out-$1.stderr" || status=$?
+    --workdir "${3:-$TMP/work}" --output "$TMP/out-$1" >/dev/null 2>"$TMP/out-$1.stderr" || status=$?
   check test "$status" -eq 2
   check grep -qF "$2" "$TMP/out-$1.stderr"
 }
@@ -250,6 +257,15 @@ rm -f "$TMP/gemini-home/.gemini/.env"
 chmod g+w "$TMP/gemini-home"
 implement_refused open-parent 'closed to group and others'
 chmod g-w "$TMP/gemini-home"
+# A parent owned by another user is refused even when its mode is closed. The
+# fake id makes this user someone other than the owner of every parent.
+mkdir -p "$TMP/other-user-bin"
+printf '#!/bin/sh\necho 65533\n' > "$TMP/other-user-bin/id"
+chmod +x "$TMP/other-user-bin/id"
+implement_refused other-owner 'owned by this user or root' "$TMP/work" "$TMP/other-user-bin:$TMP/bin:/usr/bin:/bin"
+# The CLI splits an included directory on commas, so such a workdir is refused.
+mkdir -p "$TMP/work,extra"
+implement_refused comma-workdir 'no comma' "$TMP/work,extra"
 check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 

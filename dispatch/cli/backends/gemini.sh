@@ -93,7 +93,8 @@ cat > "$run_home/.gemini/settings.json" <<'EOF'
   },
   "general": {"enableAutoUpdate": false, "enableAutoUpdateNotification": false},
   "advanced": {"ignoreLocalEnv": true},
-  "tools": {"exclude": ["google_web_search", "web_fetch"]}
+  "tools": {"exclude": ["google_web_search", "web_fetch"]},
+  "experimental": {"enableAgents": false}
 }
 EOF
 
@@ -104,11 +105,16 @@ export GEMINI_CLI_TRUST_WORKSPACE="$trust_folder"
 # In a trusted folder the CLI loads .gemini/.env from the folder and every parent,
 # unfiltered, before ignoreLocalEnv applies. So the implement folder lives in the
 # dedicated home, and the run refuses when any parent could let another user plant
-# that file or already holds one.
+# that file or already holds one: a parent owned by another user, or one that
+# group or others can write.
 require_safe_parents() {
-  local dir="$1" mode
+  local dir="$1" mode owner uid
+  uid="$(id -u)"
   while :; do
     [[ ! -e "$dir/.gemini/.env" ]] || fail "Gemini implementation refuses $dir/.gemini/.env above its folder"
+    owner="$(stat -c '%u' -- "$dir" 2>/dev/null || stat -f '%u' -- "$dir")"
+    [[ "$owner" == "$uid" || "$owner" == 0 ]] \
+      || fail "Gemini implementation needs every parent of its folder owned by this user or root: $dir"
     mode="$(stat -c '%a' -- "$dir" 2>/dev/null || stat -f '%Lp' -- "$dir")"
     (( (8#$mode & 8#022) == 0 )) || fail "Gemini implementation needs every parent of its folder closed to group and others: $dir"
     [[ "$dir" != / ]] || break
@@ -117,6 +123,10 @@ require_safe_parents() {
 }
 
 if [[ "$trust_folder" == true ]]; then
+  # The CLI splits --include-directories on commas and expands a leading ~, so
+  # such a workdir would add another writable root.
+  [[ "$DISPATCH_WORKDIR" = /* && "$DISPATCH_WORKDIR" != *,* ]] \
+    || fail 'Gemini implementation needs an absolute workdir with no comma'
   implement_folder="$(mktemp -d "$gemini_home_real/.dispatch-folder.XXXXXX")"
   require_safe_parents "$implement_folder"
   folder="$implement_folder"

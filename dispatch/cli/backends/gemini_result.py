@@ -74,12 +74,21 @@ def _models(stats: object) -> dict:
     return models if isinstance(models, dict) else {}
 
 
-def _answered_main_turns(entry: object) -> bool:
-    roles = entry.get("roles") if isinstance(entry, dict) else None
-    main = roles.get("main") if isinstance(roles, dict) else None
-    requests = main.get("totalRequests", 0) if isinstance(main, dict) else 0
-    errors = main.get("totalErrors", 0) if isinstance(main, dict) else 0
+# A subagent does substantive work that the main turn may only relay, so it
+# counts as answering. Subagents are also off in the adapter's settings.
+ANSWERING_ROLES = ("main", "subagent")
+
+
+def _answered_role(roles: dict, role: str) -> bool:
+    stats = roles.get(role)
+    requests = stats.get("totalRequests", 0) if isinstance(stats, dict) else 0
+    errors = stats.get("totalErrors", 0) if isinstance(stats, dict) else 0
     return isinstance(requests, int) and isinstance(errors, int) and requests > errors
+
+
+def _answered_main_turns(entry: object, roles_counted: tuple[str, ...] = ("main",)) -> bool:
+    roles = entry.get("roles") if isinstance(entry, dict) else None
+    return isinstance(roles, dict) and any(_answered_role(roles, role) for role in roles_counted)
 
 
 def check_model_answered(result: dict, model: str) -> None:
@@ -89,10 +98,11 @@ def check_model_answered(result: dict, model: str) -> None:
     instead of switching, so a quota never reaches this check. A switch here has
     another cause, and its answer came from a model nobody asked for, so it fails
     loudly and is never reported as a limit. Utility calls run on other models by
-    design and do not count.
+    design and do not count; subagent turns do.
     """
     models = _models(result.get("stats"))
-    others = sorted(name for name, entry in models.items() if name != model and _answered_main_turns(entry))
+    others = sorted(name for name, entry in models.items()
+                    if name != model and _answered_main_turns(entry, ANSWERING_ROLES))
     if others:
         raise RunFailed(FAILED, f"the CLI switched main turns from {model} to {', '.join(others)}; "
                                 "its answer is refused")
@@ -103,7 +113,9 @@ def check_model_answered(result: dict, model: str) -> None:
 
 def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
     """Return the response text, or raise RunFailed."""
-    error = _first_error(_json_objects(stdout) + _json_objects(stderr))
+    # A run that exits 0 may still log an error its own retry cleared, so stderr
+    # is read for an error report only when the run failed.
+    error = _first_error(_json_objects(stdout) + (_json_objects(stderr) if cli_status != 0 else []))
     if error is not None and _is_quota_error(error):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
