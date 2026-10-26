@@ -39,6 +39,10 @@ def _check_env_names(names: tuple[str, ...]) -> None:
 
 
 LocalReviewRunner = Callable[["RemoteReviewMetadata", "ReviewRequest"], "ReviewArtifact"]
+ReviewParser = Callable[[bytes], "tuple[dict[str, object], ...]"]
+# Returns "quota", "rate-limit", or None from the backend's own error report.
+LimitDetector = Callable[[str], "str | None"]
+LIMIT_KINDS = frozenset({"quota", "rate-limit"})
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,9 @@ class Adapter:
     local_review_fallback: LocalReviewFallback | None = None
     # The model shape an implement request must name for this backend, when it constrains one.
     implement_model: re.Pattern[str] | None = None
+    # Turns the backend's raw review output into findings, for any caller that runs it.
+    parse_review: ReviewParser | None = None
+    detect_limit: LimitDetector | None = None
     label: str = ""
 
     def __post_init__(self) -> None:
@@ -76,6 +83,8 @@ class Adapter:
             raise ValueError(f"adapter {self.name!r} has a local review fallback but does not declare the review role")
         if self.implement_model is not None and "implement" not in self.roles:
             raise ValueError(f"adapter {self.name!r} constrains implement models but does not declare the implement role")
+        if self.parse_review is not None and "review" not in self.roles:
+            raise ValueError(f"adapter {self.name!r} parses review output but does not declare the review role")
         if not self.label:
             object.__setattr__(self, "label", self.name)
 

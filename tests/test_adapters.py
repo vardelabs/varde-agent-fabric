@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import re
 import sys
 import unittest
@@ -95,6 +96,38 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already registered"):
                 adapters.register(extra)
         self.assertNotIn("example-backend", adapters.ADAPTERS)
+
+
+class LimitAndParserTests(unittest.TestCase):
+    def test_codex_reads_only_its_own_fatal_last_line(self):
+        self.assertEqual(adapters.detect_limit("codex", "working\nerror: 429 Too Many Requests\n"), "rate-limit")
+        self.assertEqual(adapters.detect_limit("codex", "error: usage limit reached"), "rate-limit")
+        self.assertIsNone(adapters.detect_limit("codex", "the model said rate limit\nerror: bad request"))
+        self.assertIsNone(adapters.detect_limit("codex", "error: 429\nnote: retried and finished"))
+
+    def test_opencode_reads_its_last_top_level_error_event(self):
+        v2_quota = '{"type":"error","error":{"type":"provider.quota","status":429}}'
+        v1_rate = '{"type":"error","error":{"name":"APIError","data":{"statusCode":429}}}'
+        other = '{"type":"error","error":{"type":"provider.auth","status":401}}'
+        self.assertEqual(adapters.detect_limit("opencode", v2_quota), "quota")
+        self.assertEqual(adapters.detect_limit("opencode", v1_rate), "rate-limit")
+        self.assertIsNone(adapters.detect_limit("opencode", other))
+        self.assertIsNone(adapters.detect_limit("opencode", v2_quota + "\n{unreadable"))
+
+    def test_an_adapter_without_a_detector_or_an_unknown_kind_reports_no_limit(self):
+        self.assertIsNone(adapters.detect_limit("llama-broker", "error: 429"))
+        odd = Adapter(name="example-backend", detect_limit=lambda diagnostic: "maybe")
+        with mock.patch.dict(adapters.ADAPTERS, {"example-backend": odd}):
+            self.assertIsNone(adapters.detect_limit("example-backend", "x"))
+
+    def test_review_parsers_return_the_findings(self):
+        finding = {"severity": "red", "message": "m"}
+        self.assertEqual(adapters.resolve("review", "codex").parse_review(json.dumps({"findings": [finding]}).encode()),
+                         (finding,))
+        event = json.dumps({"type": "text", "part": {"text": json.dumps([finding])}}) + "\n"
+        self.assertEqual(adapters.resolve("review", "opencode").parse_review(event.encode()), (finding,))
+        with self.assertRaises(RuntimeError):
+            adapters.resolve("review", "codex").parse_review(b"not json")
 
 
 class ContractEligibilityTests(unittest.TestCase):
