@@ -67,6 +67,7 @@ run() {  # run <scenario> <out-name> [extra dispatcher args...]
 run ok out-review --kind review --diff "$TMP/change.diff" --task private-task-sentinel
 check test "$status" -eq 0
 check grep -qxF 'review text' "$TMP/out-review"
+check test "$(stat -c '%a' "$TMP/out-review" 2>/dev/null || stat -f '%Lp' "$TMP/out-review")" = 600
 record="$TMP/gemini-home/record"
 check grep -qF -- "--model $MODEL" "$record"
 check grep -qF -- '--approval-mode default' "$record"
@@ -80,6 +81,13 @@ check grep -qF '"folderTrust":{"enabled":false}' "$record"
 check grep -qF 'stdin=private-task-sentinel' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
+
+# With no --output the dispatcher returns its private temporary file; a loose
+# umask must not make the review text readable by other users.
+default_output="$(umask 022; HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" TMPDIR="$TMP" "$CLI" --harness gemini --kind review --diff "$TMP/change.diff" \
+  --task t --workdir "$TMP/work" 2>/dev/null)"
+check test "$(stat -c '%a' "$default_output" 2>/dev/null || stat -f '%Lp' "$default_output")" = 600
 
 run quota out-quota --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 75

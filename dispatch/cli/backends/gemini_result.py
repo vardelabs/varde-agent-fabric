@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 LIMIT_REACHED = 75
 FAILED = 1
@@ -101,10 +102,17 @@ def _read(path: str) -> str:
 
 
 def _write_atomic(path: str, text: str) -> None:
+    # mkstemp gives an unpredictable name, created exclusively at 0600, so the
+    # output is never readable by other users and no planted link is followed.
     target = Path(path)
-    temporary = target.with_name(f".{target.name}.gemini-result")
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, target)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def main(argv: list[str]) -> int:
