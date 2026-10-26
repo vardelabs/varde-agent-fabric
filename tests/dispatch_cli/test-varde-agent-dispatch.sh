@@ -735,6 +735,10 @@ case "$DISPATCH_TASK" in
   mentions-quota) printf 'fatal: quota exhausted\nfatal: disk full\n' >&2; exit 9 ;;
   stdout-quota) printf 'fatal: quota exhausted\n'; exit 9 ;;
   slow) printf 'transcript line\n' >&2; sleep 6 & printf '%s' "$!" > "$DISPATCH_WORKDIR/slow-child.pid"; wait ;;
+  trap-term)
+    marker="$DISPATCH_WORKDIR/trap-term.marker"; : > "$marker"
+    trap 'rm -f -- "$marker"' EXIT; trap 'exit 143' TERM
+    sleep 6 ;;
 esac
 { printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
 EOF
@@ -807,6 +811,19 @@ sleep 0.3
 check test -s "$TMP/work/slow-child.pid"
 check_not kill -0 "$(cat "$TMP/work/slow-child.pid")" 2>/dev/null
 check test -z "$(find "$TMP/sig" -name 'agent-dispatch-*' -o -name '.agent-dispatch-*')"
+
+# A backend that traps TERM keeps running after the signal, and bash then reports
+# its killed child on stderr. The stderr copier must outlive it, or that write
+# raises SIGPIPE and the backend dies before its own cleanup trap runs.
+TMPDIR="$TMP/sig" "$SEAM_CLI" --harness example-backend --kind implement --task trap-term --workdir "$TMP/work" \
+  --output "$TMP/sig/out-trap" >/dev/null 2>&1 &
+trap_pid=$!
+sleep 1
+check test -e "$TMP/work/trap-term.marker"
+kill -TERM "$trap_pid"
+wait "$trap_pid" || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -e "$TMP/work/trap-term.marker" ]] || break; sleep 0.3; done
+check_not test -e "$TMP/work/trap-term.marker"
 
 # A registered backend serves only the roles it declares.
 seam_status=0
