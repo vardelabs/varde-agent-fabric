@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -308,6 +310,90 @@ class RouteRegistryTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RouteConfigError, "fallback"):
             RouteRegistry.from_dict(unsupported_harness)
+
+
+# How a deployment validates routes: the module's source alone, executed in an
+# isolated interpreter with no package path.
+STANDALONE_LOADER = """
+import json, sys, types
+data = json.load(sys.stdin)
+module = types.ModuleType('_pinned_route_registry')
+sys.modules[module.__name__] = module
+exec(compile(data['source'], '<pinned-route-registry>', 'exec'), module.__dict__)
+route = module.RouteRegistry.from_dict(data['routes']).resolve(data['model'], 'review')
+print(json.dumps([route.harness, route.target, route.fallback.policy]))
+"""
+
+
+CONTRACT_LOADER = """
+import json, sys, types
+data = json.load(sys.stdin)
+module = types.ModuleType('_pinned_contract')
+sys.modules[module.__name__] = module
+exec(compile(data['source'], '<pinned-contract>', 'exec'), module.__dict__)
+print(json.dumps(sorted(name for name in dir(module) if not name.startswith('_'))[:1]))
+"""
+
+
+IN_PACKAGE_PROBE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from dispatch.route_registry import RouteRegistry
+from contracts.implement_contracts import ImplementRequest
+probe = sys.argv[2]
+try:
+    if probe == "route":
+        RouteRegistry.from_dict({"schema": "dispatch-routes.v1", "routes": {"example/model": {
+            "default_harness": "codex", "target": "remote", "kinds": ["review"],
+            "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"}}}})
+    else:
+        ImplementRequest("o/r", "opencode", "id", "edit", ({"path": "a.txt", "content": "x"},), 3, model="p/m")
+except ImportError:
+    print("registry import failed")
+"""
+
+
+class StandaloneLoadTests(unittest.TestCase):
+    def test_inside_the_package_a_missing_registry_fails_loudly(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tree:
+            for relative in ("dispatch/__init__.py", "dispatch/route_registry.py",
+                             "contracts/__init__.py", "contracts/implement_contracts.py"):
+                target = Path(tree) / relative
+                target.parent.mkdir(exist_ok=True)
+                source = root / relative
+                target.write_bytes(source.read_bytes() if source.exists() else b"")
+            for probe in ("route", "implement"):
+                with self.subTest(probe=probe):
+                    result = subprocess.run([sys.executable, "-I", "-c", IN_PACKAGE_PROBE, tree, probe],
+                                            cwd=tree, text=True, capture_output=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), "registry import failed")
+
+    def test_each_contract_module_loads_from_its_source_alone(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative in ("contracts/review_contracts.py", "contracts/implement_contracts.py", "dispatch/route_registry.py"):
+            with self.subTest(module=relative), tempfile.TemporaryDirectory() as empty:
+                source = (root / relative).read_text(encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, "-I", "-c", CONTRACT_LOADER], cwd=empty, text=True, capture_output=True,
+                    input=json.dumps({"source": source}), check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_module_resolves_routes_from_its_source_alone(self):
+        source = (Path(__file__).resolve().parents[1] / "dispatch" / "route_registry.py").read_text(encoding="utf-8")
+        routes = {"schema": "dispatch-routes.v1", "routes": {"example/model": {
+            "default_harness": "codex", "target": "remote", "kinds": ["review"],
+            "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"},
+        }}}
+        with tempfile.TemporaryDirectory() as empty:
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", STANDALONE_LOADER], cwd=empty, text=True, capture_output=True,
+                input=json.dumps({"source": source, "routes": routes, "model": "example/model"}), check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["codex", "remote", "remote-unavailable"])
 
 
 if __name__ == "__main__":
