@@ -35,13 +35,14 @@ def _worker_model(worker_kind, model):
 
 
 def _registered_implement_model(worker_kind):
-    # A deployment also loads this module alone from its source, with no package on
-    # the path. The registry is then out of reach and only the shape checks apply;
-    # its gateway grants exact models, so nothing unshaped is served.
-    try:
-        from dispatch.adapters import ADAPTERS
-    except ImportError:
+    # A deployment also runs this module's source alone, outside any package, where
+    # the registry cannot be reached; the shape checks still apply and its gateway
+    # grants exact models. Inside the package a missing registry is a broken install,
+    # so the import is left to fail loudly.
+    if __package__ != "contracts":
         return None, None
+    from dispatch.adapters import ADAPTERS
+
     adapter = ADAPTERS.get(worker_kind)
     return (adapter.implement_model, adapter.label) if adapter else (None, None)
 

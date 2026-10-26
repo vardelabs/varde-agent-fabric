@@ -7,13 +7,14 @@ from typing import Any, Mapping
 
 
 def _serves_local_review_fallback(harness: str) -> bool:
-    # A deployment loads this module alone from its source to validate routes, with
-    # no package on the path. The registry is then out of reach, and the runtime
-    # fallback still refuses a harness whose adapter registers none.
-    try:
-        from dispatch import adapters
-    except ImportError:
+    # A deployment validates routes by running this module's source alone, outside
+    # any package, where the registry cannot be reached; the runtime fallback still
+    # refuses a harness whose adapter registers none. Inside the package a missing
+    # registry is a broken install, so the import is left to fail loudly.
+    if __package__ != "dispatch":
         return True
+    from dispatch import adapters
+
     return adapters.local_review_fallback(harness) is not None
 
 

@@ -335,7 +335,41 @@ print(json.dumps(sorted(name for name in dir(module) if not name.startswith('_')
 """
 
 
+IN_PACKAGE_PROBE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from dispatch.route_registry import RouteRegistry
+from contracts.implement_contracts import ImplementRequest
+probe = sys.argv[2]
+try:
+    if probe == "route":
+        RouteRegistry.from_dict({"schema": "dispatch-routes.v1", "routes": {"example/model": {
+            "default_harness": "codex", "target": "remote", "kinds": ["review"],
+            "fallback": {"policy": "remote-unavailable", "harness": "codex", "target": "local"}}}})
+    else:
+        ImplementRequest("o/r", "opencode", "id", "edit", ({"path": "a.txt", "content": "x"},), 3, model="p/m")
+except ImportError:
+    print("registry import failed")
+"""
+
+
 class StandaloneLoadTests(unittest.TestCase):
+    def test_inside_the_package_a_missing_registry_fails_loudly(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tree:
+            for relative in ("dispatch/__init__.py", "dispatch/route_registry.py",
+                             "contracts/__init__.py", "contracts/implement_contracts.py"):
+                target = Path(tree) / relative
+                target.parent.mkdir(exist_ok=True)
+                source = root / relative
+                target.write_bytes(source.read_bytes() if source.exists() else b"")
+            for probe in ("route", "implement"):
+                with self.subTest(probe=probe):
+                    result = subprocess.run([sys.executable, "-I", "-c", IN_PACKAGE_PROBE, tree, probe],
+                                            cwd=tree, text=True, capture_output=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), "registry import failed")
+
     def test_each_contract_module_loads_from_its_source_alone(self):
         root = Path(__file__).resolve().parents[1]
         for relative in ("contracts/review_contracts.py", "contracts/implement_contracts.py", "dispatch/route_registry.py"):
