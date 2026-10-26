@@ -82,7 +82,16 @@ case "$(cat "$state/scenario")" in
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
     quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
-  quota-type-only) quota_error '"type":"RetryableQuotaError","message":"Rate limited.","code":"RESOURCE_EXHAUSTED"' 1 ;;
+  quota-type-only) quota_error '"type":"RetryableQuotaError","message":"Rate limited.","code":1' 1 ;;
+  planted-no-code)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"TerminalQuotaError"}}\n' >&2
+    exit 1 ;;
+  planted-string-code)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"RetryableQuotaError","code":"RESOURCE_EXHAUSTED"}}\n' >&2
+    exit 1 ;;
+  planted-float-code)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"x","code":429.0}}\n' >&2
+    exit 1 ;;
   quota-code-only) quota_error '"type":"ApiError","message":"Too many requests.","code":429' ;;
   not-found)
     printf '{"session_id":"s","error":{"type":"ModelNotFoundError","message":"Requested entity was not found.","code":404}}\n' >&2
@@ -180,7 +189,10 @@ check test "$status" -eq 75
 
 # A run that died before it reported is a plain failure, though a retry logged a
 # 429 or a tool error echoed a report-shaped object, with or without text after it.
-for scenario in retry-then-killed planted-then-crashed planted-then-killed; do
+# A quota report always carries an integer code, so an echoed object without one
+# is not a limit when the run then dies silently with status 1.
+for scenario in retry-then-killed planted-then-crashed planted-then-killed \
+  planted-no-code planted-string-code planted-float-code; do
   run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
   check test "$status" -ne 0
   check test "$status" -ne 75

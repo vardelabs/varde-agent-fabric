@@ -220,9 +220,13 @@ error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
 code 429. Either one is enough. The CLI raises these for a 429 from the model
 API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
 never a limit, even when stderr logs a 429 that a retry cleared. On a failed
-run, only the CLI's own error report counts: the object that ends stderr, whose
-code matches the exit status. A retry the CLI logged, an object a tool error
-echoed, and a run that died before it reported are all plain failures.
+run, a quota error counts only from the object that ends stderr, and only when
+its integer code is the exit status, as the CLI's own report always is. A retry
+the CLI logged, or an object a tool error echoed before more output, is a plain
+failure. One case stays open: a model can make a tool error echo a quota-shaped
+object with an integer code, and if the CLI then dies without printing anything
+more, with that code as its status, the run reads as a limit. That case changes
+only the caller's retry or backoff choice; it reaches no data and no write scope.
 
 The adapter never accepts an answer from a model other than the one requested.
 In headless mode the CLI has no fallback handler, so with an explicit model and

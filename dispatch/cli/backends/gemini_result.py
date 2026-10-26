@@ -92,10 +92,15 @@ def _is_quota_error(error: dict) -> bool:
     return error.get("type") in QUOTA_ERROR_TYPES or error.get("code") == QUOTA_HTTP_STATUS
 
 
-def _reported_status(error: dict) -> int:
-    """The status the CLI exits with after printing this report: its numeric code, else 1."""
+def _reports_exit(error: dict, cli_status: int) -> bool:
+    """True when the report's code is the integer the CLI exited with.
+
+    The CLI exits with the code its report prints, and its quota errors always
+    print an integer code, so a code-less, string, or float code is no report of
+    a quota exit.
+    """
     code = error.get("code")
-    return code % 256 if isinstance(code, int) and not isinstance(code, bool) else 1
+    return isinstance(code, int) and not isinstance(code, bool) and code % 256 == cli_status
 
 
 def _models(stats: object) -> dict:
@@ -147,9 +152,9 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
     error = _first_error(_json_objects(stdout))
     if error is None and cli_status != 0:
         error = _final_error(stderr)
-    # The CLI exits with the code its report carries. A planted object at the end
-    # of stderr from a run that died another way does not match it.
-    if error is not None and _is_quota_error(error) and (cli_status == 0 or _reported_status(error) == cli_status):
+    # A planted object that ends stderr counts only when its code is the status of
+    # the death that followed, which narrows that case without closing it.
+    if error is not None and _is_quota_error(error) and (cli_status == 0 or _reports_exit(error, cli_status)):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
         detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else _fatal_line(stderr)
