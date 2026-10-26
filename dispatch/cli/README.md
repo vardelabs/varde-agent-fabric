@@ -222,7 +222,10 @@ Copy the fake-CLI pattern in `tests/dispatch_cli/test-varde-agent-dispatch.sh`
 to test the backend without a provider account or network access.
 
 The remote wire contracts in `contracts/` list the workers the remote gateway
-runs. A local backend does not need a change there.
+runs. A local backend needs no change there unless it sets
+`local_review_fallback`: a fallback review request names the backend as its
+worker, so the backend must be a review worker in
+`contracts/review_contracts.py`, and registration refuses it otherwise.
 
 ## Public boundary
 

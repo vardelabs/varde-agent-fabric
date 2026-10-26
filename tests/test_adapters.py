@@ -20,6 +20,12 @@ class AdapterRegistrationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     LocalReviewFallback(stamp="example", run=lambda metadata, request: None, env=(name,))
 
+    def test_local_fallback_requires_a_worker_the_review_contract_accepts(self):
+        fallback = LocalReviewFallback(stamp="example", run=lambda metadata, request: None)
+        with self.assertRaisesRegex(ValueError, "review worker"):
+            Adapter(name="example-backend", local_review_fallback=fallback)
+        Adapter(name="example-backend")
+
     def test_unknown_harness_forwards_nothing_and_has_no_local_fallback(self):
         self.assertEqual(adapters.forwarded_env("llama-broker"), ())
         self.assertEqual(adapters.forwarded_env("llama-broker", fallback=True), ())

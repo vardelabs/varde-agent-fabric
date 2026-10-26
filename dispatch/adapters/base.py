@@ -7,6 +7,8 @@ import os
 import re
 from typing import TYPE_CHECKING
 
+from contracts.review_contracts import REVIEW_WORKER_KINDS
+
 if TYPE_CHECKING:
     from contracts.review_contracts import ReviewArtifact, ReviewRequest
     from dispatch.remote_runner import RemoteReviewMetadata
@@ -60,6 +62,13 @@ class Adapter:
 
     def __post_init__(self) -> None:
         _check_env_names(self.env)
+        # The fallback builds a review request named after this backend, which the
+        # wire contract refuses unless it lists the worker.
+        if self.local_review_fallback is not None and self.name not in REVIEW_WORKER_KINDS:
+            raise ValueError(
+                f"adapter {self.name!r} has a local review fallback but contracts/review_contracts.py "
+                "does not accept it as a review worker"
+            )
 
 
 def caller_base_env(workdir: str) -> dict[str, str]:
