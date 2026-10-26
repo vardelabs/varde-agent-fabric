@@ -67,10 +67,11 @@ trap 'exit 143' TERM
 # The prompt goes on stdin, never in process arguments that other users can read.
 printf '%s' "$prompt" > "$scratch/prompt"
 
-# A per-run home carries the adapter's own user settings. The CLI loads a system
-# settings file only when root owns it and every parent, which a worker cannot
-# arrange, but it always loads user settings, and an untrusted or empty folder
-# adds no workspace settings above them. Only the sign-in files are linked in
+# A per-run home carries the adapter's own user settings. A root-owned system
+# settings file would rank above them, and system defaults could add MCP servers
+# they never name, so both system paths point at files in the private scratch
+# that never exist. An untrusted or empty folder adds no workspace settings
+# above the user settings, which are then final. Only the sign-in files are linked in
 # from the dedicated home; the CLI's session state stays in the per-run home and
 # goes with it. A refreshed token is not written back: the CLI replaces the link
 # with a new file, so each run refreshes from the stored sign-in.
@@ -99,6 +100,8 @@ cat > "$run_home/.gemini/settings.json" <<'EOF'
 EOF
 
 export HOME="$run_home" GEMINI_CLI_HOME="$run_home"
+export GEMINI_CLI_SYSTEM_SETTINGS_PATH="$scratch/no-system-settings.json"
+export GEMINI_CLI_SYSTEM_DEFAULTS_PATH="$scratch/no-system-defaults.json"
 # With folder trust off, an untrusted headless run starts instead of refusing.
 export GEMINI_CLI_TRUST_WORKSPACE="$trust_folder"
 

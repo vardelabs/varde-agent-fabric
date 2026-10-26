@@ -35,7 +35,10 @@ state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")")"
   printf 'home=%s cli_home=%s\n' "$HOME" "${GEMINI_CLI_HOME:-}"
   printf 'trust=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-}"
   printf 'keys=%s\n' "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${DISPATCH_UNSAFE_SENTINEL:-}"
-  printf 'system_settings=%s\n' "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}"
+  for system_path in "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}" "${GEMINI_CLI_SYSTEM_DEFAULTS_PATH:-}"; do
+    [[ "$system_path" == "$(dirname -- "$HOME")"/* && ! -e "$system_path" ]] && printf 'system_path=isolated\n' \
+      || printf 'system_path=%s\n' "$system_path"
+  done
   printf 'settings=%s\n' "$(tr -d ' \n' < "$HOME/.gemini/settings.json")"
   printf 'creds=%s\n' "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")"
   [[ ! -e "$HOME/.gemini/tmp" ]] || touch "$HOME/.gemini/tmp/leaked"
@@ -142,7 +145,9 @@ check test "$run_home" != "$TMP/gemini-home"
 check grep -qxF "home=$run_home cli_home=$run_home" "$record"
 check grep -qxF "creds=$TMP/gemini-home/.gemini/oauth_creds.json" "$record"
 check_not grep -qF 'gemini-api-key' "$record"
-check grep -qxF 'system_settings=' "$record"
+# Both system settings paths point inside the private scratch, at files that do
+# not exist, so a root-owned system file can never rank above the adapter's.
+check test "$(grep -cxF 'system_path=isolated' "$record")" -eq 2
 check grep -qxF 'scratch_mode=700' "$record"
 check grep -qxF "cwd=$TMP/work" "$record"
 check_not grep -qF -- '--include-directories' "$record"

@@ -180,11 +180,13 @@ in (`oauth_creds.json`, `google_accounts.json`, `installation_id`, and any
 `*credential*` file), so the CLI's session state stays in the per-run home and goes
 with it. A refreshed access token is not written back, because the CLI replaces
 the link with a new file, so each run refreshes from the stored sign-in. The
-dedicated home's own `settings.json` is never read. The adapter
-cannot use a system settings file, because the CLI loads one only when root owns
-it and every parent directory. The CLI always loads user settings, and a run
-never adds workspace settings above them (see below), so the adapter's settings
-are final. They set these values:
+dedicated home's own `settings.json` is never read. The CLI loads a system
+settings file above user settings, and system defaults below them, when root
+owns the file and every parent directory. So the adapter points both system
+paths (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`)
+at files in the private scratch that never exist, and neither loads. A run never
+adds workspace settings above the user settings (see below), so the adapter's
+settings are final. They set these values:
 
 - `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
   or any other auth type. The dispatcher also forwards no key variable.
