@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The gemini backend against a fake `gemini` CLI: no account, network, or key.
 set -euo pipefail
-unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_GEMINI_HOME DISPATCH_GEMINI_ALLOW_WRITE
+unset DISPATCH_MODEL DISPATCH_ROUTES_FILE DISPATCH_GEMINI_HOME
 unset GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
@@ -308,75 +308,22 @@ check test "$status" -eq 41
 check grep -qF 'FatalAuthenticationError' "$TMP/out-auth.stderr"
 check_not grep -qF 'limit reached' "$TMP/out-auth.stderr"
 
-run ok out-implement-denied --kind implement --task t
-check test "$status" -eq 2
-check grep -qF 'DISPATCH_GEMINI_ALLOW_WRITE=1' "$TMP/out-implement-denied.stderr"
-
-printf '%s' ok > "$state/scenario"
-status=0
-HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
-  DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" \
-  "$CLI" --harness gemini --kind implement --task t --workdir "$TMP/work" --output "$TMP/out-implement" \
-  >/dev/null 2>"$TMP/out-implement.stderr" || status=$?
-check test "$status" -eq 0
-check grep -qF -- '--approval-mode auto_edit' "$record"
-check grep -qxF 'trust=true' "$record"
-# Implement trusts only an empty folder of its own and reaches the worktree as an
-# included directory, so the worktree's own Gemini settings and env never load.
-check_not grep -qxF "cwd=$TMP/work" "$record"
-check grep -qE "^cwd=$TMP/gemini-home/\.dispatch-folder\.[A-Za-z0-9]+$" "$record"
-check grep -qF -- "--include-directories $TMP/work" "$record"
-check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
+# Gemini serves review only; the dispatcher refuses every other kind before the
+# backend runs, and the backend refuses one called directly.
+for kind in implement passthrough; do
+  run ok "out-$kind-refused" --kind "$kind" --task t
+  check test "$status" -eq 3
+  check grep -qF "cannot serve kind $kind" "$TMP/out-$kind-refused.stderr"
+done
+direct_status=0
+(cd "$TMP/work" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=implement DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" \
+  DISPATCH_OUTPUT="$TMP/out-direct-implement" "$ROOT/dispatch/cli/backends/gemini.sh" \
+  >/dev/null 2>"$TMP/out-direct-implement.stderr") || direct_status=$?
+check test "$direct_status" -eq 2
+check grep -qF 'only --kind review' "$TMP/out-direct-implement.stderr"
 # Only the sign-in is linked in; other state in the dedicated home stays out.
 check_not test -e "$TMP/gemini-home/.gemini/tmp/leaked"
-
-# A trusted folder loads .gemini/.env from every parent, so implement refuses
-# when a parent holds one or could let another user plant one.
-implement_refused() {  # implement_refused <name> <message> [workdir] [path]
-  status=0
-  HOME="$TMP/caller-home" PATH="${4:-$TMP/bin:/usr/bin:/bin}" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
-    DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind implement --task t \
-    --workdir "${3:-$TMP/work}" --output "$TMP/out-$1" >/dev/null 2>"$TMP/out-$1.stderr" || status=$?
-  check test "$status" -eq 2
-  check grep -qF "$2" "$TMP/out-$1.stderr"
-}
-printf 'CODE_ASSIST_ENDPOINT=https://example.invalid\n' > "$TMP/gemini-home/.gemini/.env"
-implement_refused planted-env '.gemini/.env above its folder'
-rm -f "$TMP/gemini-home/.gemini/.env"
-chmod g+w "$TMP/gemini-home"
-implement_refused open-parent 'closed to group and others'
-chmod g-w "$TMP/gemini-home"
-# A parent owned by another user is refused even when its mode is closed. The
-# fake id makes this user someone other than the owner of every parent.
-mkdir -p "$TMP/other-user-bin"
-printf '#!/bin/sh\necho 65533\n' > "$TMP/other-user-bin/id"
-chmod +x "$TMP/other-user-bin/id"
-implement_refused other-owner 'owned by this user or root' "$TMP/work" "$TMP/other-user-bin:$TMP/bin:/usr/bin:/bin"
-# The CLI splits an included directory on commas and trims it, so such a
-# workdir is refused.
-mkdir -p "$TMP/work,extra" "$TMP/work-space " "$TMP/work-space /inner"
-implement_refused comma-workdir 'no comma' "$TMP/work,extra"
-implement_refused space-workdir 'no name ending in a space' "$TMP/work-space "
-implement_refused space-parent 'no name ending in a space' "$TMP/work-space /inner"
-# The CLI trims Unicode whitespace too, so a path outside printable ASCII is refused.
-mkdir -p "$TMP/work"$'\u00a0'
-implement_refused nbsp-workdir 'printable ASCII' "$TMP/work"$'\u00a0'
-# A newline the dispatcher cannot see, behind a link, is not dropped and accepted.
-mkdir -p "$TMP/work"$'\n'
-ln -s "$TMP/work"$'\n' "$TMP/newline-link"
-implement_refused newline-workdir 'printable ASCII' "$TMP/newline-link"
-# The CLI resolves .. without following links, so it gets the resolved workdir.
-mkdir -p "$TMP/work/inner"
-ln -s "$TMP/work/inner" "$TMP/inner-link"
-printf '%s' ok > "$state/scenario"
-status=0
-HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
-  DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind implement --task t \
-  --workdir "$TMP/inner-link/.." --output "$TMP/out-dotdot" >/dev/null 2>&1 || status=$?
-check test "$status" -eq 0
-check grep -qE -- "--include-directories $TMP/work( |$)" "$record"
-check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
-check grep -qF '"enforcedType":"oauth-personal"' "$record"
 
 mkdir -p "$TMP/caller-home/nested-gemini-home"
 for bad_home in "$TMP/caller-home/nested-gemini-home" "$TMP" relative-home; do

@@ -165,7 +165,9 @@ it puts the key in the process arguments, where other local users can read it.
 
 The `gemini` backend runs the Gemini CLI in headless mode
 (`--prompt`, `--output-format json`) and writes the final response text to the
-output. It needs an explicit model id, which must be the full id the CLI
+output. It serves `review` only; the dispatcher refuses `implement` and
+`passthrough` for it. Settings cannot confine an edit, so implement waits for an
+OS sandbox. It needs an explicit model id, which must be the full id the CLI
 reports, not an alias. The prompt and the review diff go to the CLI on stdin, never in its
 arguments. The input starts with a fixed line, because the CLI runs input that
 starts with `/` as a command, and an untrusted workdir's commands still load.
@@ -203,39 +205,23 @@ these values:
   or any other auth type. The dispatcher also forwards no key variable.
 - `advanced.ignoreLocalEnv`, so the CLI loads no plain `.env` file in or above
   the folder it runs in. Without it, an untrusted workdir could set the CLI's
-  auth variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`. It does not
-  cover `.gemini/.env` in a trusted folder; see `implement` below.
+  auth variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`.
 - `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
   policy allows both, and text in a reviewed diff could steer workdir content
   into a search or a fetch.
 - `tools.exclude` for `run_shell_command`, `enter_plan_mode`, and
-  `exit_plan_mode`, and `general.plan.enabled` off. Leaving plan mode in a
-  headless run switches it to `yolo`, which allows every tool, the shell
-  included, so no run can plan or reach a shell.
+  `exit_plan_mode`, and `general.plan.enabled` off, so no run can reach a mode
+  or tool that executes.
 - Folder trust prompts and auto-update turned off.
 
-Two sources stay outside the adapter's reach. A Workspace admin of the signed-in
-account can require MCP servers through remote admin controls; use a personal
-account. And `implement` can write anywhere in the worktree, `.git` included, so
-the caller should treat the worktree's git metadata as untrusted after a run.
+A Workspace admin of the signed-in account can require MCP servers through
+remote admin controls, which no local setting overrides; use a personal account.
 
-A `review` runs in the workdir with it untrusted
+A review runs in the workdir with it untrusted
 (`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
 extensions do not load. The CLI then runs in `default` approval mode, where
 headless mode refuses every tool that needs approval, so the review writes
-nothing. `implement` and `passthrough` require `DISPATCH_GEMINI_ALLOW_WRITE=1`.
-An edit needs a trusted folder, so they run in a new empty folder inside the
-dedicated home, trusted, in `auto_edit` mode, and reach the worktree through
-`--include-directories`. The worktree's `.gemini` settings and `.env` are never
-loaded, and the enforced sign-in holds there too. In a trusted folder the CLI
-loads `.gemini/.env` from the folder and every parent, unfiltered. So the run
-refuses when any parent of that folder already holds `.gemini/.env`, or is
-owned by another user or writable by group or others, where another user could
-plant one. A dedicated home under `/tmp` is therefore refused for these kinds;
-put it under a private directory. The CLI splits an included directory on
-commas, trims Unicode whitespace from it, and resolves `..` without following
-links. So the adapter passes the resolved workdir, and refuses one whose path is
-not printable ASCII, holds a comma, or has a name ending in a space.
+nothing.
 
 The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or

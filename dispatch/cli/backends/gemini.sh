@@ -32,20 +32,11 @@ command -v gemini >/dev/null 2>&1 || fail 'gemini CLI not found on PATH' 127
 model="$DISPATCH_MODEL"
 [[ "$model" != *[[:space:]]* && "$model" != *[![:print:]]* && "$model" != -* ]] || fail 'model identifier is invalid'
 
-# The workdir never supplies Gemini settings, because they could pick another
-# auth type. A review runs inside it untrusted, which drops its settings and
-# extensions and leaves headless mode refusing every tool that needs approval.
-# An edit needs a trusted folder, so implement runs in an empty trusted folder
-# and reaches the worktree as an included directory.
-case "${DISPATCH_KIND:-}" in
-  review) approval_mode=default; trust_folder=false ;;
-  implement|passthrough)
-    [[ "${DISPATCH_GEMINI_ALLOW_WRITE:-}" == 1 ]] \
-      || fail "Gemini implementation requires DISPATCH_GEMINI_ALLOW_WRITE=1 (kind: $DISPATCH_KIND)"
-    approval_mode=auto_edit; trust_folder=true
-    ;;
-  *) fail 'unsupported Gemini dispatch kind' ;;
-esac
+# Gemini serves review only. A review runs in the workdir untrusted, which drops
+# its settings and extensions and leaves headless mode refusing every tool that
+# needs approval, so it writes nothing. Config flags cannot confine an edit, so
+# implement waits for an OS sandbox.
+[[ "${DISPATCH_KIND:-}" == review ]] || fail 'Gemini supports only --kind review'
 [[ ! -d "$DISPATCH_OUTPUT" ]] || fail 'DISPATCH_OUTPUT must not be a directory'
 
 # The CLI runs input that starts with / as a command, and an untrusted workdir's
@@ -62,8 +53,7 @@ unset DISPATCH_TASK DISPATCH_DIFF
 # mktemp -d makes the scratch directory 0700. It holds links to the sign-in, so
 # a signal exits through the EXIT trap too and it never outlives the run.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")"
-implement_folder=""
-trap 'rm -rf -- "$scratch" ${implement_folder:+"$implement_folder"}' EXIT
+trap 'rm -rf -- "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # The prompt goes on stdin, never in process arguments that other users can read.
@@ -92,8 +82,7 @@ done
 # variables, which it otherwise does even when the folder is untrusted. The web
 # tools are excluded because the read-only policy still allows them, and text in
 # a reviewed diff could steer workdir content into a search or a fetch. Plan mode
-# is off and its tools excluded, because leaving it headless in a trusted folder
-# switches the run to yolo, which allows the shell; the shell is excluded too.
+# and the shell are off too, so no run can reach a mode or tool that executes.
 run_home="$scratch/home"
 mkdir -p "$run_home/.gemini"
 for entry in "$DISPATCH_GEMINI_HOME/.gemini"/*; do
@@ -123,55 +112,12 @@ EOF
 cli_env=(PATH="$PATH" HOME="$run_home" GEMINI_CLI_HOME="$run_home" TMPDIR="$scratch/tmp"
   GEMINI_CLI_SYSTEM_SETTINGS_PATH="$scratch/no-system-settings.json"
   GEMINI_CLI_SYSTEM_DEFAULTS_PATH="$scratch/no-system-defaults.json"
-  GEMINI_CLI_TRUST_WORKSPACE="$trust_folder")
-
-# In a trusted folder the CLI loads .gemini/.env from the folder and every parent,
-# unfiltered, before ignoreLocalEnv applies. So the implement folder lives in the
-# dedicated home, and the run refuses when any parent could let another user plant
-# that file or already holds one: a parent owned by another user, or one that
-# group or others can write.
-require_safe_parents() {
-  local dir="$1" mode owner uid
-  uid="$(id -u)"
-  while :; do
-    [[ ! -e "$dir/.gemini/.env" ]] || fail "Gemini implementation refuses $dir/.gemini/.env above its folder"
-    owner="$(stat -c '%u' -- "$dir" 2>/dev/null || stat -f '%u' -- "$dir")"
-    [[ "$owner" == "$uid" || "$owner" == 0 ]] \
-      || fail "Gemini implementation needs every parent of its folder owned by this user or root: $dir"
-    mode="$(stat -c '%a' -- "$dir" 2>/dev/null || stat -f '%Lp' -- "$dir")"
-    (( (8#$mode & 8#022) == 0 )) || fail "Gemini implementation needs every parent of its folder closed to group and others: $dir"
-    [[ "$dir" != / ]] || break
-    dir="$(dirname -- "$dir")"
-  done
-}
-
-includable_path() {
-  local LC_ALL=C
-  [[ "$1" != *[![:print:]]* && "$1" != *,* && "$1" != *' ' && "$1" != *' /'* ]]
-}
-
-if [[ "$trust_folder" == true ]]; then
-  # The CLI splits --include-directories on commas, trims each part of Unicode
-  # whitespace, and resolves .. without following links. So it gets the resolved
-  # workdir, and only a printable ASCII path it would not split or trim. The x
-  # keeps a trailing newline that command substitution would otherwise drop.
-  workdir_real="$(realpath -- "$DISPATCH_WORKDIR" && printf x)"
-  workdir_real="${workdir_real%$'\n'x}"
-  includable_path "$workdir_real" \
-    || fail 'Gemini implementation needs a printable ASCII workdir path with no comma and no name ending in a space'
-  implement_folder="$(mktemp -d "$gemini_home_real/.dispatch-folder.XXXXXX")"
-  require_safe_parents "$implement_folder"
-  folder="$implement_folder"
-  include=(--include-directories "$workdir_real")
-else
-  folder="$DISPATCH_WORKDIR"
-  include=()
-fi
+  GEMINI_CLI_TRUST_WORKSPACE=false)
 
 status=0
-(cd -- "$folder" && exec env -i "${cli_env[@]}" gemini \
+(cd -- "$DISPATCH_WORKDIR" && exec env -i "${cli_env[@]}" gemini \
   --prompt 'Follow the instructions above.' --output-format json \
-  --model "$model" --approval-mode "$approval_mode" "${include[@]}") \
+  --model "$model" --approval-mode default) \
   <"$scratch/prompt" >"$scratch/stdout" 2>"$scratch/stderr" || status=$?
 python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/gemini_result.py" \
   "$scratch/stdout" "$scratch/stderr" "$model" "$status" "$DISPATCH_OUTPUT"

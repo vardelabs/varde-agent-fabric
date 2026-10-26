@@ -3,7 +3,7 @@ from dispatch.adapters.base import Adapter
 
 ADAPTER = Adapter(
     name="gemini",
-    roles=frozenset({"review", "implement"}),
-    env=("DISPATCH_GEMINI_HOME", "DISPATCH_GEMINI_ALLOW_WRITE"),
+    roles=frozenset({"review"}),
+    env=("DISPATCH_GEMINI_HOME",),
     label="Gemini",
 )
