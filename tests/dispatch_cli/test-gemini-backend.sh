@@ -61,6 +61,16 @@ case "$(cat "$state/scenario")" in
     printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
     printf '[ERROR] {"session_id":"s","error":{"type":"FatalToolExecutionError","message":"No space left.","code":"NO_SPACE_LEFT"}}\n' >&2
     exit 1 ;;
+  injected-quota)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"TerminalQuotaError","code":429}}\n' >&2
+    printf '{"session_id":"s","error":{"type":"FatalToolExecutionError","message":"No space left.","code":"NO_SPACE_LEFT"}}\n' >&2
+    exit 1 ;;
+  injected-other)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"FatalToolExecutionError"}}\n' >&2
+    quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
+  retry-then-killed)
+    printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
+    kill -KILL $$ ;;
   subagent-other) answer "relayed text" "$(turn "$model" main 1 0),$(turn fallback-model subagent 1 0)" ;;
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
@@ -152,6 +162,20 @@ run retry-then-fail out-retry-then-fail --kind review --diff "$TMP/change.diff" 
 check test "$status" -eq 1
 check grep -qF 'FatalToolExecutionError' "$TMP/out-retry-then-fail.stderr"
 check_not grep -qF 'limit reached' "$TMP/out-retry-then-fail.stderr"
+
+# Only the CLI's last report counts, so an object a tool error echoed earlier
+# cannot decide the class either way.
+run injected-quota out-injected-quota --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 1
+check_not grep -qF 'limit reached' "$TMP/out-injected-quota.stderr"
+run injected-other out-injected-other --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 75
+
+# A run killed before it reported is a plain failure, though a retry logged a 429.
+run retry-then-killed out-retry-then-killed --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -ne 0
+check test "$status" -ne 75
+check_not grep -qF 'limit reached' "$TMP/out-retry-then-killed.stderr"
 
 # A non-quota error fails loudly with the CLI's status, never as a limit.
 run not-found out-not-found --kind review --diff "$TMP/change.diff" --task t
@@ -277,8 +301,15 @@ implement_refused other-owner 'owned by this user or root' "$TMP/work" "$TMP/oth
 # workdir is refused.
 mkdir -p "$TMP/work,extra" "$TMP/work-space " "$TMP/work-space /inner"
 implement_refused comma-workdir 'no comma' "$TMP/work,extra"
-implement_refused space-workdir 'no trailing space' "$TMP/work-space "
-implement_refused space-parent 'no trailing space' "$TMP/work-space /inner"
+implement_refused space-workdir 'no name ending in a space' "$TMP/work-space "
+implement_refused space-parent 'no name ending in a space' "$TMP/work-space /inner"
+# The CLI trims Unicode whitespace too, so a path outside printable ASCII is refused.
+mkdir -p "$TMP/work"$'\u00a0'
+implement_refused nbsp-workdir 'printable ASCII' "$TMP/work"$'\u00a0'
+# A newline the dispatcher cannot see, behind a link, is not dropped and accepted.
+mkdir -p "$TMP/work"$'\n'
+ln -s "$TMP/work"$'\n' "$TMP/newline-link"
+implement_refused newline-workdir 'printable ASCII' "$TMP/newline-link"
 # The CLI resolves .. without following links, so it gets the resolved workdir.
 mkdir -p "$TMP/work/inner"
 ln -s "$TMP/work/inner" "$TMP/inner-link"

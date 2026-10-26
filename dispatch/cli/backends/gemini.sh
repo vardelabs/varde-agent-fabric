@@ -122,13 +122,20 @@ require_safe_parents() {
   done
 }
 
+includable_path() {
+  local LC_ALL=C
+  [[ "$1" != *[![:print:]]* && "$1" != *,* && "$1" != *' ' && "$1" != *' /'* ]]
+}
+
 if [[ "$trust_folder" == true ]]; then
-  # The CLI splits --include-directories on commas, trims each part, and resolves
-  # .. without following links, so it gets the resolved workdir, and one whose
-  # name it would split or trim is refused.
-  workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
-  [[ "$workdir_real" != *,* && "$workdir_real" != *[[:space:]] && "$workdir_real" != *[[:space:]]/* ]] \
-    || fail 'Gemini implementation needs a workdir path with no comma and no trailing space in a name'
+  # The CLI splits --include-directories on commas, trims each part of Unicode
+  # whitespace, and resolves .. without following links. So it gets the resolved
+  # workdir, and only a printable ASCII path it would not split or trim. The x
+  # keeps a trailing newline that command substitution would otherwise drop.
+  workdir_real="$(realpath -- "$DISPATCH_WORKDIR" && printf x)"
+  workdir_real="${workdir_real%$'\n'x}"
+  includable_path "$workdir_real" \
+    || fail 'Gemini implementation needs a printable ASCII workdir path with no comma and no name ending in a space'
   implement_folder="$(mktemp -d "$gemini_home_real/.dispatch-folder.XXXXXX")"
   require_safe_parents "$implement_folder"
   folder="$implement_folder"

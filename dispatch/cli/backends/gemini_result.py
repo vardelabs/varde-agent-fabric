@@ -56,13 +56,15 @@ def _first_error(objects: list[dict]) -> dict | None:
 
 
 def _final_error(objects: list[dict]) -> dict | None:
-    """The CLI's own error report, never an earlier retry it logged.
+    """The CLI's own error report, printed last, never a retry it logged.
 
-    The report carries a session_id; a logged retry does not. Without one, the
-    last error printed is the one the run ended on.
+    The report carries a session_id; a logged retry does not. Text the model
+    steers, such as a tool error echoing a path, can print an object shaped like
+    a report earlier, so only the last one counts. A run killed before it could
+    report has none, and fails without a class.
     """
     reports = [value for value in objects if "session_id" in value]
-    return _first_error(reports) or _first_error(objects[::-1])
+    return _first_error(reports[::-1])
 
 
 # Some fatal errors, such as a missing sign-in, are printed as text, not JSON.

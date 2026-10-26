@@ -211,16 +211,18 @@ refuses when any parent of that folder already holds `.gemini/.env`, or is
 owned by another user or writable by group or others, where another user could
 plant one. A dedicated home under `/tmp` is therefore refused for these kinds;
 put it under a private directory. The CLI splits an included directory on
-commas, trims it, and resolves `..` without following links. So the adapter
-passes the resolved workdir, and refuses one whose path holds a comma or a name
-ending in a space.
+commas, trims Unicode whitespace from it, and resolves `..` without following
+links. So the adapter passes the resolved workdir, and refuses one whose path is
+not printable ASCII, holds a comma, or has a name ending in a space.
 
 The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
 code 429. Either one is enough. The CLI raises these for a 429 from the model
 API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
 never a limit, even when stderr logs a 429 that a retry cleared. On a failed
-run, only the CLI's final error report counts, never a retry it logged.
+run, only the CLI's last error report counts, never a retry it logged or an
+object a tool error echoed earlier. A run killed before it reported is a plain
+failure.
 
 The adapter never accepts an answer from a model other than the one requested.
 In headless mode the CLI has no fallback handler, so with an explicit model and
