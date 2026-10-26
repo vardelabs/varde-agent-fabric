@@ -5,7 +5,16 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from dispatch import adapters
+
+def _serves_local_review_fallback(harness: str) -> bool:
+    # A deployment loads this module alone from its source to validate routes, with
+    # no package on the path. The registry is then out of reach, and the runtime
+    # fallback still refuses a harness whose adapter registers none.
+    try:
+        from dispatch import adapters
+    except ImportError:
+        return True
+    return adapters.local_review_fallback(harness) is not None
 
 
 class RouteConfigError(ValueError):
@@ -128,7 +137,7 @@ class RouteDefinition:
                 raise RouteConfigError(
                     "remote-unavailable fallback harness must match default_harness"
                 )
-            if adapters.local_review_fallback(default_harness) is None:
+            if not _serves_local_review_fallback(default_harness):
                 raise RouteConfigError(
                     f"local fallback is not supported for harness {default_harness!r}"
                 )

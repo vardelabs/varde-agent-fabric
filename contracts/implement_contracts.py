@@ -29,12 +29,21 @@ def _worker_model(worker_kind, model):
         raise ContractError("unsupported implement worker")
     if model is not None:
         _text(model, "model", 256)
-    from dispatch.adapters import ADAPTERS
-
-    adapter = ADAPTERS.get(worker_kind)
-    pattern = adapter.implement_model if adapter else None
+    pattern, label = _registered_implement_model(worker_kind)
     if pattern is not None and (not isinstance(model, str) or not pattern.fullmatch(model)):
-        raise ContractError(f"unsupported {adapter.label} implement model")
+        raise ContractError(f"unsupported {label} implement model")
+
+
+def _registered_implement_model(worker_kind):
+    # A deployment also loads this module alone from its source, with no package on
+    # the path. The registry is then out of reach and only the shape checks apply;
+    # its gateway grants exact models, so nothing unshaped is served.
+    try:
+        from dispatch.adapters import ADAPTERS
+    except ImportError:
+        return None, None
+    adapter = ADAPTERS.get(worker_kind)
+    return (adapter.implement_model, adapter.label) if adapter else (None, None)
 
 
 def _encoded(value: Any) -> bytes:
