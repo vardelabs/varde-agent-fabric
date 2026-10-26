@@ -42,16 +42,17 @@ fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 # reached, so a caller can wait or fall back instead of treating it as a failure.
 LIMIT_REACHED_STATUS=75
 
+# Run by path from this directory, which holds no Python modules: -m would put
+# the caller's cwd first on sys.path, and a path in dispatch/adapters/ would let
+# an adapter module shadow the standard library.
+adapter_registry() { PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/adapter_env.py" "$@"; }
+
 # Append NAME=value for each variable the harness's adapter registers and the
 # caller has set. $2 is env (a direct run) or fallback-env (a local fallback).
 forward_adapter_env() {
   local -n forward_target="$1"
   local names name
-  # Run by path from this directory, which holds no Python modules: -m would put
-  # the caller's cwd first on sys.path, and a path in dispatch/adapters/ would let
-  # an adapter module shadow the standard library.
-  names="$(PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/adapter_env.py" "$2" "$3")" \
-    || fail "could not read the adapter registration for $3" 3
+  names="$(adapter_registry "$2" "$3")" || fail "could not read the adapter registration for $3" 3
   while IFS= read -r name; do
     if [[ -n "$name" && -n "${!name:-}" ]]; then forward_target+=("$name=${!name}"); fi
   done <<< "$names"
@@ -126,6 +127,9 @@ esac
 backend="$BACKENDS_DIR/$harness.sh"
 if [[ "$route_target" != "remote" ]]; then
   [[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
+  role=implement
+  [[ "$kind" == review ]] && role=review
+  adapter_registry role "$role" "$harness" || fail "harness $harness cannot serve kind $kind" 3
 fi
 
 if [[ "$route_target" == "remote" ]]; then
@@ -252,9 +256,19 @@ if ((${#route_target_arg[@]})); then backend_env+=("${route_target_arg[@]}"); fi
 if ((${#route_metadata_args[@]})); then backend_env+=("${route_metadata_args[@]}"); fi
 forward_adapter_env backend_env env "$harness"
 backend_status=0
-env -i "${backend_env[@]}" "$backend" || backend_status=$?
-if ((backend_status == LIMIT_REACHED_STATUS)); then
-  fail "limit reached: the $harness backend reports its provider usage limit" "$LIMIT_REACHED_STATUS"
+# A copy of the backend's stderr lets its adapter read the CLI's own limit report
+# after a failure, while the caller still sees the stream as it happens.
+backend_stderr="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-stderr.XXXXXX")"
+# fd 3 keeps the backend's stdout apart; with pipefail the group returns the
+# backend's status, and the pipeline waits for tee before the copy is read.
+{ env -i "${backend_env[@]}" "$backend" 2>&1 1>&3 3>&- | tee -- "$backend_stderr" >&2; } 3>&1 || backend_status=$?
+limit=""
+if ((backend_status != 0 && backend_status != LIMIT_REACHED_STATUS)); then
+  limit="$(adapter_registry limit "$harness" "$backend_stderr" 2>/dev/null)" || limit=""
+fi
+rm -f -- "$backend_stderr"
+if ((backend_status == LIMIT_REACHED_STATUS)) || [[ -n "$limit" ]]; then
+  fail "limit reached${limit:+ ($limit)}: the $harness backend reports its provider usage limit" "$LIMIT_REACHED_STATUS"
 fi
 ((backend_status == 0)) || exit "$backend_status"
 fi
