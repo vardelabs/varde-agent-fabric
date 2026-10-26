@@ -222,6 +222,27 @@ check test $((SECONDS - term_sent)) -le 2
 check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
 check test -z "$(find "$TMP/direct-runs" -mindepth 1 -maxdepth 1)"
 
+# A relative TMPDIR still gives the CLI an absolute home and temp directory.
+mkdir -p "$TMP/relative-base/rel-tmp"
+printf '%s' ok > "$state/scenario"
+relative_status=0
+(cd "$TMP/relative-base" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR=rel-tmp \
+  DISPATCH_OUTPUT="$TMP/out-relative" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || relative_status=$?
+check test "$relative_status" -eq 0
+check grep -qxF 'tmpdir=isolated' "$record"
+check grep -qE "^home=/" "$record"
+check test -z "$(find "$TMP/relative-base/rel-tmp" -mindepth 1)"
+
+# The CLI's report ends stderr, so logs longer than the read limit cannot hide it.
+head -c $((9 * 1024 * 1024)) /dev/zero | tr '\0' 'x' > "$TMP/long.stderr"
+printf '\n{"session_id":"s","error":{"type":"TerminalQuotaError","message":"quota","code":429}}\n' >> "$TMP/long.stderr"
+: > "$TMP/long.stdout"
+long_status=0
+python3 "$ROOT/dispatch/cli/backends/gemini_result.py" "$TMP/long.stdout" "$TMP/long.stderr" "$MODEL" 173 "$TMP/out-long" \
+  2>/dev/null || long_status=$?
+check test "$long_status" -eq 75
+
 # A CLI that exits 75 for a reason other than a quota is not a limit.
 printf '{"session_id":"s","error":{"type":"Error","message":"other","code":75}}\n' > "$TMP/exit75.stderr"
 : > "$TMP/exit75.stdout"

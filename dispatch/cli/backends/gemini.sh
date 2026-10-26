@@ -60,7 +60,8 @@ unset DISPATCH_TASK DISPATCH_DIFF
 
 # mktemp -d makes the scratch directory 0700. It holds links to the sign-in, so
 # a signal exits through the EXIT trap too and it never outlives the run.
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")"
+# The CLI starts in the workdir, so its homes and temp directory must be absolute.
+scratch="$(realpath -- "$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")")"
 cli_group=""
 # Bash runs a trap only after its foreground child ends, so the CLI runs as its
 # own background process group and a signal stops that group first.
@@ -69,7 +70,7 @@ trap 'stop_cli; rm -rf -- "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
-case "$(realpath -- "$scratch")/" in
+case "$scratch/" in
   "${workdir_real%/}/"*) fail 'Gemini needs a TMPDIR outside the workdir, which the CLI can read' ;;
 esac
 # The prompt goes on stdin, never in process arguments that other users can read.

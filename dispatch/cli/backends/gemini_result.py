@@ -177,6 +177,14 @@ def _read(path: str) -> str:
         return stream.read(MAX_READ_BYTES).decode("utf-8", errors="replace")
 
 
+def _read_tail(path: str) -> str:
+    """The end of a file, where the CLI's own error report is, however long its logs."""
+    with open(path, "rb") as stream:
+        stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, stream.tell() - MAX_READ_BYTES))
+        return stream.read().decode("utf-8", errors="replace")
+
+
 def _write_atomic(path: str, text: str) -> None:
     # mkstemp gives an unpredictable name, created exclusively at 0600, so the
     # output is never readable by other users and no planted link is followed.
@@ -197,7 +205,7 @@ def main(argv: list[str]) -> int:
         return 2
     stdout_path, stderr_path, model, status, output_path = argv
     try:
-        response = classify(_read(stdout_path), _read(stderr_path), model, int(status))
+        response = classify(_read(stdout_path), _read_tail(stderr_path), model, int(status))
     except RunFailed as failure:
         print(f"gemini: {failure}", file=sys.stderr)
         return failure.status if 0 < failure.status < 256 else FAILED
