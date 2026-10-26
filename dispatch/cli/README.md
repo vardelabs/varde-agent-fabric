@@ -221,7 +221,7 @@ code 429. Either one is enough. The CLI raises these for a 429 from the model
 API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
 never a limit, even when stderr logs a 429 that a retry cleared. On a failed
 run, a quota error counts only from the object that ends stderr, and only when
-its integer code is the exit status, as the CLI's own report always is. A retry
+its integer code, modulo 256, is the exit status, as the CLI's own report always is. A retry
 the CLI logged, or an object a tool error echoed before more output, is a plain
 failure. One case stays open: a model can make a tool error echo a quota-shaped
 object with an integer code, and if the CLI then dies without printing anything

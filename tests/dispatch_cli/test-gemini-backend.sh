@@ -91,6 +91,9 @@ case "$(cat "$state/scenario")" in
     exit 1 ;;
   planted-float-code)
     printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"x","code":429.0}}\n' >&2
+    exit 173 ;;
+  planted-bool-code)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"TerminalQuotaError","code":true}}\n' >&2
     exit 1 ;;
   quota-code-only) quota_error '"type":"ApiError","message":"Too many requests.","code":429' ;;
   not-found)
@@ -192,7 +195,7 @@ check test "$status" -eq 75
 # A quota report always carries an integer code, so an echoed object without one
 # is not a limit when the run then dies silently with status 1.
 for scenario in retry-then-killed planted-then-crashed planted-then-killed \
-  planted-no-code planted-string-code planted-float-code; do
+  planted-no-code planted-string-code planted-float-code planted-bool-code; do
   run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
   check test "$status" -ne 0
   check test "$status" -ne 75
