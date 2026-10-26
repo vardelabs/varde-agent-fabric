@@ -64,7 +64,9 @@ dispatch/cli/varde-agent-dispatch \
 ```
 
 The current public backends are `codex` and `opencode`. The OpenCode adapter
-supports CLI v2. The dispatcher passes only an explicit runtime contract to a backend:
+supports CLI v2. Each backend is registered in `dispatch/adapters/`; see
+[Adding a Backend](#adding-a-backend). The dispatcher passes only an explicit
+runtime contract to a backend:
 
 - `DISPATCH_TASK`
 - `DISPATCH_WORKDIR`
@@ -77,6 +79,15 @@ supports CLI v2. The dispatcher passes only an explicit runtime contract to a ba
 - routed `DISPATCH_FALLBACK_POLICY`
 - routed `DISPATCH_FALLBACK_HARNESS`
 - routed `DISPATCH_FALLBACK_TARGET`
+- the variables that backend's registration lists, when the caller sets them
+  (for example `DISPATCH_CODEX_SANDBOX` to `codex`, and the
+  `DISPATCH_OPENCODE_*` settings to `opencode`). A backend never receives
+  another backend's variables.
+
+A backend exits 75 when its provider reports that a usage limit is reached.
+The dispatcher prints `limit reached` to stderr, writes no output, and exits 75,
+so a caller can wait or fall back instead of treating the run as a failure. Any
+other non-zero backend status is returned unchanged.
 
 The caller owns authentication, deployment policy, and remote transport. When
 `--model` is supplied, `--routes` provides the portable model-first registry;
@@ -186,6 +197,29 @@ validated empty proposal is still published but exits 6, so callers must not
 mistake successful worker completion for a file modification. Authentication
 failures and unavailability never trigger a local implementation fallback.
 Remote reviews retain their existing route.
+
+## Adding a Backend
+
+A backend is two files and one registration line. No other part of the
+dispatcher changes.
+
+1. `dispatch/cli/backends/<name>.sh`, executable. It reads the runtime contract
+   above from its environment, runs the tool, and writes one artifact to
+   `DISPATCH_OUTPUT`. It exits 0 on success, 75 when the provider's usage limit
+   is reached, and any other non-zero status on failure.
+2. `dispatch/adapters/<module>.py`, defining `ADAPTER = Adapter(name="<name>", env=(...))`.
+   `env` lists the caller variables the dispatcher forwards to this backend
+   only. Each must start with `DISPATCH_` and must not be a contract variable.
+   Set `local_review_fallback` only when the backend can serve a remote review
+   route locally while the gateway is unavailable; it names the fallback stamp,
+   the runner, and the variables that runner needs.
+3. Add the module to `_REGISTERED` in `dispatch/adapters/__init__.py`.
+
+Copy the fake-CLI pattern in `tests/dispatch_cli/test-varde-agent-dispatch.sh`
+to test the backend without a provider account or network access.
+
+The remote wire contracts in `contracts/` list the workers the remote gateway
+runs. A local backend does not need a change there.
 
 ## Public boundary
 

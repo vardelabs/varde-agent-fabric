@@ -1,0 +1,150 @@
+"""OpenCode backend registration and its local review fallback."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+from typing import TYPE_CHECKING
+
+from contracts.review_contracts import MAX_TRANSPORT_BYTES, ReviewArtifact
+from dispatch.adapters.base import LOCAL_REVIEW_CONTRACT, Adapter, LocalReviewFallback, caller_base_env
+
+if TYPE_CHECKING:
+    from contracts.review_contracts import ReviewRequest
+    from dispatch.remote_runner import RemoteReviewMetadata
+
+
+def _text_parts(raw: bytes) -> list[str]:
+    text_parts: list[str] = []
+    try:
+        for line in raw.decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise RuntimeError("local OpenCode output event is not an object")
+            if event.get("type") == "text":
+                part = event.get("part")
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("local OpenCode output is malformed JSONL") from exc
+    if not text_parts:
+        raise RuntimeError("local OpenCode returned no final text event")
+    return text_parts
+
+
+def _extract(value: object) -> list[object] | None:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("findings"), list):
+        return value["findings"]
+    return None
+
+
+def _final_findings(text_parts: list[str]) -> list[object]:
+    try:
+        parsed = json.loads(text_parts[-1])
+    except json.JSONDecodeError as last_exc:
+        try:
+            parsed = json.loads("".join(text_parts))
+        except json.JSONDecodeError:
+            raise RuntimeError("local OpenCode final text is not valid JSON") from last_exc
+    final_findings = _extract(parsed)
+    if final_findings is None:
+        raise RuntimeError("local OpenCode final text is not a findings array")
+    return final_findings
+
+
+def _prior_findings(text_parts: list[str]) -> list[object]:
+    prior_findings: list[object] = []
+    for text in text_parts[:-1]:
+        try:
+            prior = _extract(json.loads(text))
+        except json.JSONDecodeError:
+            continue
+        if prior:
+            prior_findings.extend(prior)
+    return prior_findings
+
+
+def opencode_findings(raw: bytes) -> tuple[dict[str, object], ...]:
+    text_parts = _text_parts(raw)
+    final_findings = _final_findings(text_parts)
+    prior_findings = _prior_findings(text_parts)
+    if prior_findings and not all(item in final_findings for item in prior_findings):
+        raise RuntimeError("local OpenCode final snapshot dropped earlier findings")
+    findings: list[dict[str, object]] = []
+    for item in final_findings:
+        if not isinstance(item, dict):
+            raise RuntimeError("local OpenCode returned a non-object finding")
+        findings.append(item)
+    return tuple(findings)
+
+
+def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
+    opencode_home = os.environ.get("DISPATCH_OPENCODE_HOME")
+    if not opencode_home:
+        raise RuntimeError("local OpenCode fallback requires DISPATCH_OPENCODE_HOME")
+    if metadata.diff is None:
+        raise RuntimeError("local OpenCode fallback requires a review diff")
+
+    local_output = Path(f"{metadata.output}.local")
+    fallback_task = f"{LOCAL_REVIEW_CONTRACT}\n\n{metadata.task}"
+    environment = {
+        **caller_base_env(metadata.workdir),
+        "DISPATCH_TASK": fallback_task,
+        "DISPATCH_WORKDIR": metadata.workdir,
+        "DISPATCH_OUTPUT": str(local_output),
+        "DISPATCH_KIND": "review",
+        "DISPATCH_MODEL": metadata.model,
+        "DISPATCH_DIFF": metadata.diff,
+        "DISPATCH_OPENCODE_HOME": opencode_home,
+    }
+    if os.environ.get("DISPATCH_OPENCODE_MODELS_PATH"):
+        environment["DISPATCH_OPENCODE_MODELS_PATH"] = os.environ["DISPATCH_OPENCODE_MODELS_PATH"]
+    try:
+        result = subprocess.run(
+            [metadata.local_backend],
+            cwd=metadata.workdir,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=request.timeout_seconds + 5,
+            check=False,
+        )
+        if result.returncode != 0 or not local_output.is_file():
+            raise RuntimeError("local OpenCode fallback backend failed")
+        with local_output.open("rb") as stream:
+            raw = stream.read(MAX_TRANSPORT_BYTES + 1)
+        if len(raw) > MAX_TRANSPORT_BYTES:
+            raise RuntimeError("local OpenCode output exceeds the review artifact limit")
+        findings = opencode_findings(raw)
+        return ReviewArtifact(
+            request.repository,
+            request.pull_request,
+            request.base_sha,
+            request.head_sha,
+            request.worker_kind,
+            "requester",
+            request.model or metadata.model,
+            request.correlation_id,
+            findings,
+            "completed",
+        )
+    finally:
+        local_output.unlink(missing_ok=True)
+
+
+ADAPTER = Adapter(
+    name="opencode",
+    env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH", "DISPATCH_OPENCODE_ALLOW_WRITE"),
+    local_review_fallback=LocalReviewFallback(
+        stamp="cluster-unavailable-local-opencode",
+        run=run_local_review,
+        env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH"),
+    ),
+)

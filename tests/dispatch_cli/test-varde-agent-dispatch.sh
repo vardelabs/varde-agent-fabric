@@ -698,4 +698,63 @@ fi
 check test -s "$TMP/out-implement-boundary"
 check grep -qF '"schema":"implement-artifact.v2"' "$TMP/out-implement-boundary"
 
+# A backend added by one script and one registration, in a copy of the tree,
+# must run with no other change to the dispatch core.
+SEAM="$TMP/seam-repo"
+mkdir -p "$SEAM"
+cp -R "$ROOT/dispatch" "$ROOT/contracts" "$SEAM/"
+cat > "$SEAM/dispatch/adapters/example_backend.py" <<'EOF'
+from dispatch.adapters.base import Adapter
+
+ADAPTER = Adapter(name="example-backend", env=("DISPATCH_EXAMPLE_HOME",))
+EOF
+python3 - "$SEAM/dispatch/adapters/__init__.py" <<'EOF'
+import pathlib
+import sys
+
+registry = pathlib.Path(sys.argv[1])
+registry.write_text(registry.read_text(encoding="utf-8").replace(
+    "_REGISTERED = (codex, opencode)\n",
+    "from dispatch.adapters import example_backend\n_REGISTERED = (codex, opencode, example_backend)\n",
+), encoding="utf-8")
+EOF
+check grep -qF 'example_backend)' "$SEAM/dispatch/adapters/__init__.py"
+cat > "$SEAM/dispatch/cli/backends/example-backend.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$DISPATCH_TASK" in
+  limit) exit 75 ;;
+  broken) exit 7 ;;
+esac
+{ printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
+EOF
+chmod +x "$SEAM/dispatch/cli/backends/example-backend.sh"
+SEAM_CLI="$SEAM/dispatch/cli/varde-agent-dispatch"
+
+# Run from the original tree: its dispatch package must not shadow the copy's registry.
+if ! (cd "$ROOT" && DISPATCH_EXAMPLE_HOME=/example-home DISPATCH_OPENCODE_HOME=/opencode-home DISPATCH_CODEX_SANDBOX=read-only \
+  "$SEAM_CLI" --harness example-backend --kind implement --task run --workdir "$TMP/work" \
+  --output "$TMP/out-seam" >"$TMP/stdout-seam" 2>"$TMP/err-seam"); then
+  printf 'registration-only backend unexpectedly failed\n' >&2
+  cat "$TMP/err-seam" >&2
+  exit 1
+fi
+check grep -qxF 'DISPATCH_EXAMPLE_HOME=/example-home' "$TMP/out-seam"
+check grep -qxF 'ran' "$TMP/out-seam"
+check_not() { if "$@"; then printf 'unexpected match: %s\n' "$*" >&2; exit 1; fi; pass=$((pass + 1)); }
+check_not grep -q 'DISPATCH_OPENCODE_HOME\|DISPATCH_CODEX_SANDBOX' "$TMP/out-seam"
+
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task limit --workdir "$TMP/work" \
+  --output "$TMP/out-seam-limit" >"$TMP/stdout-seam-limit" 2>"$TMP/err-seam-limit" || seam_status=$?
+check test "$seam_status" -eq 75
+check grep -qF 'limit reached' "$TMP/err-seam-limit"
+check test ! -e "$TMP/out-seam-limit"
+
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task broken --workdir "$TMP/work" \
+  --output "$TMP/out-seam-broken" >"$TMP/stdout-seam-broken" 2>"$TMP/err-seam-broken" || seam_status=$?
+check test "$seam_status" -eq 7
+check_not grep -qF 'limit reached' "$TMP/err-seam-broken"
+
 printf 'dispatch CLI tests: %s passed\n' "$pass"

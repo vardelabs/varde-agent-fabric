@@ -5,12 +5,8 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
+from dispatch import adapters
 from dispatch.gateway_client import GatewayUnavailable
-
-FALLBACK_STAMPS = {
-    "codex": "cluster-unavailable-local-codex",
-    "opencode": "cluster-unavailable-local-opencode",
-}
 
 
 def validate_fallback_artifact(artifact: ReviewArtifact, request: ReviewRequest) -> None:
@@ -29,9 +25,9 @@ def run_with_remote_fallback(
     try:
         return submit()
     except GatewayUnavailable:
-        fallback_stamp = FALLBACK_STAMPS.get(request.worker_kind)
-        if fallback_stamp is None or local_fallback is None:
+        policy = adapters.local_review_fallback(request.worker_kind)
+        if policy is None or local_fallback is None:
             raise
         artifact = local_fallback()
         validate_fallback_artifact(artifact, request)
-        return replace(artifact, fallback=fallback_stamp)
+        return replace(artifact, fallback=policy.stamp)
