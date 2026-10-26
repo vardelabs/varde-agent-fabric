@@ -171,23 +171,36 @@ arguments.
 
 It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
-rules as `DISPATCH_OPENCODE_HOME`. The adapter points `HOME` and
-`GEMINI_CLI_HOME` there, and writes a per-run system settings file that sets
-`security.auth.enforcedType` to `oauth-personal`. System settings take precedence over
-user and workspace settings, so the CLI refuses an API key or any other auth
-type, and the dispatcher forwards no key variable. The same file turns off
-auto-update and folder trust prompts, and sets `advanced.ignoreLocalEnv`, so the
-CLI loads no `.env` file in or above the workdir. Without it, an untrusted workdir
-could still set the CLI's auth variables, such as `GOOGLE_CLOUD_PROJECT`, from
-its `.env`. Only the dedicated home's own `.env` is read.
+rules as `DISPATCH_OPENCODE_HOME`.
 
-A `review` runs with the workdir untrusted (`GEMINI_CLI_TRUST_WORKSPACE=false`),
-so the workdir's `.gemini` settings and extensions do not load. The CLI then
-runs in `default` approval mode, where headless mode refuses every tool that
-needs approval, so the review is read-only. `implement` and `passthrough` require
-`DISPATCH_GEMINI_ALLOW_WRITE=1`. They trust the workdir and run in `auto_edit`
-mode, so they load the workdir's own `.gemini` settings and `.gemini/.env`: use
-them only on a worktree you trust. The enforced sign-in still holds there.
+Each run gets its own home, which `HOME` and `GEMINI_CLI_HOME` point to. Its
+`.gemini/settings.json` is the adapter's, and every other entry of the dedicated
+home's `.gemini` is linked in, so the stored sign-in is used and a token refresh
+reaches it. The dedicated home's own `settings.json` is never read. The adapter
+cannot use a system settings file, because the CLI loads one only when root owns
+it and every parent directory. The CLI always loads user settings, and a run
+never adds workspace settings above them (see below), so the adapter's settings
+are final. They set these values:
+
+- `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
+  or any other auth type. The dispatcher also forwards no key variable.
+- `advanced.ignoreLocalEnv`, so the CLI loads no `.env` file in or above the
+  folder it runs in. Without it, an untrusted workdir could set the CLI's auth
+  variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`.
+- `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
+  policy allows both, and text in a reviewed diff could steer workdir content
+  into a search or a fetch.
+- Folder trust prompts and auto-update turned off.
+
+A `review` runs in the workdir with it untrusted
+(`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
+extensions do not load. The CLI then runs in `default` approval mode, where
+headless mode refuses every tool that needs approval, so the review writes
+nothing. `implement` and `passthrough` require `DISPATCH_GEMINI_ALLOW_WRITE=1`.
+An edit needs a trusted folder, so they run in an empty folder of the adapter's
+own, trusted, in `auto_edit` mode, and reach the worktree through
+`--include-directories`. The worktree's `.gemini` settings and `.env` are never
+loaded, and the enforced sign-in holds there too.
 
 The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
@@ -197,10 +210,11 @@ API, and exits with status 173, which is 429 modulo 256.
 The adapter never accepts an answer from a model other than the one requested.
 In headless mode the CLI has no fallback handler, so with an explicit model and
 outside `plan` approval mode it reports a quota error rather than switching
-models. The adapter still reads `stats.models`: if any model other than the requested one answered a
-main turn, or the requested model answered none, the run fails loudly with
-status 1 and its text is discarded. It is never reported as a limit. Calls on
-other models in utility roles, such as routing or loop detection, are normal.
+models. The adapter still reads `stats.models`: if any model other than the
+requested one answered a main turn, or the requested model answered none, the
+run fails loudly with status 1 and its text is discarded. It is never reported
+as a limit. Calls on other models in utility roles, such as routing or loop
+detection, are normal.
 Any other CLI failure returns the CLI's status with its error type and message.
 
 To sign in, run the CLI once, interactively, as the worker user, with the

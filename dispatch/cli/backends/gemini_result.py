@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -54,6 +55,16 @@ def _first_error(objects: list[dict]) -> dict | None:
     return None
 
 
+# Some fatal errors, such as a missing sign-in, are printed as text, not JSON.
+# Only the CLI's own Fatal...Error line is quoted, never other stderr text.
+_FATAL_LINE = re.compile(r"^.*\bFatal\w*Error\b.*$", re.MULTILINE)
+
+
+def _fatal_line(stderr: str) -> str:
+    match = _FATAL_LINE.search(stderr)
+    return match.group(0).strip() if match else "no error report"
+
+
 def _is_quota_error(error: dict) -> bool:
     return error.get("type") in QUOTA_ERROR_TYPES or error.get("code") == QUOTA_HTTP_STATUS
 
@@ -96,7 +107,7 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
     if error is not None and _is_quota_error(error):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
-        detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else "no error report"
+        detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else _fatal_line(stderr)
         raise RunFailed(cli_status or FAILED, f"gemini exited with status {cli_status}: {detail}"[:MAX_REASON_CHARS])
     try:
         result = json.loads(stdout)

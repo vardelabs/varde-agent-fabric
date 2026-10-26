@@ -9,8 +9,13 @@ CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gemini-backend-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/work" "$TMP/caller-home" "$TMP/gemini-home" "$TMP/bin"
+mkdir -p "$TMP/work" "$TMP/caller-home" "$TMP/gemini-home/.gemini" "$TMP/bin"
 printf 'diff body\n' > "$TMP/change.diff"
+# The dedicated home holds the sign-in and the operator's own settings; a run
+# must use the sign-in and never these settings, which pick an API key.
+printf '{"refresh_token":"example"}' > "$TMP/gemini-home/.gemini/oauth_creds.json"
+printf '{"security":{"auth":{"selectedType":"gemini-api-key"}}}' > "$TMP/gemini-home/.gemini/settings.json"
+state="$TMP/gemini-home/.gemini"
 MODEL=example-gemini-model
 
 pass=0
@@ -21,16 +26,19 @@ check_not() { if "$@"; then printf 'unexpected match: %s\n' "$*" >&2; exit 1; fi
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-record="$HOME/record"
+# The scenario file reaches the run's home through the same links as the sign-in.
+state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/scenario")")"
 {
   printf 'argv=%s\n' "$*"
   printf 'cwd=%s\n' "$PWD"
   printf 'home=%s cli_home=%s\n' "$HOME" "${GEMINI_CLI_HOME:-}"
   printf 'trust=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-}"
   printf 'keys=%s\n' "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${DISPATCH_UNSAFE_SENTINEL:-}"
-  printf 'settings=%s\n' "$(tr -d ' \n' < "$GEMINI_CLI_SYSTEM_SETTINGS_PATH")"
+  printf 'system_settings=%s\n' "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}"
+  printf 'settings=%s\n' "$(tr -d ' \n' < "$HOME/.gemini/settings.json")"
+  printf 'creds=%s\n' "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")"
   printf 'stdin=%s\n' "$(cat)"
-} > "$record"
+} > "$state/record"
 model=""
 while (($#)); do
   case "$1" in --model) model="$2"; shift 2 ;; *) shift ;; esac
@@ -39,7 +47,7 @@ done
 turn() { printf '"%s":{"api":{"totalRequests":%s,"totalErrors":%s},"roles":{"%s":{"totalRequests":%s,"totalErrors":%s}}}' "$1" "$3" "$4" "$2" "$3" "$4"; }
 answer() { printf '{"session_id":"s","response":"%s","stats":{"models":{%s}}}\n' "$1" "$2"; }
 quota_error() { printf '{"session_id":"s","error":{%s}}\n' "$1" >&2; exit 173; }
-case "$(cat "$HOME/scenario")" in
+case "$(cat "$state/scenario")" in
   ok) answer "review text" "$(turn "$model" main 1 0)" ;;
   with-utility) answer "review text" "$(turn "$model" main 1 0),$(turn utility-model utility_router 2 0)" ;;
   retried-main) answer "review text" "$(turn "$model" main 3 2)" ;;
@@ -55,6 +63,10 @@ case "$(cat "$HOME/scenario")" in
   later-switch) answer "other model text" "$(turn "$model" main 2 1),$(turn fallback-model main 1 0)" ;;
   downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
   no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
+  all-failed) answer "text" "$(turn "$model" main 2 2)" ;;
+  text-auth)
+    printf 'Warning: something unrelated\nError authenticating: FatalAuthenticationError: Manual authorization is required\n' >&2
+    exit 41 ;;
   auth)
     printf '{"session_id":"s","error":{"type":"FatalAuthenticationError","message":"Please sign in.","code":41}}\n' >&2
     exit 41 ;;
@@ -63,7 +75,7 @@ EOF
 chmod +x "$TMP/bin/gemini"
 
 run() {  # run <scenario> <out-name> [extra dispatcher args...]
-  printf '%s' "$1" > "$TMP/gemini-home/scenario"
+  printf '%s' "$1" > "$state/scenario"
   local name="$2"; shift 2
   status=0
   HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
@@ -76,17 +88,27 @@ run ok out-review --kind review --diff "$TMP/change.diff" --task private-task-se
 check test "$status" -eq 0
 check grep -qxF 'review text' "$TMP/out-review"
 check test "$(stat -c '%a' "$TMP/out-review" 2>/dev/null || stat -f '%Lp' "$TMP/out-review")" = 600
-record="$TMP/gemini-home/record"
+record="$state/record"
 check grep -qF -- "--model $MODEL" "$record"
 check grep -qF -- '--approval-mode default' "$record"
 check grep -qF -- '--output-format json' "$record"
 check grep -qxF 'trust=false' "$record"
-check grep -qxF "home=$TMP/gemini-home cli_home=$TMP/gemini-home" "$record"
+# A per-run home, not the dedicated one, so the operator's settings never load;
+# the sign-in is the dedicated home's file, reached through a link.
+run_home="$(sed -n 's/^home=\([^ ]*\) .*/\1/p' "$record")"
+check test -n "$run_home"
+check test "$run_home" != "$TMP/gemini-home"
+check grep -qxF "home=$run_home cli_home=$run_home" "$record"
+check grep -qxF "creds=$TMP/gemini-home/.gemini/oauth_creds.json" "$record"
+check_not grep -qF 'gemini-api-key' "$record"
+check grep -qxF 'system_settings=' "$record"
 check grep -qxF "cwd=$TMP/work" "$record"
+check_not grep -qF -- '--include-directories' "$record"
 check grep -qxF 'keys=' "$record"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 check grep -qF '"folderTrust":{"enabled":false}' "$record"
 check grep -qF '"advanced":{"ignoreLocalEnv":true}' "$record"
+check grep -qF '"tools":{"exclude":["google_web_search","web_fetch"]}' "$record"
 check grep -qF 'stdin=private-task-sentinel' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
@@ -140,9 +162,27 @@ check test "$status" -eq 1
 check grep -qF 'switched main turns' "$TMP/out-downgraded.stderr"
 check_not grep -qF 'limit reached' "$TMP/out-downgraded.stderr"
 
-run no-main out-no-main --kind review --diff "$TMP/change.diff" --task t
-check test "$status" -eq 1
-check grep -qF 'answered no main turn' "$TMP/out-no-main.stderr"
+# No main turn answered, whether nothing ran on the main role or every main
+# request of the requested model failed.
+for scenario in no-main all-failed; do
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -eq 1
+  check grep -qF 'answered no main turn' "$TMP/out-$scenario.stderr"
+  check_not grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
+done
+
+# A fatal error printed as text, as a missing sign-in is, is still named.
+run text-auth out-text-auth --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 41
+check grep -qF 'FatalAuthenticationError: Manual authorization is required' "$TMP/out-text-auth.stderr"
+
+# The classifier itself creates the output at 0600; the dispatcher's own
+# pre-created file must not be what makes the mode right.
+printf '{"session_id":"s","response":"direct","stats":{"models":{"%s":{"roles":{"main":{"totalRequests":1,"totalErrors":0}}}}}}' "$MODEL" > "$TMP/direct.stdout"
+: > "$TMP/direct.stderr"
+(umask 022; python3 "$ROOT/dispatch/cli/backends/gemini_result.py" "$TMP/direct.stdout" "$TMP/direct.stderr" "$MODEL" 0 "$TMP/direct-out")
+check grep -qxF 'direct' "$TMP/direct-out"
+check test "$(stat -c '%a' "$TMP/direct-out" 2>/dev/null || stat -f '%Lp' "$TMP/direct-out")" = 600
 
 run auth out-auth --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 41
@@ -153,7 +193,7 @@ run ok out-implement-denied --kind implement --task t
 check test "$status" -eq 2
 check grep -qF 'DISPATCH_GEMINI_ALLOW_WRITE=1' "$TMP/out-implement-denied.stderr"
 
-printf '%s' ok > "$TMP/gemini-home/scenario"
+printf '%s' ok > "$state/scenario"
 status=0
 HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
   DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" \
@@ -162,6 +202,11 @@ HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP
 check test "$status" -eq 0
 check grep -qF -- '--approval-mode auto_edit' "$record"
 check grep -qxF 'trust=true' "$record"
+# Implement trusts only an empty folder of its own and reaches the worktree as an
+# included directory, so the worktree's own Gemini settings and env never load.
+check_not grep -qxF "cwd=$TMP/work" "$record"
+check grep -qF -- "--include-directories $TMP/work" "$record"
+check grep -qF '"enforcedType":"oauth-personal"' "$record"
 
 mkdir -p "$TMP/caller-home/nested-gemini-home"
 for bad_home in "$TMP/caller-home/nested-gemini-home" "$TMP" relative-home; do
