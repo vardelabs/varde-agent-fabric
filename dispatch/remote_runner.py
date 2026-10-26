@@ -72,7 +72,10 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
     if metadata.target != "remote":
         raise GatewayError("remote runner requires a remote target")
     client = _gateway_client()
-    fallback = adapters.local_review_fallback(metadata.harness)
+    try:
+        fallback = adapters.resolve("review", metadata.harness).local_review_fallback
+    except LookupError:
+        fallback = None
     local_fallback = None
     if fallback_policy == "remote-unavailable" and fallback is not None:
         def local_fallback() -> ReviewArtifact:

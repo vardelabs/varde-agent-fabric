@@ -140,6 +140,45 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         local_output.unlink(missing_ok=True)
 
 
+def _json_object(line: str) -> dict | None:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _error_event_limit(event: dict) -> str | None:
+    error = event.get("error")
+    if not isinstance(error, dict):
+        return None
+    # v1 names the error and nests its status under data; v2 gives a dotted type and a top-level status.
+    data = error.get("data")
+    status = data.get("statusCode") if isinstance(data, dict) else None
+    if status is None:
+        status = error.get("status")
+    name = error.get("name", error.get("type"))
+    if not isinstance(name, str):
+        return "rate-limit" if status == 429 else None
+    name = name.lower().replace("_", "").replace("-", "")
+    # A spent quota also answers 429, but waiting will not bring it back.
+    if name.endswith(".quota"):
+        return "quota"
+    return "rate-limit" if status == 429 or "ratelimit" in name else None
+
+
+def detect_limit(diagnostic: str) -> str | None:
+    """Read only OpenCode's own top-level error events: model text can mention limits in passing."""
+    for line in (line for line in reversed(diagnostic.strip().splitlines()) if line.startswith("{")):
+        event = _json_object(line)
+        if event is None:
+            # The last event cannot be read, so an earlier limit may not be the final error.
+            return None
+        if event.get("type") == "error":
+            return _error_event_limit(event)
+    return None
+
+
 # The deployment's broker and gateway allowlists grant exact models; this only
 # bounds the provider/model shape, so a new OpenCode provider or model needs no
 # fabric release. An aggregating provider names a model by its vendor too, as in
@@ -155,5 +194,7 @@ ADAPTER = Adapter(
         env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH"),
     ),
     implement_model=IMPLEMENT_MODEL,
+    parse_review=opencode_findings,
+    detect_limit=detect_limit,
     label="OpenCode",
 )

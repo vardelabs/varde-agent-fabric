@@ -706,7 +706,13 @@ cp -R "$ROOT/dispatch" "$ROOT/contracts" "$SEAM/"
 cat > "$SEAM/dispatch/adapters/example_backend.py" <<'EOF'
 from dispatch.adapters.base import Adapter
 
-ADAPTER = Adapter(name="example-backend", env=("DISPATCH_EXAMPLE_HOME",))
+def detect_limit(diagnostic):
+    lines = diagnostic.strip().splitlines()
+    return "quota" if lines and lines[-1] == "fatal: quota exhausted" else None
+
+
+ADAPTER = Adapter(name="example-backend", roles=frozenset({"implement"}), env=("DISPATCH_EXAMPLE_HOME",),
+                  detect_limit=detect_limit)
 EOF
 python3 - "$SEAM/dispatch/adapters/__init__.py" <<'EOF'
 import pathlib
@@ -725,6 +731,10 @@ set -euo pipefail
 case "$DISPATCH_TASK" in
   limit) exit 75 ;;
   broken) exit 7 ;;
+  quota) printf 'fatal: quota exhausted\n' >&2; exit 9 ;;
+  mentions-quota) printf 'fatal: quota exhausted\nfatal: disk full\n' >&2; exit 9 ;;
+  stdout-quota) printf 'fatal: quota exhausted\n'; exit 9 ;;
+  slow) printf 'transcript line\n' >&2; sleep 6 & printf '%s' "$!" > "$DISPATCH_WORKDIR/slow-child.pid"; wait ;;
 esac
 { printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
 EOF
@@ -756,5 +766,54 @@ seam_status=0
   --output "$TMP/out-seam-broken" >"$TMP/stdout-seam-broken" 2>"$TMP/err-seam-broken" || seam_status=$?
 check test "$seam_status" -eq 7
 check_not grep -qF 'limit reached' "$TMP/err-seam-broken"
+
+# The adapter's own detector turns the CLI's fatal quota report into exit 75,
+# and the caller still sees the backend's stderr.
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task quota --workdir "$TMP/work" \
+  --output "$TMP/out-seam-quota" >"$TMP/stdout-seam-quota" 2>"$TMP/err-seam-quota" || seam_status=$?
+check test "$seam_status" -eq 75
+check grep -qF 'limit reached (quota)' "$TMP/err-seam-quota"
+check grep -qxF 'fatal: quota exhausted' "$TMP/err-seam-quota"
+
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task mentions-quota --workdir "$TMP/work" \
+  --output "$TMP/out-seam-mention" >"$TMP/stdout-seam-mention" 2>"$TMP/err-seam-mention" || seam_status=$?
+check test "$seam_status" -eq 9
+check_not grep -qF 'limit reached' "$TMP/err-seam-mention"
+
+# Only stderr reaches the limit detector; the backend's stdout stays on the caller's stdout.
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task stdout-quota --workdir "$TMP/work" \
+  --output "$TMP/out-seam-stdout" >"$TMP/stdout-seam-stdout" 2>"$TMP/err-seam-stdout" || seam_status=$?
+check test "$seam_status" -eq 9
+check grep -qxF 'fatal: quota exhausted' "$TMP/stdout-seam-stdout"
+check_not grep -qF 'fatal: quota exhausted' "$TMP/err-seam-stdout"
+
+# TERM ends the run at once, not after the backend finishes, and still removes
+# the private stderr copy and the staged output.
+mkdir -p "$TMP/sig"
+TMPDIR="$TMP/sig" "$SEAM_CLI" --harness example-backend --kind implement --task slow --workdir "$TMP/work" \
+  --output "$TMP/sig/out" >/dev/null 2>&1 &
+sig_pid=$!
+sleep 1
+sig_sent=$SECONDS
+kill -TERM "$sig_pid"
+sig_status=0
+wait "$sig_pid" || sig_status=$?
+check test "$sig_status" -eq 143
+check test $((SECONDS - sig_sent)) -le 2
+sleep 0.3
+check test -s "$TMP/work/slow-child.pid"
+check_not kill -0 "$(cat "$TMP/work/slow-child.pid")" 2>/dev/null
+check test -z "$(find "$TMP/sig" -name 'agent-dispatch-*' -o -name '.agent-dispatch-*')"
+
+# A registered backend serves only the roles it declares.
+seam_status=0
+printf 'diff\n' > "$TMP/seam.diff"
+"$SEAM_CLI" --harness example-backend --kind review --diff "$TMP/seam.diff" --task run --workdir "$TMP/work" \
+  --output "$TMP/out-seam-role" >"$TMP/stdout-seam-role" 2>"$TMP/err-seam-role" || seam_status=$?
+check test "$seam_status" -eq 3
+check grep -qF 'cannot serve kind review' "$TMP/err-seam-role"
 
 printf 'dispatch CLI tests: %s passed\n' "$pass"

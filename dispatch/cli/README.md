@@ -84,13 +84,17 @@ runtime contract to a backend:
   `DISPATCH_OPENCODE_*` settings to `opencode`). A backend never receives
   another backend's variables.
 
-A backend that detects its provider's usage limit exits 75. The dispatcher
-then prints `limit reached` to stderr, writes no output, and exits 75, so a
-caller can wait or fall back instead of treating the run as a failure. Any other
-non-zero backend status is returned unchanged. The `codex` and `opencode`
-backends do not detect a usage limit; they return their CLI's own status. On a
-remote route's local fallback, a status of 75 is a fallback failure like any
-other.
+A run that hits its provider's usage limit exits 75, so a caller can wait or
+fall back instead of treating it as a failure. The dispatcher prints
+`limit reached` to stderr and writes no output. It reaches 75 in two ways: the
+backend exits 75 itself, or the backend fails and its adapter's `detect_limit`
+finds a limit in the backend's stderr. That stderr still streams to the caller.
+The message then names the kind, `quota` or `rate-limit`. The `codex` adapter
+reads only Codex's last line, when it starts with `error` and names a rate,
+usage, or quota limit. The `opencode` adapter reads only OpenCode's last
+top-level `error` event. Model text on stderr is never matched. Any other
+non-zero status is returned unchanged. On a remote route's local fallback, a
+limit is a fallback failure like any other.
 
 The caller owns authentication, deployment policy, and remote transport. When
 `--model` is supplied, `--routes` provides the portable model-first registry;
@@ -222,16 +226,23 @@ and one registration line. No other part of the dispatcher changes.
      `review` role, and its stamp is `cluster-unavailable-local-<name>`.
    - `implement_model` bounds the model an implement request may name for this
      backend. It needs the `implement` role.
+   - `parse_review(raw)` turns the backend's review output into findings. It
+     needs the `review` role.
+   - `detect_limit(stderr)` returns `quota`, `rate-limit`, or `None` from the
+     backend's own error report. Match only the CLI's fatal report, never model
+     text.
 3. Add the module to `_REGISTERED` in `dispatch/adapters/__init__.py`.
 
 `adapters.resolve(role, harness)` returns a backend only for a role it
 declares. A deployment registers a private backend with
 `adapters.register(Adapter(...))` from its own module, so the backend joins the
-same registry without appearing in this repository. Today the registry drives
-the forwarded environment, the local review fallback, and the implement model
-rule. A local run through this CLI still needs the backend's script in
-`backends/`; routing local runs and other callers through `resolve()` is the
-next step.
+same registry without appearing in this repository. A local run through this
+CLI resolves the harness for its role (`review` for `--kind review`,
+`implement` for `implement` and `passthrough`), so a backend serves only the
+roles it declares, and runs the backend's script in `backends/`. The remote
+runner's local fallback resolves the `review` role the same way. An adapter's
+`parse_review` and `detect_limit` let any other caller read the backend's
+output and limits without its own copy of that logic.
 
 The wire contracts in `contracts/` check a worker name's shape only, and a
 remote route accepts any worker name. The side that runs the job decides which
