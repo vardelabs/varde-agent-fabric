@@ -79,9 +79,9 @@ class RemoteEntrypointTests(unittest.TestCase):
             with self.subTest(model=invalid), self.assertRaises(ContractError):
                 ReviewRequest.from_dict({**legacy_payload, "model": invalid})
 
-    def test_unknown_harness_is_rejected_by_request_allowlist(self):
+    def test_malformed_harness_is_rejected_by_request_contract(self):
         with self.assertRaises(ContractError):
-            build_review_request(self.metadata(harness="llama-broker", target="remote"))
+            build_review_request(self.metadata(harness="Llama Broker", target="remote"))
 
     def test_remote_gemma_never_falls_back(self):
         metadata = self.metadata(harness="local-gemma", target="remote")

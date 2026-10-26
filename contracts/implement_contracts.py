@@ -18,21 +18,23 @@ class ContractError(ValueError):
 
 MAX_BYTES = 320 * 1024
 MAX_TASK_BYTES = 16 * 1024
-# The deployment's broker and gateway allowlists grant exact models; the contract only
-# bounds the provider/model shape, so a new OpenCode provider or model needs no fabric release.
-# An aggregating provider names a model by its vendor too, as in <provider>/<vendor>/<name>.
-OPENCODE_IMPLEMENT_MODEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}/(?:[a-z0-9][a-z0-9-]{0,31}/)?[a-z0-9][a-z0-9.-]{0,63}")
+# Shape only: the executing side decides which registered adapters may implement.
+WORKER_KIND = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 # A deployment may serve a job on a sibling route when the requested provider refuses it
 # before doing any work; the artifact then names both, so the caller can see who served it.
 FALLBACK_REASONS = frozenset({"rate-limit"})
 
 def _worker_model(worker_kind, model):
-    if worker_kind not in {"codex", "opencode"}:
+    if not isinstance(worker_kind, str) or not WORKER_KIND.fullmatch(worker_kind):
         raise ContractError("unsupported implement worker")
     if model is not None:
         _text(model, "model", 256)
-    if worker_kind == "opencode" and (not isinstance(model, str) or not OPENCODE_IMPLEMENT_MODEL.fullmatch(model)):
-        raise ContractError("unsupported OpenCode implement model")
+    from dispatch.adapters import ADAPTERS
+
+    adapter = ADAPTERS.get(worker_kind)
+    pattern = adapter.implement_model if adapter else None
+    if pattern is not None and (not isinstance(model, str) or not pattern.fullmatch(model)):
+        raise ContractError(f"unsupported {adapter.label} implement model")
 
 
 def _encoded(value: Any) -> bytes:

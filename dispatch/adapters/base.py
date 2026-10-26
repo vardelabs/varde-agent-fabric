@@ -1,4 +1,4 @@
-"""The registration shape every dispatch backend adapter declares."""
+"""The registration shape every model backend adapter declares."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import os
 import re
 from typing import TYPE_CHECKING
-
-from contracts.review_contracts import REVIEW_WORKER_KINDS
 
 if TYPE_CHECKING:
     from contracts.review_contracts import ReviewArtifact, ReviewRequest
@@ -21,6 +19,9 @@ LOCAL_REVIEW_CONTRACT = (
     "Return [] when there are no findings. Do not include prose or code fences."
 )
 
+ADAPTER_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+# A role is a plain name, so a new role needs no change here.
+_ROLE_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 # The prefix keeps an adapter from asking for PATH, HOME, or a provider key; the
 # reserved names are the core contract, which an adapter must not override.
 _FORWARDABLE_NAME = re.compile(r"DISPATCH_[A-Z0-9_]+")
@@ -44,7 +45,6 @@ LocalReviewRunner = Callable[["RemoteReviewMetadata", "ReviewRequest"], "ReviewA
 class LocalReviewFallback:
     """How a backend serves a remote review route locally when the gateway is unavailable."""
 
-    stamp: str
     run: LocalReviewRunner
     env: tuple[str, ...] = ()
 
@@ -54,21 +54,34 @@ class LocalReviewFallback:
 
 @dataclass(frozen=True)
 class Adapter:
-    """One backend: `dispatch/cli/backends/<name>.sh` plus what the dispatcher forwards to it."""
+    """One model backend and the roles it can serve, for every caller that resolves one."""
 
     name: str
+    roles: frozenset[str] = frozenset()
     env: tuple[str, ...] = ()
     local_review_fallback: LocalReviewFallback | None = None
+    # The model shape an implement request must name for this backend, when it constrains one.
+    implement_model: re.Pattern[str] | None = None
+    label: str = ""
 
     def __post_init__(self) -> None:
+        if not ADAPTER_NAME.fullmatch(self.name):
+            raise ValueError(f"adapter name {self.name!r} is invalid")
+        object.__setattr__(self, "roles", frozenset(self.roles))
+        invalid = sorted(role for role in self.roles if not _ROLE_NAME.fullmatch(role))
+        if invalid:
+            raise ValueError(f"adapter {self.name!r} declares invalid roles {invalid}")
         _check_env_names(self.env)
-        # The fallback builds a review request named after this backend, which the
-        # wire contract refuses unless it lists the worker.
-        if self.local_review_fallback is not None and self.name not in REVIEW_WORKER_KINDS:
-            raise ValueError(
-                f"adapter {self.name!r} has a local review fallback but contracts/review_contracts.py "
-                "does not accept it as a review worker"
-            )
+        if self.local_review_fallback is not None and "review" not in self.roles:
+            raise ValueError(f"adapter {self.name!r} has a local review fallback but does not declare the review role")
+        if self.implement_model is not None and "implement" not in self.roles:
+            raise ValueError(f"adapter {self.name!r} constrains implement models but does not declare the implement role")
+        if not self.label:
+            object.__setattr__(self, "label", self.name)
+
+    @property
+    def fallback_stamp(self) -> str:
+        return f"cluster-unavailable-local-{self.name}"
 
 
 def caller_base_env(workdir: str) -> dict[str, str]:

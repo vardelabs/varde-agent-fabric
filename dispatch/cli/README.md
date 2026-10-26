@@ -176,8 +176,8 @@ deployment concern.
 
 ## Remote implementation
 
-A route with `target: remote`, `kinds: ["implement"]`, default harness `codex`,
-and fallback policy `none` sends only explicitly named relative files:
+A route with `target: remote`, `kinds: ["implement"]`, any harness the remote
+side runs, and fallback policy `none` sends only explicitly named relative files:
 
 Implementation tasks are additionally limited to 16 KiB, matching
 `implement-request.v1`. For all remote routes, `DISPATCH_TIMEOUT_SECONDS` must
@@ -203,29 +203,43 @@ Remote reviews retain their existing route.
 
 ## Adding a Backend
 
-A backend is two files and one registration line. No other part of the
-dispatcher changes.
+`dispatch/adapters/` is the one registry for every role that calls a model,
+in this repository and in a deployment that imports it. A backend is two files
+and one registration line. No other part of the dispatcher changes.
 
 1. `dispatch/cli/backends/<name>.sh`, executable. It reads the runtime contract
    above from its environment, runs the tool, and writes one artifact to
    `DISPATCH_OUTPUT`. It exits 0 on success, 75 when the provider's usage limit
    is reached, and any other non-zero status on failure.
-2. `dispatch/adapters/<module>.py`, defining `ADAPTER = Adapter(name="<name>", env=(...))`.
-   `env` lists the caller variables the dispatcher forwards to this backend
-   only. Each must start with `DISPATCH_` and must not be a contract variable.
-   Set `local_review_fallback` only when the backend can serve a remote review
-   route locally while the gateway is unavailable; it names the fallback stamp,
-   the runner, and the variables that runner needs.
+2. `dispatch/adapters/<module>.py`, defining
+   `ADAPTER = Adapter(name="<name>", roles=frozenset({...}), env=(...))`.
+   - `roles` names what the backend can serve, such as `review`, `implement`,
+     or `write`. A role is a plain name, so a new role needs no core change.
+   - `env` lists the caller variables the dispatcher forwards to this backend
+     only. Each must start with `DISPATCH_` and must not be a contract variable.
+   - `local_review_fallback` is set only when the backend can serve a remote
+     review route locally while the gateway is unavailable. It needs the
+     `review` role, and its stamp is `cluster-unavailable-local-<name>`.
+   - `implement_model` bounds the model an implement request may name for this
+     backend. It needs the `implement` role.
 3. Add the module to `_REGISTERED` in `dispatch/adapters/__init__.py`.
+
+`adapters.resolve(role, harness)` returns a backend only for a role it
+declares. A deployment registers a private backend with
+`adapters.register(Adapter(...))` from its own module, so the backend joins the
+same registry without appearing in this repository. Today the registry drives
+the forwarded environment, the local review fallback, and the implement model
+rule. A local run through this CLI still needs the backend's script in
+`backends/`; routing local runs and other callers through `resolve()` is the
+next step.
+
+The wire contracts in `contracts/` check a worker name's shape only, and a
+remote route accepts any worker name. The side that runs the job decides which
+of its workers may serve it, so a new backend can fill any role, a reviewer slot
+included, with no contract change.
 
 Copy the fake-CLI pattern in `tests/dispatch_cli/test-varde-agent-dispatch.sh`
 to test the backend without a provider account or network access.
-
-The remote wire contracts in `contracts/` list the workers the remote gateway
-runs. A local backend needs no change there unless it sets
-`local_review_fallback`: a fallback review request names the backend as its
-worker, so the backend must be a review worker in
-`contracts/review_contracts.py`, and registration refuses it otherwise.
 
 ## Public boundary
 

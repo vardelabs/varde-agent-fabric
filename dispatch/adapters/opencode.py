@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -139,12 +140,20 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         local_output.unlink(missing_ok=True)
 
 
+# The deployment's broker and gateway allowlists grant exact models; this only
+# bounds the provider/model shape, so a new OpenCode provider or model needs no
+# fabric release. An aggregating provider names a model by its vendor too, as in
+# <provider>/<vendor>/<name>.
+IMPLEMENT_MODEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}/(?:[a-z0-9][a-z0-9-]{0,31}/)?[a-z0-9][a-z0-9.-]{0,63}")
+
 ADAPTER = Adapter(
     name="opencode",
+    roles=frozenset({"review", "implement"}),
     env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH", "DISPATCH_OPENCODE_ALLOW_WRITE"),
     local_review_fallback=LocalReviewFallback(
-        stamp="cluster-unavailable-local-opencode",
         run=run_local_review,
         env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH"),
     ),
+    implement_model=IMPLEMENT_MODEL,
+    label="OpenCode",
 )

@@ -57,6 +57,8 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
 
 ADAPTER = Adapter(
     name="codex",
+    roles=frozenset({"review", "implement"}),
     env=("DISPATCH_CODEX_SANDBOX",),
-    local_review_fallback=LocalReviewFallback(stamp="cluster-unavailable-local-codex", run=run_local_review),
+    local_review_fallback=LocalReviewFallback(run=run_local_review),
+    label="Codex",
 )
