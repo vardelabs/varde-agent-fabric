@@ -25,9 +25,9 @@ def run_with_remote_fallback(
     try:
         return submit()
     except GatewayUnavailable:
-        policy = adapters.local_review_fallback(request.worker_kind)
-        if policy is None or local_fallback is None:
+        adapter = adapters.ADAPTERS.get(request.worker_kind)
+        if adapter is None or adapter.local_review_fallback is None or local_fallback is None:
             raise
         artifact = local_fallback()
         validate_fallback_artifact(artifact, request)
-        return replace(artifact, fallback=policy.stamp)
+        return replace(artifact, fallback=adapter.fallback_stamp)
