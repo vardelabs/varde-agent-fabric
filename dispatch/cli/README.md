@@ -167,7 +167,14 @@ The `gemini` backend runs the Gemini CLI in headless mode
 (`--prompt`, `--output-format json`) and writes the final response text to the
 output. It needs an explicit model id, which must be the full id the CLI
 reports, not an alias. The prompt and the review diff go to the CLI on stdin, never in its
-arguments.
+arguments. The input starts with a fixed line, because the CLI runs input that
+starts with `/` as a command, and an untrusted workdir's commands still load.
+
+The CLI gets only the environment the adapter builds, under `env -i`: `PATH`,
+the per-run home, a temp directory inside the run's private scratch, and the
+settings paths below. A proxy, `NODE_OPTIONS`, or an endpoint override never
+reaches it. The CLI writes the whole chat to its temp directory on an API error
+and never removes it, so that copy goes with the scratch.
 
 It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
@@ -186,7 +193,11 @@ owns the file and every parent directory. So the adapter points both system
 paths (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`)
 at files in the private scratch that never exist, and neither loads. A run never
 adds workspace settings above the user settings (see below), so the adapter's
-settings are final. They set these values:
+settings are final, except against a root-owned system policy directory
+(`/etc/gemini-cli/policies`, or `/Library/Application Support/GeminiCli/policies`
+on macOS). The CLI reads it from a fixed path, and its rules rank above any the
+adapter can set, so a run refuses while it holds a policy. The settings set
+these values:
 
 - `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
   or any other auth type. The dispatcher also forwards no key variable.
@@ -197,7 +208,16 @@ settings are final. They set these values:
 - `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
   policy allows both, and text in a reviewed diff could steer workdir content
   into a search or a fetch.
+- `tools.exclude` for `run_shell_command`, `enter_plan_mode`, and
+  `exit_plan_mode`, and `general.plan.enabled` off. Leaving plan mode in a
+  headless run switches it to `yolo`, which allows every tool, the shell
+  included, so no run can plan or reach a shell.
 - Folder trust prompts and auto-update turned off.
+
+Two sources stay outside the adapter's reach. A Workspace admin of the signed-in
+account can require MCP servers through remote admin controls; use a personal
+account. And `implement` can write anywhere in the worktree, `.git` included, so
+the caller should treat the worktree's git metadata as untrusted after a run.
 
 A `review` runs in the workdir with it untrusted
 (`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and

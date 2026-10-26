@@ -34,7 +34,8 @@ state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")")"
   printf 'cwd=%s\n' "$PWD"
   printf 'home=%s cli_home=%s\n' "$HOME" "${GEMINI_CLI_HOME:-}"
   printf 'trust=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-}"
-  printf 'keys=%s\n' "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${DISPATCH_UNSAFE_SENTINEL:-}"
+  printf 'keys=%s\n' "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${DISPATCH_UNSAFE_SENTINEL:-}${NODE_OPTIONS:-}${HTTPS_PROXY:-}"
+  [[ "${TMPDIR:-}" == "$(dirname -- "$HOME")/tmp" && -d "$TMPDIR" ]] && printf 'tmpdir=isolated\n' || printf 'tmpdir=%s\n' "${TMPDIR:-}"
   for system_path in "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}" "${GEMINI_CLI_SYSTEM_DEFAULTS_PATH:-}"; do
     [[ "$system_path" == "$(dirname -- "$HOME")"/* && ! -e "$system_path" ]] && printf 'system_path=isolated\n' \
       || printf 'system_path=%s\n' "$system_path"
@@ -155,9 +156,12 @@ check grep -qxF 'keys=' "$record"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 check grep -qF '"folderTrust":{"enabled":false}' "$record"
 check grep -qF '"advanced":{"ignoreLocalEnv":true}' "$record"
-check grep -qF '"tools":{"exclude":["google_web_search","web_fetch"],"disableLLMCorrection":true}' "$record"
+check grep -qF '"tools":{"exclude":["google_web_search","web_fetch","run_shell_command","enter_plan_mode","exit_plan_mode"],"disableLLMCorrection":true}' "$record"
 check grep -qF '"experimental":{"enableAgents":false}' "$record"
-check grep -qF 'stdin=private-task-sentinel' "$record"
+check grep -qxF 'stdin=Task for this run:' "$record"
+check grep -qxF 'private-task-sentinel' "$record"
+check grep -qxF 'tmpdir=isolated' "$record"
+check grep -qF '"plan":{"enabled":false}' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
 
@@ -167,6 +171,27 @@ default_output="$(umask 022; HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bi
   DISPATCH_MODEL="$MODEL" TMPDIR="$TMP" "$CLI" --harness gemini --kind review --diff "$TMP/change.diff" \
   --task t --workdir "$TMP/work" 2>/dev/null)"
 check test "$(stat -c '%a' "$default_output" 2>/dev/null || stat -f '%Lp' "$default_output")" = 600
+
+# Run outside the dispatcher, the backend still hands the CLI none of its caller's
+# environment, so a proxy or NODE_OPTIONS never reaches it.
+printf '%s' ok > "$state/scenario"
+(cd "$TMP/work" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" \
+  DISPATCH_OUTPUT="$TMP/out-direct-env" NODE_OPTIONS=--require=/must-not-load HTTPS_PROXY=http://must-not-proxy \
+  "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1)
+check grep -qxF 'keys=' "$record"
+
+# A system policy directory ranks above every policy the adapter can set, so a
+# run refuses while one holds a policy.
+mkdir -p "$TMP/system-policies"
+printf '[[rule]]\ntoolName = "run_shell_command"\ndecision = "allow"\n' > "$TMP/system-policies/allow.toml"
+policy_status=0
+(cd "$TMP/work" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" \
+  DISPATCH_OUTPUT="$TMP/out-policy" DISPATCH_GEMINI_EXTRA_POLICY_DIR="$TMP/system-policies" \
+  "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>"$TMP/out-policy.stderr") || policy_status=$?
+check test "$policy_status" -eq 2
+check grep -qF 'system policies' "$TMP/out-policy.stderr"
 
 run quota out-quota --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 75
