@@ -37,6 +37,7 @@ state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/scenario")")"
   printf 'system_settings=%s\n' "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}"
   printf 'settings=%s\n' "$(tr -d ' \n' < "$HOME/.gemini/settings.json")"
   printf 'creds=%s\n' "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")"
+  printf 'scratch_mode=%s\n' "$(stat -c '%a' "$(dirname -- "$HOME")" 2>/dev/null || stat -f '%Lp' "$(dirname -- "$HOME")")"
   printf 'stdin=%s\n' "$(cat)"
 } > "$state/record"
 model=""
@@ -64,6 +65,7 @@ case "$(cat "$state/scenario")" in
   downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
   no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
   all-failed) answer "text" "$(turn "$model" main 2 2)" ;;
+  slow) sleep 6 ;;
   text-auth)
     printf 'Warning: something unrelated\nError authenticating: FatalAuthenticationError: Manual authorization is required\n' >&2
     exit 41 ;;
@@ -102,6 +104,7 @@ check grep -qxF "home=$run_home cli_home=$run_home" "$record"
 check grep -qxF "creds=$TMP/gemini-home/.gemini/oauth_creds.json" "$record"
 check_not grep -qF 'gemini-api-key' "$record"
 check grep -qxF 'system_settings=' "$record"
+check grep -qxF 'scratch_mode=700' "$record"
 check grep -qxF "cwd=$TMP/work" "$record"
 check_not grep -qF -- '--include-directories' "$record"
 check grep -qxF 'keys=' "$record"
@@ -170,6 +173,24 @@ for scenario in no-main all-failed; do
   check grep -qF 'answered no main turn' "$TMP/out-$scenario.stderr"
   check_not grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
 done
+
+# The per-run home holds links to the sign-in: a finished run and a run ended by
+# TERM both remove it.
+mkdir -p "$TMP/runs"
+run ok out-cleanup --kind review --diff "$TMP/change.diff" --task t
+printf '%s' slow > "$state/scenario"
+TMPDIR="$TMP/runs" HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind review --diff "$TMP/change.diff" --task t \
+  --workdir "$TMP/work" --output "$TMP/out-slow" >/dev/null 2>&1 &
+slow_pid=$!
+sleep 1
+check test -n "$(find "$TMP/runs" -maxdepth 1 -name 'gemini-dispatch.*')"
+kill -TERM "$slow_pid"
+slow_status=0
+wait "$slow_pid" || slow_status=$?
+check test "$slow_status" -eq 143
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -z "$(find "$TMP/runs" -maxdepth 1 -name 'gemini-dispatch.*')" ]] && break; sleep 0.5; done
+check test -z "$(find "$TMP/runs" -maxdepth 1 -name 'gemini-dispatch.*')"
 
 # A fatal error printed as text, as a missing sign-in is, is still named.
 run text-auth out-text-auth --kind review --diff "$TMP/change.diff" --task t

@@ -57,8 +57,12 @@ if [[ -n "${DISPATCH_DIFF:-}" ]]; then
 fi
 unset DISPATCH_TASK DISPATCH_DIFF
 
+# mktemp -d makes the scratch directory 0700. It holds links to the sign-in, so
+# a signal exits through the EXIT trap too and it never outlives the run.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")"
 trap 'rm -rf -- "$scratch"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # The prompt goes on stdin, never in process arguments that other users can read.
 printf '%s' "$prompt" > "$scratch/prompt"
 
