@@ -176,8 +176,8 @@ deployment concern.
 
 ## Remote implementation
 
-A route with `target: remote`, `kinds: ["implement"]`, default harness `codex`,
-and fallback policy `none` sends only explicitly named relative files:
+A route with `target: remote`, `kinds: ["implement"]`, any harness the remote
+side runs, and fallback policy `none` sends only explicitly named relative files:
 
 Implementation tasks are additionally limited to 16 KiB, matching
 `implement-request.v1`. For all remote routes, `DISPATCH_TIMEOUT_SECONDS` must
@@ -224,14 +224,19 @@ and one registration line. No other part of the dispatcher changes.
      backend. It needs the `implement` role.
 3. Add the module to `_REGISTERED` in `dispatch/adapters/__init__.py`.
 
-A caller finds a backend with `adapters.resolve(role, harness)`, which refuses
-a harness that does not declare the role. A deployment registers a private
-backend with `adapters.register(Adapter(...))` from its own module, so the
-backend joins the same registry without appearing in this repository.
+`adapters.resolve(role, harness)` returns a backend only for a role it
+declares. A deployment registers a private backend with
+`adapters.register(Adapter(...))` from its own module, so the backend joins the
+same registry without appearing in this repository. Today the registry drives
+the forwarded environment, the local review fallback, and the implement model
+rule. A local run through this CLI still needs the backend's script in
+`backends/`; routing local runs and other callers through `resolve()` is the
+next step.
 
-The wire contracts in `contracts/` check a worker name's shape only. The side
-that runs the job decides which registered backends may serve it, so a new
-backend can fill any role, a reviewer slot included, with no contract change.
+The wire contracts in `contracts/` check a worker name's shape only, and a
+remote route accepts any worker name. The side that runs the job decides which
+of its workers may serve it, so a new backend can fill any role, a reviewer slot
+included, with no contract change.
 
 Copy the fake-CLI pattern in `tests/dispatch_cli/test-varde-agent-dispatch.sh`
 to test the backend without a provider account or network access.
