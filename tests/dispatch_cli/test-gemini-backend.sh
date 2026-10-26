@@ -57,6 +57,10 @@ case "$(cat "$state/scenario")" in
   retry-logged)
     printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
     answer "review text" "$(turn "$model" main 2 1)" ;;
+  retry-then-fail)
+    printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
+    printf '[ERROR] {"session_id":"s","error":{"type":"FatalToolExecutionError","message":"No space left.","code":"NO_SPACE_LEFT"}}\n' >&2
+    exit 1 ;;
   subagent-other) answer "relayed text" "$(turn "$model" main 1 0),$(turn fallback-model subagent 1 0)" ;;
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
@@ -117,7 +121,7 @@ check grep -qxF 'keys=' "$record"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 check grep -qF '"folderTrust":{"enabled":false}' "$record"
 check grep -qF '"advanced":{"ignoreLocalEnv":true}' "$record"
-check grep -qF '"tools":{"exclude":["google_web_search","web_fetch"]}' "$record"
+check grep -qF '"tools":{"exclude":["google_web_search","web_fetch"],"disableLLMCorrection":true}' "$record"
 check grep -qF '"experimental":{"enableAgents":false}' "$record"
 check grep -qF 'stdin=private-task-sentinel' "$record"
 check grep -qF 'diff body' "$record"
@@ -142,6 +146,12 @@ for scenario in quota-type-only quota-code-only; do
   check test "$status" -eq 75
   check grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
 done
+
+# A run that fails for another reason is not a limit, though a retry logged a 429.
+run retry-then-fail out-retry-then-fail --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 1
+check grep -qF 'FatalToolExecutionError' "$TMP/out-retry-then-fail.stderr"
+check_not grep -qF 'limit reached' "$TMP/out-retry-then-fail.stderr"
 
 # A non-quota error fails loudly with the CLI's status, never as a limit.
 run not-found out-not-found --kind review --diff "$TMP/change.diff" --task t
@@ -263,9 +273,22 @@ mkdir -p "$TMP/other-user-bin"
 printf '#!/bin/sh\necho 65533\n' > "$TMP/other-user-bin/id"
 chmod +x "$TMP/other-user-bin/id"
 implement_refused other-owner 'owned by this user or root' "$TMP/work" "$TMP/other-user-bin:$TMP/bin:/usr/bin:/bin"
-# The CLI splits an included directory on commas, so such a workdir is refused.
-mkdir -p "$TMP/work,extra"
+# The CLI splits an included directory on commas and trims it, so such a
+# workdir is refused.
+mkdir -p "$TMP/work,extra" "$TMP/work-space " "$TMP/work-space /inner"
 implement_refused comma-workdir 'no comma' "$TMP/work,extra"
+implement_refused space-workdir 'no trailing space' "$TMP/work-space "
+implement_refused space-parent 'no trailing space' "$TMP/work-space /inner"
+# The CLI resolves .. without following links, so it gets the resolved workdir.
+mkdir -p "$TMP/work/inner"
+ln -s "$TMP/work/inner" "$TMP/inner-link"
+printf '%s' ok > "$state/scenario"
+status=0
+HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind implement --task t \
+  --workdir "$TMP/inner-link/.." --output "$TMP/out-dotdot" >/dev/null 2>&1 || status=$?
+check test "$status" -eq 0
+check grep -qE -- "--include-directories $TMP/work( |$)" "$record"
 check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 

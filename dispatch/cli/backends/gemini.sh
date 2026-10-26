@@ -93,7 +93,7 @@ cat > "$run_home/.gemini/settings.json" <<'EOF'
   },
   "general": {"enableAutoUpdate": false, "enableAutoUpdateNotification": false},
   "advanced": {"ignoreLocalEnv": true},
-  "tools": {"exclude": ["google_web_search", "web_fetch"]},
+  "tools": {"exclude": ["google_web_search", "web_fetch"], "disableLLMCorrection": true},
   "experimental": {"enableAgents": false}
 }
 EOF
@@ -123,14 +123,16 @@ require_safe_parents() {
 }
 
 if [[ "$trust_folder" == true ]]; then
-  # The CLI splits --include-directories on commas and expands a leading ~, so
-  # such a workdir would add another writable root.
-  [[ "$DISPATCH_WORKDIR" = /* && "$DISPATCH_WORKDIR" != *,* ]] \
-    || fail 'Gemini implementation needs an absolute workdir with no comma'
+  # The CLI splits --include-directories on commas, trims each part, and resolves
+  # .. without following links, so it gets the resolved workdir, and one whose
+  # name it would split or trim is refused.
+  workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
+  [[ "$workdir_real" != *,* && "$workdir_real" != *[[:space:]] && "$workdir_real" != *[[:space:]]/* ]] \
+    || fail 'Gemini implementation needs a workdir path with no comma and no trailing space in a name'
   implement_folder="$(mktemp -d "$gemini_home_real/.dispatch-folder.XXXXXX")"
   require_safe_parents "$implement_folder"
   folder="$implement_folder"
-  include=(--include-directories "$DISPATCH_WORKDIR")
+  include=(--include-directories "$workdir_real")
 else
   folder="$DISPATCH_WORKDIR"
   include=()

@@ -55,6 +55,16 @@ def _first_error(objects: list[dict]) -> dict | None:
     return None
 
 
+def _final_error(objects: list[dict]) -> dict | None:
+    """The CLI's own error report, never an earlier retry it logged.
+
+    The report carries a session_id; a logged retry does not. Without one, the
+    last error printed is the one the run ended on.
+    """
+    reports = [value for value in objects if "session_id" in value]
+    return _first_error(reports) or _first_error(objects[::-1])
+
+
 # Some fatal errors, such as a missing sign-in, are printed as text, not JSON.
 # Only the CLI's own Fatal...Error line is quoted, never other stderr text.
 _FATAL_LINE = re.compile(r"^.*\bFatal\w*Error\b.*$", re.MULTILINE)
@@ -115,7 +125,9 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
     """Return the response text, or raise RunFailed."""
     # A run that exits 0 may still log an error its own retry cleared, so stderr
     # is read for an error report only when the run failed.
-    error = _first_error(_json_objects(stdout) + (_json_objects(stderr) if cli_status != 0 else []))
+    error = _first_error(_json_objects(stdout))
+    if error is None and cli_status != 0:
+        error = _final_error(_json_objects(stderr))
     if error is not None and _is_quota_error(error):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
