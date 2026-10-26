@@ -733,6 +733,7 @@ case "$DISPATCH_TASK" in
   broken) exit 7 ;;
   quota) printf 'fatal: quota exhausted\n' >&2; exit 9 ;;
   mentions-quota) printf 'fatal: quota exhausted\nfatal: disk full\n' >&2; exit 9 ;;
+  stdout-quota) printf 'fatal: quota exhausted\n'; exit 9 ;;
 esac
 { printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
 EOF
@@ -779,6 +780,14 @@ seam_status=0
   --output "$TMP/out-seam-mention" >"$TMP/stdout-seam-mention" 2>"$TMP/err-seam-mention" || seam_status=$?
 check test "$seam_status" -eq 9
 check_not grep -qF 'limit reached' "$TMP/err-seam-mention"
+
+# Only stderr reaches the limit detector; the backend's stdout stays on the caller's stdout.
+seam_status=0
+"$SEAM_CLI" --harness example-backend --kind implement --task stdout-quota --workdir "$TMP/work" \
+  --output "$TMP/out-seam-stdout" >"$TMP/stdout-seam-stdout" 2>"$TMP/err-seam-stdout" || seam_status=$?
+check test "$seam_status" -eq 9
+check grep -qxF 'fatal: quota exhausted' "$TMP/stdout-seam-stdout"
+check_not grep -qF 'fatal: quota exhausted' "$TMP/err-seam-stdout"
 
 # A registered backend serves only the roles it declares.
 seam_status=0
