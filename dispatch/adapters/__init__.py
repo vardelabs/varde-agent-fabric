@@ -33,5 +33,5 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] in {"env", "fallback-env"}:
         print("\n".join(forwarded_env(argv[1], fallback=argv[0] == "fallback-env")))
         return 0
-    print("usage: dispatch/adapters/__main__.py env|fallback-env HARNESS", file=sys.stderr)
+    print("usage: dispatch/cli/adapter_env.py env|fallback-env HARNESS", file=sys.stderr)
     return 2

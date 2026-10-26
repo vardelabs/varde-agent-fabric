@@ -84,10 +84,13 @@ runtime contract to a backend:
   `DISPATCH_OPENCODE_*` settings to `opencode`). A backend never receives
   another backend's variables.
 
-A backend exits 75 when its provider reports that a usage limit is reached.
-The dispatcher prints `limit reached` to stderr, writes no output, and exits 75,
-so a caller can wait or fall back instead of treating the run as a failure. Any
-other non-zero backend status is returned unchanged.
+A backend that detects its provider's usage limit exits 75. The dispatcher
+then prints `limit reached` to stderr, writes no output, and exits 75, so a
+caller can wait or fall back instead of treating the run as a failure. Any other
+non-zero backend status is returned unchanged. The `codex` and `opencode`
+backends do not detect a usage limit; they return their CLI's own status. On a
+remote route's local fallback, a status of 75 is a fallback failure like any
+other.
 
 The caller owns authentication, deployment policy, and remote transport. When
 `--model` is supplied, `--routes` provides the portable model-first registry;

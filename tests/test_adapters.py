@@ -30,6 +30,10 @@ class AdapterRegistrationTests(unittest.TestCase):
             with self.subTest(harness=name):
                 self.assertLessEqual(set(adapters.forwarded_env(name, fallback=True)), set(adapter.env))
 
+    def test_opencode_fallback_review_never_gets_write_permission(self):
+        self.assertIn("DISPATCH_OPENCODE_ALLOW_WRITE", adapters.forwarded_env("opencode"))
+        self.assertNotIn("DISPATCH_OPENCODE_ALLOW_WRITE", adapters.forwarded_env("opencode", fallback=True))
+
     def test_each_registered_adapter_has_an_executable_backend_script(self):
         backends = Path(__file__).resolve().parents[1] / "dispatch" / "cli" / "backends"
         for name in adapters.ADAPTERS:

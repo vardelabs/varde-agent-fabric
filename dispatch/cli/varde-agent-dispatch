@@ -47,8 +47,10 @@ LIMIT_REACHED_STATUS=75
 forward_adapter_env() {
   local -n forward_target="$1"
   local names name
-  # Run by path, not -m: -m would put the caller's cwd ahead of PYTHONPATH.
-  names="$(PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/../adapters/__main__.py" "$2" "$3")" \
+  # Run by path from this directory, which holds no Python modules: -m would put
+  # the caller's cwd first on sys.path, and a path in dispatch/adapters/ would let
+  # an adapter module shadow the standard library.
+  names="$(PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/adapter_env.py" "$2" "$3")" \
     || fail "could not read the adapter registration for $3" 3
   while IFS= read -r name; do
     if [[ -n "$name" && -n "${!name:-}" ]]; then forward_target+=("$name=${!name}"); fi
