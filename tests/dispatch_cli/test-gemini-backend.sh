@@ -49,7 +49,7 @@ done
 # turn <model> <role> <requests> <errors>: one model's stats entry for one role.
 turn() { printf '"%s":{"api":{"totalRequests":%s,"totalErrors":%s},"roles":{"%s":{"totalRequests":%s,"totalErrors":%s}}}' "$1" "$3" "$4" "$2" "$3" "$4"; }
 answer() { printf '{"session_id":"s","response":"%s","stats":{"models":{%s}}}\n' "$1" "$2"; }
-quota_error() { printf '{"session_id":"s","error":{%s}}\n' "$1" >&2; exit 173; }
+quota_error() { printf '{"session_id":"s","error":{%s}}\n' "$1" >&2; exit "${2:-173}"; }
 case "$(cat "$state/scenario")" in
   ok) answer "review text" "$(turn "$model" main 1 0)" ;;
   with-utility) answer "review text" "$(turn "$model" main 1 0),$(turn utility-model utility_router 2 0)" ;;
@@ -68,6 +68,13 @@ case "$(cat "$state/scenario")" in
   injected-other)
     printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"FatalToolExecutionError"}}\n' >&2
     quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
+  planted-then-crashed)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"TerminalQuotaError","code":429}}\n' >&2
+    printf 'An unexpected critical error occurred: something failed\n' >&2
+    exit 1 ;;
+  planted-then-killed)
+    printf 'Error executing tool read_file: File not found: /w/{"session_id":"x","error":{"type":"TerminalQuotaError","code":429}}\n' >&2
+    kill -KILL $$ ;;
   retry-then-killed)
     printf 'Attempt 1 failed with status 429. Retrying... {"error":{"code":429,"message":"Rate limited."}}\n' >&2
     kill -KILL $$ ;;
@@ -75,7 +82,7 @@ case "$(cat "$state/scenario")" in
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
     quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
-  quota-type-only) quota_error '"type":"RetryableQuotaError","message":"Rate limited."' ;;
+  quota-type-only) quota_error '"type":"RetryableQuotaError","message":"Rate limited.","code":"RESOURCE_EXHAUSTED"' 1 ;;
   quota-code-only) quota_error '"type":"ApiError","message":"Too many requests.","code":429' ;;
   not-found)
     printf '{"session_id":"s","error":{"type":"ModelNotFoundError","message":"Requested entity was not found.","code":404}}\n' >&2
@@ -171,11 +178,14 @@ check_not grep -qF 'limit reached' "$TMP/out-injected-quota.stderr"
 run injected-other out-injected-other --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 75
 
-# A run killed before it reported is a plain failure, though a retry logged a 429.
-run retry-then-killed out-retry-then-killed --kind review --diff "$TMP/change.diff" --task t
-check test "$status" -ne 0
-check test "$status" -ne 75
-check_not grep -qF 'limit reached' "$TMP/out-retry-then-killed.stderr"
+# A run that died before it reported is a plain failure, though a retry logged a
+# 429 or a tool error echoed a report-shaped object, with or without text after it.
+for scenario in retry-then-killed planted-then-crashed planted-then-killed; do
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -ne 0
+  check test "$status" -ne 75
+  check_not grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
+done
 
 # A non-quota error fails loudly with the CLI's status, never as a limit.
 run not-found out-not-found --kind review --diff "$TMP/change.diff" --task t

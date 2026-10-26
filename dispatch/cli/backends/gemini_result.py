@@ -30,10 +30,10 @@ class RunFailed(Exception):
         self.status = status
 
 
-def _json_objects(text: str) -> list[dict]:
-    """Every top-level JSON object in text, which may also hold plain log lines."""
+def _json_spans(text: str) -> list[tuple[dict, int]]:
+    """Every top-level JSON object in text with the offset where it ends."""
     decoder = json.JSONDecoder()
-    objects: list[dict] = []
+    spans: list[tuple[dict, int]] = []
     index = text.find("{")
     while index != -1:
         try:
@@ -42,9 +42,14 @@ def _json_objects(text: str) -> list[dict]:
             index = text.find("{", index + 1)
             continue
         if isinstance(value, dict):
-            objects.append(value)
+            spans.append((value, end))
         index = text.find("{", end)
-    return objects
+    return spans
+
+
+def _json_objects(text: str) -> list[dict]:
+    """Every top-level JSON object in text, which may also hold plain log lines."""
+    return [value for value, _ in _json_spans(text)]
 
 
 def _first_error(objects: list[dict]) -> dict | None:
@@ -55,16 +60,22 @@ def _first_error(objects: list[dict]) -> dict | None:
     return None
 
 
-def _final_error(objects: list[dict]) -> dict | None:
-    """The CLI's own error report, printed last, never a retry it logged.
+def _final_error(stderr: str) -> dict | None:
+    """The CLI's own error report, never a retry it logged or an echoed object.
 
-    The report carries a session_id; a logged retry does not. Text the model
-    steers, such as a tool error echoing a path, can print an object shaped like
-    a report earlier, so only the last one counts. A run killed before it could
-    report has none, and fails without a class.
+    The CLI writes its report, which carries a session_id, and exits at once, so
+    a real report ends stderr. Text the model steers, such as a tool error that
+    echoes a path, can print an object shaped like a report, so one followed by
+    anything else is not the report. A run that died before reporting has none,
+    and fails without a class.
     """
-    reports = [value for value in objects if "session_id" in value]
-    return _first_error(reports[::-1])
+    spans = _json_spans(stderr)
+    if not spans:
+        return None
+    value, end = spans[-1]
+    if stderr[end:].strip() or "session_id" not in value:
+        return None
+    return _first_error([value])
 
 
 # Some fatal errors, such as a missing sign-in, are printed as text, not JSON.
@@ -79,6 +90,12 @@ def _fatal_line(stderr: str) -> str:
 
 def _is_quota_error(error: dict) -> bool:
     return error.get("type") in QUOTA_ERROR_TYPES or error.get("code") == QUOTA_HTTP_STATUS
+
+
+def _reported_status(error: dict) -> int:
+    """The status the CLI exits with after printing this report: its numeric code, else 1."""
+    code = error.get("code")
+    return code % 256 if isinstance(code, int) and not isinstance(code, bool) else 1
 
 
 def _models(stats: object) -> dict:
@@ -129,8 +146,10 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
     # is read for an error report only when the run failed.
     error = _first_error(_json_objects(stdout))
     if error is None and cli_status != 0:
-        error = _final_error(_json_objects(stderr))
-    if error is not None and _is_quota_error(error):
+        error = _final_error(stderr)
+    # The CLI exits with the code its report carries. A planted object at the end
+    # of stderr from a run that died another way does not match it.
+    if error is not None and _is_quota_error(error) and (cli_status == 0 or _reported_status(error) == cli_status):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
         detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else _fatal_line(stderr)
