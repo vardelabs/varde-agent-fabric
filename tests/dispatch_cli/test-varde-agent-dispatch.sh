@@ -720,11 +720,11 @@ import sys
 
 registry = pathlib.Path(sys.argv[1])
 registry.write_text(registry.read_text(encoding="utf-8").replace(
-    "_REGISTERED = (codex, opencode)\n",
-    "from dispatch.adapters import example_backend\n_REGISTERED = (codex, opencode, example_backend)\n",
+    "\n_REGISTERED = (",
+    "\nfrom dispatch.adapters import example_backend\n_REGISTERED = (example_backend, ",
 ), encoding="utf-8")
 EOF
-check grep -qF 'example_backend)' "$SEAM/dispatch/adapters/__init__.py"
+check grep -qF '_REGISTERED = (example_backend, ' "$SEAM/dispatch/adapters/__init__.py"
 cat > "$SEAM/dispatch/cli/backends/example-backend.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

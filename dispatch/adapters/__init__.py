@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import sys
 
-from dispatch.adapters import codex, opencode
+from dispatch.adapters import codex, gemini, opencode
 from dispatch.adapters.base import LIMIT_KINDS, Adapter, LocalReviewFallback
 
-_REGISTERED = (codex, opencode)
+_REGISTERED = (codex, opencode, gemini)
 
 ADAPTERS: dict[str, Adapter] = {module.ADAPTER.name: module.ADAPTER for module in _REGISTERED}
 

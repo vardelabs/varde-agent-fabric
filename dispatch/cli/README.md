@@ -63,7 +63,7 @@ dispatch/cli/varde-agent-dispatch \
   --output /path/to/review-artifact.json
 ```
 
-The current public backends are `codex` and `opencode`. The OpenCode adapter
+The current public backends are `codex`, `opencode`, and `gemini`. The OpenCode adapter
 supports CLI v2. Each backend is registered in `dispatch/adapters/`; see
 [Adding a Backend](#adding-a-backend). The dispatcher passes only an explicit
 runtime contract to a backend:
@@ -160,6 +160,54 @@ env -i HOME=/path/to/opencode-home PATH="$PATH" opencode auth list --standalone
 
 The prompt refuses a non-interactive stdin. Do not use `--answer` for a key:
 it puts the key in the process arguments, where other local users can read it.
+
+### Gemini CLI
+
+The `gemini` backend runs the Gemini CLI in headless mode
+(`--prompt`, `--output-format json`) and writes the final response text to the
+output. It needs an explicit model id, which must be the full id the CLI
+reports, not an alias. The prompt and the review diff go to the CLI on stdin, never in its
+arguments.
+
+It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
+dedicated home that holds that sign-in, outside the caller home, under the same
+rules as `DISPATCH_OPENCODE_HOME`. The adapter points `HOME` and
+`GEMINI_CLI_HOME` there, and writes a per-run system settings file that sets
+`security.auth.enforcedType` to `oauth-personal`. System settings take precedence over
+user and workspace settings, so the CLI refuses an API key or any other auth
+type, and the dispatcher forwards no key variable. The same file turns off
+auto-update and folder trust prompts.
+
+A `review` runs with the workdir untrusted (`GEMINI_CLI_TRUST_WORKSPACE=false`),
+so the workdir's `.gemini` settings, `.env` file, and extensions do not load.
+The CLI then runs in `default` approval mode, where headless mode refuses every
+tool that needs approval, so the review is read-only. `implement` and
+`passthrough` require `DISPATCH_GEMINI_ALLOW_WRITE=1`. They trust the workdir and
+run in `auto_edit` mode, so they load the workdir's own Gemini settings: use
+them only on a worktree you trust.
+
+The adapter reports "limit reached" (exit 75) in two cases:
+
+- The CLI's JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
+  code 429. The CLI raises these for a 429 from the model API, and exits with
+  status 173, which is 429 modulo 256.
+- The run succeeded, but the requested model's requests in `stats.models` all
+  failed and another model answered. The CLI switches models after a quota
+  error, so the switch is reported as a limit, and the other model's text is
+  not used.
+
+A run that succeeded without the requested model in `stats.models` fails with
+status 1. That means the CLI chose another model before it sent a request,
+for example because the account cannot use the requested one. Any other CLI
+failure returns the CLI's status with its error type and message.
+
+To sign in, run the CLI once, interactively, as the worker user, with the
+dedicated home. Choose "Sign in with Google" and finish the browser flow. The
+CLI stores the credential in the dedicated home.
+
+```text
+env -i HOME=/path/to/gemini-home GEMINI_CLI_HOME=/path/to/gemini-home PATH="$PATH" TERM="$TERM" gemini
+```
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
