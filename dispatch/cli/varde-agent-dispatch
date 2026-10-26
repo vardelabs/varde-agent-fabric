@@ -42,10 +42,22 @@ fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 # so an interrupted run leaves no copy of a backend's transcript behind.
 cleanup_files=()
 backend_job=""
+# Every process under a pid, deepest first, listed before any is signalled: a
+# killed parent reparents its children, and the provider CLI runs under the
+# backend script, where a signal to the script alone would leave it running.
+descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null); do
+    descendants "$child"
+    printf '%s\n' "$child"
+  done
+}
 on_signal() {
   if [[ -n "$backend_job" ]]; then
-    pkill -TERM -P "$backend_job" 2>/dev/null || true
-    kill -TERM "$backend_job" 2>/dev/null || true
+    local tree
+    tree="$(descendants "$backend_job")"
+    # shellcheck disable=SC2086
+    kill -TERM $tree "$backend_job" 2>/dev/null || true
   fi
   exit "$1"
 }

@@ -734,7 +734,7 @@ case "$DISPATCH_TASK" in
   quota) printf 'fatal: quota exhausted\n' >&2; exit 9 ;;
   mentions-quota) printf 'fatal: quota exhausted\nfatal: disk full\n' >&2; exit 9 ;;
   stdout-quota) printf 'fatal: quota exhausted\n'; exit 9 ;;
-  slow) printf 'transcript line\n' >&2; sleep 6 ;;
+  slow) printf 'transcript line\n' >&2; sleep 6 & printf '%s' "$!" > "$DISPATCH_WORKDIR/slow-child.pid"; wait ;;
 esac
 { printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
 EOF
@@ -803,6 +803,9 @@ sig_status=0
 wait "$sig_pid" || sig_status=$?
 check test "$sig_status" -eq 143
 check test $((SECONDS - sig_sent)) -le 2
+sleep 0.3
+check test -s "$TMP/work/slow-child.pid"
+check_not kill -0 "$(cat "$TMP/work/slow-child.pid")" 2>/dev/null
 check test -z "$(find "$TMP/sig" -name 'agent-dispatch-*' -o -name '.agent-dispatch-*')"
 
 # A registered backend serves only the roles it declares.
