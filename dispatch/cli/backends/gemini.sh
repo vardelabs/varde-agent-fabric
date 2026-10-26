@@ -60,7 +60,8 @@ unset DISPATCH_TASK DISPATCH_DIFF
 # mktemp -d makes the scratch directory 0700. It holds links to the sign-in, so
 # a signal exits through the EXIT trap too and it never outlives the run.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")"
-trap 'rm -rf -- "$scratch"' EXIT
+implement_folder=""
+trap 'rm -rf -- "$scratch" ${implement_folder:+"$implement_folder"}' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # The prompt goes on stdin, never in process arguments that other users can read.
@@ -69,20 +70,21 @@ printf '%s' "$prompt" > "$scratch/prompt"
 # A per-run home carries the adapter's own user settings. The CLI loads a system
 # settings file only when root owns it and every parent, which a worker cannot
 # arrange, but it always loads user settings, and an untrusted or empty folder
-# adds no workspace settings above them. The sign-in files are linked from the
-# dedicated home, so the stored login is used and a token refresh reaches it.
+# adds no workspace settings above them. Only the sign-in files are linked in
+# from the dedicated home; the CLI's session state stays in the per-run home and
+# goes with it. A refreshed token is not written back: the CLI replaces the link
+# with a new file, so each run refreshes from the stored sign-in.
 # ignoreLocalEnv stops the CLI reading a .env in or above the folder for its auth
 # variables, which it otherwise does even when the folder is untrusted. The web
 # tools are excluded because the read-only policy still allows them, and text in
 # a reviewed diff could steer workdir content into a search or a fetch.
 run_home="$scratch/home"
-mkdir -p "$run_home/.gemini" "$scratch/folder"
-if [[ -d "$DISPATCH_GEMINI_HOME/.gemini" ]]; then
-  for entry in "$DISPATCH_GEMINI_HOME/.gemini"/* "$DISPATCH_GEMINI_HOME/.gemini"/.[!.]*; do
-    [[ -e "$entry" && "$(basename -- "$entry")" != settings.json ]] || continue
-    ln -s -- "$entry" "$run_home/.gemini/"
-  done
-fi
+mkdir -p "$run_home/.gemini"
+for entry in "$DISPATCH_GEMINI_HOME/.gemini"/*; do
+  case "$(basename -- "$entry")" in
+    oauth_creds.json|google_accounts.json|installation_id|*credential*) ln -s -- "$entry" "$run_home/.gemini/" ;;
+  esac
+done
 cat > "$run_home/.gemini/settings.json" <<'EOF'
 {
   "security": {
@@ -99,8 +101,25 @@ export HOME="$run_home" GEMINI_CLI_HOME="$run_home"
 # With folder trust off, an untrusted headless run starts instead of refusing.
 export GEMINI_CLI_TRUST_WORKSPACE="$trust_folder"
 
+# In a trusted folder the CLI loads .gemini/.env from the folder and every parent,
+# unfiltered, before ignoreLocalEnv applies. So the implement folder lives in the
+# dedicated home, and the run refuses when any parent could let another user plant
+# that file or already holds one.
+require_safe_parents() {
+  local dir="$1" mode
+  while :; do
+    [[ ! -e "$dir/.gemini/.env" ]] || fail "Gemini implementation refuses $dir/.gemini/.env above its folder"
+    mode="$(stat -c '%a' -- "$dir" 2>/dev/null || stat -f '%Lp' -- "$dir")"
+    (( (8#$mode & 8#022) == 0 )) || fail "Gemini implementation needs every parent of its folder closed to group and others: $dir"
+    [[ "$dir" != / ]] || break
+    dir="$(dirname -- "$dir")"
+  done
+}
+
 if [[ "$trust_folder" == true ]]; then
-  folder="$scratch/folder"
+  implement_folder="$(mktemp -d "$gemini_home_real/.dispatch-folder.XXXXXX")"
+  require_safe_parents "$implement_folder"
+  folder="$implement_folder"
   include=(--include-directories "$DISPATCH_WORKDIR")
 else
   folder="$DISPATCH_WORKDIR"

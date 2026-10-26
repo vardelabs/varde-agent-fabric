@@ -173,10 +173,14 @@ It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
 rules as `DISPATCH_OPENCODE_HOME`.
 
-Each run gets its own home, which `HOME` and `GEMINI_CLI_HOME` point to. Its
-`.gemini/settings.json` is the adapter's, and every other entry of the dedicated
-home's `.gemini` is linked in, so the stored sign-in is used and a token refresh
-reaches it. The dedicated home's own `settings.json` is never read. The adapter
+Each run gets its own home, 0700, which `HOME` and `GEMINI_CLI_HOME` point to and
+which is removed when the run ends, by signal too. Its `.gemini/settings.json` is
+the adapter's. Only the sign-in files of the dedicated home's `.gemini` are linked
+in (`oauth_creds.json`, `google_accounts.json`, `installation_id`, and any
+`*credential*` file), so the CLI's session state stays in the per-run home and goes
+with it. A refreshed access token is not written back, because the CLI replaces
+the link with a new file, so each run refreshes from the stored sign-in. The
+dedicated home's own `settings.json` is never read. The adapter
 cannot use a system settings file, because the CLI loads one only when root owns
 it and every parent directory. The CLI always loads user settings, and a run
 never adds workspace settings above them (see below), so the adapter's settings
@@ -184,9 +188,10 @@ are final. They set these values:
 
 - `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
   or any other auth type. The dispatcher also forwards no key variable.
-- `advanced.ignoreLocalEnv`, so the CLI loads no `.env` file in or above the
-  folder it runs in. Without it, an untrusted workdir could set the CLI's auth
-  variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`.
+- `advanced.ignoreLocalEnv`, so the CLI loads no plain `.env` file in or above
+  the folder it runs in. Without it, an untrusted workdir could set the CLI's
+  auth variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`. It does not
+  cover `.gemini/.env` in a trusted folder; see `implement` below.
 - `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
   policy allows both, and text in a reviewed diff could steer workdir content
   into a search or a fetch.
@@ -197,10 +202,15 @@ A `review` runs in the workdir with it untrusted
 extensions do not load. The CLI then runs in `default` approval mode, where
 headless mode refuses every tool that needs approval, so the review writes
 nothing. `implement` and `passthrough` require `DISPATCH_GEMINI_ALLOW_WRITE=1`.
-An edit needs a trusted folder, so they run in an empty folder of the adapter's
-own, trusted, in `auto_edit` mode, and reach the worktree through
+An edit needs a trusted folder, so they run in a new empty folder inside the
+dedicated home, trusted, in `auto_edit` mode, and reach the worktree through
 `--include-directories`. The worktree's `.gemini` settings and `.env` are never
-loaded, and the enforced sign-in holds there too.
+loaded, and the enforced sign-in holds there too. In a trusted folder the CLI
+loads `.gemini/.env` from the folder and every parent, unfiltered. So the run
+refuses when any parent of that folder already holds `.gemini/.env`, or is
+writable by group or others, where another user could plant one. A dedicated
+home under `/tmp` is therefore refused for these kinds; put it under a private
+directory.
 
 The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or

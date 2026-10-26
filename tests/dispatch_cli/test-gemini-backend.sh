@@ -14,6 +14,7 @@ printf 'diff body\n' > "$TMP/change.diff"
 # The dedicated home holds the sign-in and the operator's own settings; a run
 # must use the sign-in and never these settings, which pick an API key.
 printf '{"refresh_token":"example"}' > "$TMP/gemini-home/.gemini/oauth_creds.json"
+mkdir -p "$TMP/gemini-home/.gemini/tmp"
 printf '{"security":{"auth":{"selectedType":"gemini-api-key"}}}' > "$TMP/gemini-home/.gemini/settings.json"
 state="$TMP/gemini-home/.gemini"
 MODEL=example-gemini-model
@@ -26,8 +27,8 @@ check_not() { if "$@"; then printf 'unexpected match: %s\n' "$*" >&2; exit 1; fi
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-# The scenario file reaches the run's home through the same links as the sign-in.
-state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/scenario")")"
+# The scenario file sits beside the sign-in, found through the sign-in's link.
+state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")")"
 {
   printf 'argv=%s\n' "$*"
   printf 'cwd=%s\n' "$PWD"
@@ -37,6 +38,7 @@ state="$(dirname -- "$(readlink -f -- "$HOME/.gemini/scenario")")"
   printf 'system_settings=%s\n' "${GEMINI_CLI_SYSTEM_SETTINGS_PATH:-}"
   printf 'settings=%s\n' "$(tr -d ' \n' < "$HOME/.gemini/settings.json")"
   printf 'creds=%s\n' "$(readlink -f -- "$HOME/.gemini/oauth_creds.json")"
+  [[ ! -e "$HOME/.gemini/tmp" ]] || touch "$HOME/.gemini/tmp/leaked"
   printf 'scratch_mode=%s\n' "$(stat -c '%a' "$(dirname -- "$HOME")" 2>/dev/null || stat -f '%Lp' "$(dirname -- "$HOME")")"
   printf 'stdin=%s\n' "$(cat)"
 } > "$state/record"
@@ -226,7 +228,29 @@ check grep -qxF 'trust=true' "$record"
 # Implement trusts only an empty folder of its own and reaches the worktree as an
 # included directory, so the worktree's own Gemini settings and env never load.
 check_not grep -qxF "cwd=$TMP/work" "$record"
+check grep -qE "^cwd=$TMP/gemini-home/\.dispatch-folder\.[A-Za-z0-9]+$" "$record"
 check grep -qF -- "--include-directories $TMP/work" "$record"
+check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
+# Only the sign-in is linked in; other state in the dedicated home stays out.
+check_not test -e "$TMP/gemini-home/.gemini/tmp/leaked"
+
+# A trusted folder loads .gemini/.env from every parent, so implement refuses
+# when a parent holds one or could let another user plant one.
+implement_refused() {  # implement_refused <name> <message>
+  status=0
+  HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+    DISPATCH_GEMINI_ALLOW_WRITE=1 DISPATCH_MODEL="$MODEL" "$CLI" --harness gemini --kind implement --task t \
+    --workdir "$TMP/work" --output "$TMP/out-$1" >/dev/null 2>"$TMP/out-$1.stderr" || status=$?
+  check test "$status" -eq 2
+  check grep -qF "$2" "$TMP/out-$1.stderr"
+}
+printf 'CODE_ASSIST_ENDPOINT=https://example.invalid\n' > "$TMP/gemini-home/.gemini/.env"
+implement_refused planted-env '.gemini/.env above its folder'
+rm -f "$TMP/gemini-home/.gemini/.env"
+chmod g+w "$TMP/gemini-home"
+implement_refused open-parent 'closed to group and others'
+chmod g-w "$TMP/gemini-home"
+check test -z "$(find "$TMP/gemini-home" -maxdepth 1 -name '.dispatch-folder.*')"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 
 mkdir -p "$TMP/caller-home/nested-gemini-home"
