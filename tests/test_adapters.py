@@ -114,6 +114,29 @@ class LimitAndParserTests(unittest.TestCase):
         self.assertIsNone(adapters.detect_limit("opencode", other))
         self.assertIsNone(adapters.detect_limit("opencode", v2_quota + "\n{unreadable"))
 
+    def test_opencode_only_the_last_error_event_decides(self):
+        rate = '{"type":"error","error":{"name":"RateLimitError"}}'
+        not_found = '{"type":"error","error":{"name":"ProviderModelNotFoundError","data":{"statusCode":404}}}'
+        self.assertEqual(adapters.detect_limit("opencode", not_found + "\n" + rate), "rate-limit")
+        self.assertIsNone(adapters.detect_limit("opencode", rate + "\n" + not_found))
+
+    def test_opencode_a_rate_limit_name_counts_without_a_429(self):
+        for name in ('"name":"RateLimitError"', '"type":"provider.rate-limit"', '"type":"provider.rate_limit"'):
+            with self.subTest(name=name):
+                event = '{"type":"error","error":{' + name + '}}'
+                self.assertEqual(adapters.detect_limit("opencode", event), "rate-limit")
+
+    def test_opencode_an_unknown_type_with_status_429_is_a_rate_limit(self):
+        event = '{"type":"error","error":{"type":"provider.unknown","status":429}}'
+        self.assertEqual(adapters.detect_limit("opencode", event), "rate-limit")
+
+    def test_opencode_a_spent_quota_needs_no_status(self):
+        self.assertEqual(adapters.detect_limit("opencode", '{"type":"error","error":{"type":"provider.quota"}}'), "quota")
+
+    def test_opencode_the_v1_status_under_data_wins_over_a_top_level_status(self):
+        event = '{"type":"error","error":{"name":"ProviderAuthError","data":{"statusCode":401},"status":429}}'
+        self.assertIsNone(adapters.detect_limit("opencode", event))
+
     def test_an_adapter_without_a_detector_or_an_unknown_kind_reports_no_limit(self):
         self.assertIsNone(adapters.detect_limit("llama-broker", "error: 429"))
         odd = Adapter(name="example-backend", detect_limit=lambda diagnostic: "maybe")
