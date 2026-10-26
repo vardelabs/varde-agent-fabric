@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -17,8 +18,14 @@ MAX_TRANSPORT_BYTES = MAX_PACKET_BYTES + 64 * 1024
 _MAX_FINDINGS = 50
 _MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
-_ALLOWED_WORKERS = {"local-gemma", "codex", "opencode"}
-REVIEW_WORKER_KINDS = frozenset(_ALLOWED_WORKERS)
+# Shape only: the executing side decides which registered adapters may serve a
+# review, so a new adapter needs no contract change.
+WORKER_KIND = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+
+
+def _worker_kind(value: object) -> None:
+    if not isinstance(value, str) or not WORKER_KIND.fullmatch(value):
+        raise ContractError("worker_kind is not a valid worker name")
 _ALLOWED_FINISH = {"completed", "unavailable", "malformed", "timeout", "truncated"}
 _ALLOWED_SEVERITIES = {"red", "yellow", "green"}
 _ALLOWED_FINDING_KEYS = {"severity", "file", "line", "message", "confidence", "category", "reproduction"}
@@ -115,8 +122,7 @@ class ReviewRequest:
                 raise ContractError(f"paths[{index}] must be a relative path without empty, '.', '..', or NUL segments")
         if self.kind not in _ALLOWED_KINDS:
             raise ContractError("kind is not approved")
-        if self.worker_kind not in _ALLOWED_WORKERS:
-            raise ContractError("worker_kind is not approved")
+        _worker_kind(self.worker_kind)
         _text(self.correlation_id, "correlation_id", max_length=128)
         _text(self.packet, "packet", max_length=MAX_PACKET_BYTES)
         if len(self.packet.encode("utf-8")) > MAX_PACKET_BYTES:
@@ -183,8 +189,7 @@ class ReviewArtifact:
         _positive_int(self.pull_request, "pull_request")
         object.__setattr__(self, "base_sha", _sha(self.base_sha, "base_sha"))
         object.__setattr__(self, "head_sha", _sha(self.head_sha, "head_sha"))
-        if self.worker_kind not in _ALLOWED_WORKERS:
-            raise ContractError("worker_kind is not approved")
+        _worker_kind(self.worker_kind)
         _text(self.execution_location, "execution_location")
         _text(self.provider, "provider")
         _text(self.correlation_id, "correlation_id", max_length=128)

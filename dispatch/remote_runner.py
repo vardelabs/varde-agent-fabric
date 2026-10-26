@@ -98,8 +98,8 @@ class RemoteImplementMetadata:
 
 
 def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: str) -> ImplementArtifact:
-    if metadata.target != "remote" or metadata.harness not in {"codex", "opencode"} or fallback_policy != "none":
-        raise GatewayError("remote implementation requires a supported worker and no fallback")
+    if metadata.target != "remote" or fallback_policy != "none":
+        raise GatewayError("remote implementation requires a remote target and no fallback")
     request = ImplementRequest(metadata.repository, metadata.harness, metadata.correlation_id,
                                metadata.task, collect_files(metadata.workdir, metadata.paths), metadata.timeout_seconds, model=metadata.model)
     artifact = _gateway_client().submit_implementation(request)

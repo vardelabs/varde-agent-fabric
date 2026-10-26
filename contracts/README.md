@@ -6,6 +6,9 @@ Versioned, transport-neutral contracts for bounded work belong here.
 
 - Schemas and validators evolve together and are tested together.
 - A contract must reject unknown or malformed data deliberately.
+- A worker name is checked by shape only. Which worker may serve a role is the
+  executing side's decision, made from its adapter registry and its own
+  configuration, so a new worker needs no contract change.
 - Do not add filesystem paths, credentials, or references to caller-private data.
 - Keep language-specific clients outside this directory unless they are validators.
 
@@ -24,7 +27,7 @@ head, base, correlation ID, and worker kind.
 ## Implementation contracts
 
 `implement_contracts.py` defines `implement-request.v1` with exactly
-`schema`, `repository`, `worker_kind` (`codex`), `correlation_id`, `task`,
+`schema`, `repository`, `worker_kind` (a worker name), `correlation_id`, `task`,
 `files` (objects with `path` and UTF-8 `content`), and `timeout_seconds`.
 `ImplementRequest.snapshot_sha256` is derived locally as SHA-256 of compact,
 UTF-8 JSON encoding of the files sorted by path (insertion order inside each
