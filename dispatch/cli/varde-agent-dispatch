@@ -38,6 +38,13 @@ EOF
 
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
+# Private temp files this run creates. A signal exits through the EXIT trap too,
+# so an interrupted run leaves no copy of a backend's transcript behind.
+cleanup_files=()
+trap 'rm -f -- "${cleanup_files[@]}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # EX_TEMPFAIL: a backend exits with this when its provider usage limit is
 # reached, so a caller can wait or fall back instead of treating it as a failure.
 LIMIT_REACHED_STATUS=75
@@ -182,7 +189,7 @@ else
   [[ "$output_name" != "." && "$output_name" != ".." && "$output_name" != *'/'* ]] || fail 'output filename is invalid'
   requested_output="$output_parent/$output_name"
   backend_output="$(mktemp "$output_parent/.agent-dispatch-backend.XXXXXX")"
-  trap 'rm -f -- "$backend_output"' EXIT
+  cleanup_files+=("$backend_output")
   output="$requested_output"
 fi
 
@@ -259,6 +266,7 @@ backend_status=0
 # A copy of the backend's stderr lets its adapter read the CLI's own limit report
 # after a failure, while the caller still sees the stream as it happens.
 backend_stderr="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-stderr.XXXXXX")"
+cleanup_files+=("$backend_stderr")
 # fd 3 keeps the backend's stdout apart; with pipefail the group returns the
 # backend's status, and the pipeline waits for tee before the copy is read.
 { env -i "${backend_env[@]}" "$backend" 2>&1 1>&3 3>&- | tee -- "$backend_stderr" >&2; } 3>&1 || backend_status=$?

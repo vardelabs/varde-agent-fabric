@@ -1,4 +1,4 @@
-"""Print the caller variables a backend's registration forwards, one per line."""
+"""The dispatcher's view of the adapter registry: forwarded variables, role checks, and limit detection."""
 import sys
 
 from dispatch.adapters import main

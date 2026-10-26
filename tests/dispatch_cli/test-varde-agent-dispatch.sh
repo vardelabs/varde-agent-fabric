@@ -734,6 +734,7 @@ case "$DISPATCH_TASK" in
   quota) printf 'fatal: quota exhausted\n' >&2; exit 9 ;;
   mentions-quota) printf 'fatal: quota exhausted\nfatal: disk full\n' >&2; exit 9 ;;
   stdout-quota) printf 'fatal: quota exhausted\n'; exit 9 ;;
+  slow) printf 'transcript line\n' >&2; sleep 2 ;;
 esac
 { printenv | grep -E '^DISPATCH_(EXAMPLE|OPENCODE|CODEX)_' | sort; printf 'ran\n'; } > "$DISPATCH_OUTPUT"
 EOF
@@ -788,6 +789,18 @@ seam_status=0
 check test "$seam_status" -eq 9
 check grep -qxF 'fatal: quota exhausted' "$TMP/stdout-seam-stdout"
 check_not grep -qF 'fatal: quota exhausted' "$TMP/err-seam-stdout"
+
+# A signal still removes the private stderr copy and the staged output.
+mkdir -p "$TMP/sig"
+TMPDIR="$TMP/sig" "$SEAM_CLI" --harness example-backend --kind implement --task slow --workdir "$TMP/work" \
+  --output "$TMP/sig/out" >/dev/null 2>&1 &
+sig_pid=$!
+sleep 1
+kill -TERM "$sig_pid"
+sig_status=0
+wait "$sig_pid" || sig_status=$?
+check test "$sig_status" -eq 143
+check test -z "$(find "$TMP/sig" -name 'agent-dispatch-*' -o -name '.agent-dispatch-*')"
 
 # A registered backend serves only the roles it declares.
 seam_status=0

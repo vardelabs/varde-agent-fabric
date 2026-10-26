@@ -140,10 +140,6 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         local_output.unlink(missing_ok=True)
 
 
-# The deployment's broker and gateway allowlists grant exact models; this only
-# bounds the provider/model shape, so a new OpenCode provider or model needs no
-# fabric release. An aggregating provider names a model by its vendor too, as in
-# <provider>/<vendor>/<name>.
 def _json_object(line: str) -> dict | None:
     try:
         event = json.loads(line)
@@ -183,6 +179,10 @@ def detect_limit(diagnostic: str) -> str | None:
     return None
 
 
+# The deployment's broker and gateway allowlists grant exact models; this only
+# bounds the provider/model shape, so a new OpenCode provider or model needs no
+# fabric release. An aggregating provider names a model by its vendor too, as in
+# <provider>/<vendor>/<name>.
 IMPLEMENT_MODEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}/(?:[a-z0-9][a-z0-9-]{0,31}/)?[a-z0-9][a-z0-9.-]{0,63}")
 
 ADAPTER = Adapter(
