@@ -58,24 +58,36 @@ def _is_quota_error(error: dict) -> bool:
     return error.get("type") in QUOTA_ERROR_TYPES or error.get("code") == QUOTA_HTTP_STATUS
 
 
-def _model_api(stats: object, model: str) -> dict | None:
+def _models(stats: object) -> dict:
     models = stats.get("models") if isinstance(stats, dict) else None
-    entry = models.get(model) if isinstance(models, dict) else None
-    api = entry.get("api") if isinstance(entry, dict) else None
-    return api if isinstance(api, dict) else None
+    return models if isinstance(models, dict) else {}
+
+
+def _answered_main_turns(entry: object) -> bool:
+    roles = entry.get("roles") if isinstance(entry, dict) else None
+    main = roles.get("main") if isinstance(roles, dict) else None
+    requests = main.get("totalRequests", 0) if isinstance(main, dict) else 0
+    errors = main.get("totalErrors", 0) if isinstance(main, dict) else 0
+    return isinstance(requests, int) and isinstance(errors, int) and requests > errors
 
 
 def check_model_answered(result: dict, model: str) -> None:
-    """The CLI can switch models on an error; accept only a run the requested model answered."""
-    api = _model_api(result.get("stats"), model)
-    if api is None:
-        raise RunFailed(FAILED, f"the CLI did not use the requested model {model}; pass a full model id this account can use")
-    requests, errors = api.get("totalRequests", 0), api.get("totalErrors", 0)
-    if isinstance(requests, int) and isinstance(errors, int) and requests > errors:
-        return
-    # The requested model only failed and another model answered. A quota error
-    # is what makes the CLI switch, so report the limit rather than a failure.
-    raise RunFailed(LIMIT_REACHED, f"the requested model {model} failed and the CLI switched to another model")
+    """Accept only a run whose every main turn the requested model answered.
+
+    With an explicit model, and outside plan mode, the CLI reports a quota error
+    instead of switching, so a quota never reaches this check. A switch here has
+    another cause, and its answer came from a model nobody asked for, so it fails
+    loudly and is never reported as a limit. Utility calls run on other models by
+    design and do not count.
+    """
+    models = _models(result.get("stats"))
+    others = sorted(name for name, entry in models.items() if name != model and _answered_main_turns(entry))
+    if others:
+        raise RunFailed(FAILED, f"the CLI switched main turns from {model} to {', '.join(others)}; "
+                                "its answer is refused")
+    if not _answered_main_turns(models.get(model)):
+        raise RunFailed(FAILED, f"the requested model {model} answered no main turn; "
+                                "pass a full model id this account can use")
 
 
 def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:

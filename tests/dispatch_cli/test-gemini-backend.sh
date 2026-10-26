@@ -35,18 +35,26 @@ model=""
 while (($#)); do
   case "$1" in --model) model="$2"; shift 2 ;; *) shift ;; esac
 done
-stats() { printf '{"models":{"%s":{"api":{"totalRequests":%s,"totalErrors":%s}}}}' "$1" "$2" "$3"; }
+# turn <model> <role> <requests> <errors>: one model's stats entry for one role.
+turn() { printf '"%s":{"api":{"totalRequests":%s,"totalErrors":%s},"roles":{"%s":{"totalRequests":%s,"totalErrors":%s}}}' "$1" "$3" "$4" "$2" "$3" "$4"; }
+answer() { printf '{"session_id":"s","response":"%s","stats":{"models":{%s}}}\n' "$1" "$2"; }
+quota_error() { printf '{"session_id":"s","error":{%s}}\n' "$1" >&2; exit 173; }
 case "$(cat "$HOME/scenario")" in
-  ok) printf '{"session_id":"s","response":"review text","stats":%s}\n' "$(stats "$model" 1 0)" ;;
+  ok) answer "review text" "$(turn "$model" main 1 0)" ;;
+  with-utility) answer "review text" "$(turn "$model" main 1 0),$(turn utility-model utility_router 2 0)" ;;
+  retried-main) answer "review text" "$(turn "$model" main 3 2)" ;;
   quota)
     printf 'Attempt 1 failed. Max attempts reached\n' >&2
-    printf '{"session_id":"s","error":{"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429}}\n' >&2
-    exit 173 ;;
-  retryable)
-    printf '{"session_id":"s","error":{"type":"RetryableQuotaError","message":"Rate limited.","code":429}}\n' >&2
-    exit 173 ;;
-  swapped) printf '{"session_id":"s","response":"other model text","stats":{"models":{"%s":{"api":{"totalRequests":2,"totalErrors":2}},"fallback-model":{"api":{"totalRequests":1,"totalErrors":0}}}}}\n' "$model" ;;
-  downgraded) printf '{"session_id":"s","response":"other model text","stats":%s}\n' "$(stats fallback-model 1 0)" ;;
+    quota_error '"type":"TerminalQuotaError","message":"You have exhausted your capacity on this model.","code":429' ;;
+  quota-type-only) quota_error '"type":"RetryableQuotaError","message":"Rate limited."' ;;
+  quota-code-only) quota_error '"type":"ApiError","message":"Too many requests.","code":429' ;;
+  not-found)
+    printf '{"session_id":"s","error":{"type":"ModelNotFoundError","message":"Requested entity was not found.","code":404}}\n' >&2
+    exit 1 ;;
+  swapped) answer "other model text" "$(turn "$model" main 2 2),$(turn fallback-model main 1 0)" ;;
+  later-switch) answer "other model text" "$(turn "$model" main 2 1),$(turn fallback-model main 1 0)" ;;
+  downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
+  no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
   auth)
     printf '{"session_id":"s","error":{"type":"FatalAuthenticationError","message":"Please sign in.","code":41}}\n' >&2
     exit 41 ;;
@@ -78,6 +86,7 @@ check grep -qxF "cwd=$TMP/work" "$record"
 check grep -qxF 'keys=' "$record"
 check grep -qF '"enforcedType":"oauth-personal"' "$record"
 check grep -qF '"folderTrust":{"enabled":false}' "$record"
+check grep -qF '"advanced":{"ignoreLocalEnv":true}' "$record"
 check grep -qF 'stdin=private-task-sentinel' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
@@ -95,18 +104,45 @@ check grep -qF 'limit reached' "$TMP/out-quota.stderr"
 check grep -qF 'TerminalQuotaError' "$TMP/out-quota.stderr"
 check test ! -e "$TMP/out-quota"
 
-run retryable out-retryable --kind review --diff "$TMP/change.diff" --task t
-check test "$status" -eq 75
+# A quota is recognised by its error type alone or by its 429 code alone.
+for scenario in quota-type-only quota-code-only; do
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -eq 75
+  check grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
+done
 
-run swapped out-swapped --kind review --diff "$TMP/change.diff" --task t
-check test "$status" -eq 75
-check grep -qF 'switched to another model' "$TMP/out-swapped.stderr"
-check test ! -e "$TMP/out-swapped"
+# A non-quota error fails loudly with the CLI's status, never as a limit.
+run not-found out-not-found --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 1
+check grep -qF 'ModelNotFoundError' "$TMP/out-not-found.stderr"
+check_not grep -qF 'limit reached' "$TMP/out-not-found.stderr"
 
+# Utility calls on other models, and a main turn retried to success, are a normal run.
+for scenario in with-utility retried-main; do
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -eq 0
+  check grep -qxF 'review text' "$TMP/out-$scenario"
+done
+
+# Any main turn answered by another model is refused loudly and is never a limit,
+# whether the requested model failed every turn or only a later one.
+for scenario in swapped later-switch; do
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -eq 1
+  check grep -qF 'switched main turns' "$TMP/out-$scenario.stderr"
+  check_not grep -qF 'limit reached' "$TMP/out-$scenario.stderr"
+  check test ! -e "$TMP/out-$scenario"
+done
+
+# Another model answering from the first turn is a switch too.
 run downgraded out-downgraded --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 1
-check grep -qF 'did not use the requested model' "$TMP/out-downgraded.stderr"
+check grep -qF 'switched main turns' "$TMP/out-downgraded.stderr"
 check_not grep -qF 'limit reached' "$TMP/out-downgraded.stderr"
+
+run no-main out-no-main --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 1
+check grep -qF 'answered no main turn' "$TMP/out-no-main.stderr"
 
 run auth out-auth --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 41

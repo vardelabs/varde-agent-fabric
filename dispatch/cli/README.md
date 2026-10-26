@@ -176,30 +176,32 @@ rules as `DISPATCH_OPENCODE_HOME`. The adapter points `HOME` and
 `security.auth.enforcedType` to `oauth-personal`. System settings take precedence over
 user and workspace settings, so the CLI refuses an API key or any other auth
 type, and the dispatcher forwards no key variable. The same file turns off
-auto-update and folder trust prompts.
+auto-update and folder trust prompts, and sets `advanced.ignoreLocalEnv`, so the
+CLI loads no `.env` file in or above the workdir. Without it, an untrusted workdir
+could still set the CLI's auth variables, such as `GOOGLE_CLOUD_PROJECT`, from
+its `.env`. Only the dedicated home's own `.env` is read.
 
 A `review` runs with the workdir untrusted (`GEMINI_CLI_TRUST_WORKSPACE=false`),
-so the workdir's `.gemini` settings, `.env` file, and extensions do not load.
-The CLI then runs in `default` approval mode, where headless mode refuses every
-tool that needs approval, so the review is read-only. `implement` and
-`passthrough` require `DISPATCH_GEMINI_ALLOW_WRITE=1`. They trust the workdir and
-run in `auto_edit` mode, so they load the workdir's own Gemini settings: use
-them only on a worktree you trust.
+so the workdir's `.gemini` settings and extensions do not load. The CLI then
+runs in `default` approval mode, where headless mode refuses every tool that
+needs approval, so the review is read-only. `implement` and `passthrough` require
+`DISPATCH_GEMINI_ALLOW_WRITE=1`. They trust the workdir and run in `auto_edit`
+mode, so they load the workdir's own `.gemini` settings and `.gemini/.env`: use
+them only on a worktree you trust. The enforced sign-in still holds there.
 
-The adapter reports "limit reached" (exit 75) in two cases:
+The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
+error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
+code 429. Either one is enough. The CLI raises these for a 429 from the model
+API, and exits with status 173, which is 429 modulo 256.
 
-- The CLI's JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
-  code 429. The CLI raises these for a 429 from the model API, and exits with
-  status 173, which is 429 modulo 256.
-- The run succeeded, but the requested model's requests in `stats.models` all
-  failed and another model answered. The CLI switches models after a quota
-  error, so the switch is reported as a limit, and the other model's text is
-  not used.
-
-A run that succeeded without the requested model in `stats.models` fails with
-status 1. That means the CLI chose another model before it sent a request,
-for example because the account cannot use the requested one. Any other CLI
-failure returns the CLI's status with its error type and message.
+The adapter never accepts an answer from a model other than the one requested.
+In headless mode the CLI has no fallback handler, so with an explicit model and
+outside `plan` approval mode it reports a quota error rather than switching
+models. The adapter still reads `stats.models`: if any model other than the requested one answered a
+main turn, or the requested model answered none, the run fails loudly with
+status 1 and its text is discarded. It is never reported as a limit. Calls on
+other models in utility roles, such as routing or loop detection, are normal.
+Any other CLI failure returns the CLI's status with its error type and message.
 
 To sign in, run the CLI once, interactively, as the worker user, with the
 dedicated home. Choose "Sign in with Google" and finish the browser flow. The

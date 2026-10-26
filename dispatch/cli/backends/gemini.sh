@@ -63,13 +63,17 @@ trap 'rm -rf -- "$scratch"' EXIT
 printf '%s' "$prompt" > "$scratch/prompt"
 # System settings take precedence over the user and workspace settings, so a
 # workdir under review cannot select another auth type or re-enable updates.
+# ignoreLocalEnv keeps the CLI from loading any .env file in or above the workdir,
+# which it would otherwise read for its auth variables even when untrusted; only
+# the dedicated home's own .env remains.
 cat > "$scratch/system-settings.json" <<'EOF'
 {
   "security": {
     "auth": {"selectedType": "oauth-personal", "enforcedType": "oauth-personal"},
     "folderTrust": {"enabled": false}
   },
-  "general": {"enableAutoUpdate": false, "enableAutoUpdateNotification": false}
+  "general": {"enableAutoUpdate": false, "enableAutoUpdateNotification": false},
+  "advanced": {"ignoreLocalEnv": true}
 }
 EOF
 

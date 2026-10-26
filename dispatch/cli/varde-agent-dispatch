@@ -18,7 +18,7 @@ usage() {
 Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind KIND --task TEXT --workdir DIR [options]
 
 Options:
-  --harness NAME   Backend name, codex or opencode
+  --harness NAME   A registered backend name, such as codex, opencode, or gemini
   --kind KIND      Work contract, review or implement (passthrough is legacy spelling; behavior is harness-specific)
   --task TEXT      Bounded task prompt
   --workdir DIR    Existing absolute directory (use a Git worktree for isolated review)
