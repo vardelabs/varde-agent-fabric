@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from contracts.implement_contracts import ImplementRequest, ImplementArtifact, ContractError, collect_files
 from dispatch.gateway_client import GatewayClient, GatewayError, _NoRedirect
+from tests.adapter_doubles import patch_local_review
 from dispatch.remote_runner import RemoteImplementMetadata, run_remote_implement
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,7 +130,7 @@ class ImplementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             (Path(directory)/'a.txt').write_text('before')
             meta = RemoteImplementMetadata('org/repo','corr',('a.txt',),'change it',directory,'out.json')
-            with mock.patch('dispatch.remote_runner._gateway_client') as client, mock.patch('dispatch.remote_runner._run_local_codex') as local:
+            with mock.patch('dispatch.remote_runner._gateway_client') as client, patch_local_review("codex") as local:
                 client.return_value.submit_implementation.side_effect = OSError('offline')
                 with self.assertRaises(OSError): run_remote_implement(meta, fallback_policy='none')
                 with self.assertRaises(GatewayError): run_remote_implement(meta, fallback_policy='remote-unavailable')

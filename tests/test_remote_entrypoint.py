@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayError, GatewayUnavailable
+from tests.adapter_doubles import patch_local_review
 from dispatch.remote_runner import RemoteReviewMetadata, build_review_request, run_remote_review
 
 BASE = "a" * 40
@@ -87,7 +88,7 @@ class RemoteEntrypointTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
-                with mock.patch("dispatch.remote_runner._run_local_codex") as local:
+                with patch_local_review("codex") as local:
                     with self.assertRaises(GatewayUnavailable):
                         run_remote_review(metadata, fallback_policy="remote-unavailable")
                     local.assert_not_called()
@@ -99,12 +100,12 @@ class RemoteEntrypointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as workdir:
             metadata = self.metadata(workdir=workdir, output=f"{workdir}/remote.json")
             with mock.patch.dict(os.environ, {"PATH": "/custom/bin:/usr/bin", "HOME": "/caller-home", "DISPATCH_GATEWAY_TOKEN": "must-not-forward"}, clear=False):
-                with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                with mock.patch("subprocess.run") as run:
                     def execute(*args, **kwargs):
                         Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(payload, encoding="utf-8")
                         return mock.Mock(returncode=0)
                     run.side_effect = execute
-                    from dispatch.remote_runner import _run_local_codex
+                    from dispatch.adapters.codex import run_local_review as _run_local_codex
                     _run_local_codex(metadata, request)
                     environment = run.call_args.kwargs["env"]
             self.assertEqual(environment["PATH"], "/custom/bin:/usr/bin")
@@ -136,7 +137,7 @@ class RemoteEntrypointTests(unittest.TestCase):
             }, clear=False):
                 with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                     client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
-                    with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                    with mock.patch("subprocess.run") as run:
                         def execute(*args, **kwargs):
                             Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(stream, encoding="utf-8")
                             return mock.Mock(returncode=0)
@@ -223,7 +224,7 @@ cat "$HOME/events.jsonl"
         }, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayError("gateway returned HTTP 400")
-                with mock.patch("dispatch.remote_runner._run_local_opencode", create=True) as local:
+                with patch_local_review("opencode") as local:
                     with self.assertRaisesRegex(GatewayError, "HTTP 400"):
                         run_remote_review(metadata, fallback_policy="remote-unavailable")
                     local.assert_not_called()
@@ -250,7 +251,7 @@ cat "$HOME/events.jsonl"
             }, clear=False):
                 with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                     client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
-                    with mock.patch("dispatch.remote_runner.subprocess.run") as run:
+                    with mock.patch("subprocess.run") as run:
                         def execute(*args, **kwargs):
                             Path(kwargs["env"]["DISPATCH_OUTPUT"]).write_text(
                                 json.dumps({"type": "step_finish"}) + "\n", encoding="utf-8"
@@ -283,7 +284,7 @@ cat "$HOME/events.jsonl"
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
-                with mock.patch("dispatch.remote_runner._run_local_codex", return_value=expected) as local:
+                with patch_local_review("codex", return_value=expected) as local:
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
         self.assertEqual((result.repository, result.pull_request, result.base_sha, result.head_sha, result.correlation_id), ("example-org/example", 19, BASE, HEAD, "corr-19"))
@@ -299,7 +300,7 @@ cat "$HOME/events.jsonl"
             def read(self, limit=-1): return b""
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient", return_value=__import__("dispatch.gateway_client", fromlist=["GatewayClient"]).GatewayClient("https://private.example", "token", opener=lambda *args, **kwargs: UnavailableResponse())):
-                with mock.patch("dispatch.remote_runner._run_local_codex", return_value=expected):
+                with patch_local_review("codex", return_value=expected):
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
         self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
 
@@ -323,7 +324,7 @@ cat "$HOME/events.jsonl"
         }, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.side_effect = error
-                with mock.patch("dispatch.remote_runner._run_local_opencode", create=True) as local:
+                with patch_local_review("opencode") as local:
                     with self.assertRaises(GatewayError):
                         run_remote_review(metadata, fallback_policy="remote-unavailable")
                     local.assert_not_called()
@@ -334,7 +335,7 @@ cat "$HOME/events.jsonl"
                 with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
                     with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                         client_type.return_value.submit.side_effect = error
-                        with mock.patch("dispatch.remote_runner._run_local_codex") as local:
+                        with patch_local_review("codex") as local:
                             with self.assertRaises(type(error)):
                                 run_remote_review(self.metadata(), fallback_policy="remote-unavailable")
                             local.assert_not_called()

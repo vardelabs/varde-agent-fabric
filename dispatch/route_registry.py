@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from dispatch import adapters
+
 
 class RouteConfigError(ValueError):
     """Raised when route configuration or resolution is unsafe or ambiguous."""
@@ -126,7 +128,7 @@ class RouteDefinition:
                 raise RouteConfigError(
                     "remote-unavailable fallback harness must match default_harness"
                 )
-            if default_harness not in {"codex", "opencode"}:
+            if adapters.local_review_fallback(default_harness) is None:
                 raise RouteConfigError(
                     f"local fallback is not supported for harness {default_harness!r}"
                 )

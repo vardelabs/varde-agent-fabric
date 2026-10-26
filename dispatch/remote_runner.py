@@ -5,26 +5,18 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import ssl
 
-from contracts.review_contracts import MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
+from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
+from dispatch import adapters
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError
 
 
 class LocalFallbackError(RuntimeError):
     """A local fallback ran after the gateway was unavailable and then failed."""
-
-
-_LOCAL_REVIEW_CONTRACT = (
-    "Review the supplied pull request packet and diff. Return only a JSON array of findings. "
-    "Each finding must be an object with severity red, yellow, or green and a non-empty message string. "
-    "Optional keys are file, line, category, confidence, and reproduction. "
-    "Return [] when there are no findings. Do not include prose or code fences."
-)
 
 
 @dataclass(frozen=True)
@@ -67,162 +59,6 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
     )
 
 
-def _run_local_codex(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
-    local_output = Path(metadata.output + ".local")
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", ""),
-        "TMPDIR": metadata.workdir,
-        "DISPATCH_TASK": f"{_LOCAL_REVIEW_CONTRACT}\n\n{metadata.task}",
-        "DISPATCH_WORKDIR": metadata.workdir,
-        "DISPATCH_OUTPUT": str(local_output),
-        "DISPATCH_MODEL": metadata.model,
-        "DISPATCH_KIND": "review",
-        "DISPATCH_CODEX_SANDBOX": "read-only",
-    }
-    if metadata.diff is not None:
-        env["DISPATCH_DIFF"] = metadata.diff
-    try:
-        result = subprocess.run(
-            [metadata.local_backend], cwd=metadata.workdir, env=env,
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, timeout=request.timeout_seconds + 5,
-        )
-        if result.returncode != 0 or not local_output.is_file():
-            raise RuntimeError("local backend failed")
-        try:
-            payload = json.loads(local_output.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("local Codex output is not JSON") from exc
-        if isinstance(payload, dict) and payload.get("schema") == "review-artifact.v1":
-            artifact = ReviewArtifact.from_dict(payload)
-        else:
-            findings = payload.get("findings") if isinstance(payload, dict) else payload
-            if not isinstance(findings, list):
-                raise RuntimeError("local backend returned invalid findings")
-            artifact = ReviewArtifact(
-                request.repository, request.pull_request, request.base_sha,
-                request.head_sha, request.worker_kind, "requester", metadata.model,
-                request.correlation_id, tuple(findings), "completed",
-            )
-        return artifact
-    finally:
-        local_output.unlink(missing_ok=True)
-
-
-def _opencode_findings(raw: bytes) -> tuple[dict[str, object], ...]:
-    text_parts: list[str] = []
-    try:
-        for line in raw.decode("utf-8").splitlines():
-            if not line.strip():
-                continue
-            event = json.loads(line)
-            if not isinstance(event, dict):
-                raise RuntimeError("local OpenCode output event is not an object")
-            if event.get("type") == "text":
-                part = event.get("part")
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    text_parts.append(part["text"])
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("local OpenCode output is malformed JSONL") from exc
-    if not text_parts:
-        raise RuntimeError("local OpenCode returned no final text event")
-
-    def extract(value: object) -> list[object] | None:
-        if isinstance(value, list):
-            return value
-        if isinstance(value, dict) and isinstance(value.get("findings"), list):
-            return value["findings"]
-        return None
-
-    candidate = text_parts[-1]
-    try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError as last_exc:
-        try:
-            parsed = json.loads("".join(text_parts))
-        except json.JSONDecodeError:
-            raise RuntimeError("local OpenCode final text is not valid JSON") from last_exc
-    final_findings = extract(parsed)
-    if final_findings is None:
-        raise RuntimeError("local OpenCode final text is not a findings array")
-
-    prior_findings: list[object] = []
-    for text in text_parts[:-1]:
-        try:
-            prior = extract(json.loads(text))
-        except json.JSONDecodeError:
-            continue
-        if prior:
-            prior_findings.extend(prior)
-    if prior_findings and not all(item in final_findings for item in prior_findings):
-        raise RuntimeError("local OpenCode final snapshot dropped earlier findings")
-    findings: list[dict[str, object]] = []
-    for item in final_findings:
-        if not isinstance(item, dict):
-            raise RuntimeError("local OpenCode returned a non-object finding")
-        findings.append(item)
-    return tuple(findings)
-
-
-def _run_local_opencode(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
-    opencode_home = os.environ.get("DISPATCH_OPENCODE_HOME")
-    if not opencode_home:
-        raise RuntimeError("local OpenCode fallback requires DISPATCH_OPENCODE_HOME")
-    if metadata.diff is None:
-        raise RuntimeError("local OpenCode fallback requires a review diff")
-
-    local_output = Path(f"{metadata.output}.local")
-    fallback_task = f"{_LOCAL_REVIEW_CONTRACT}\n\n{metadata.task}"
-    environment = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", ""),
-        "TMPDIR": metadata.workdir,
-        "DISPATCH_TASK": fallback_task,
-        "DISPATCH_WORKDIR": metadata.workdir,
-        "DISPATCH_OUTPUT": str(local_output),
-        "DISPATCH_KIND": "review",
-        "DISPATCH_MODEL": metadata.model,
-        "DISPATCH_DIFF": metadata.diff,
-        "DISPATCH_OPENCODE_HOME": opencode_home,
-    }
-    if os.environ.get("DISPATCH_OPENCODE_MODELS_PATH"):
-        environment["DISPATCH_OPENCODE_MODELS_PATH"] = os.environ["DISPATCH_OPENCODE_MODELS_PATH"]
-    try:
-        result = subprocess.run(
-            [metadata.local_backend],
-            cwd=metadata.workdir,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=request.timeout_seconds + 5,
-            check=False,
-        )
-        if result.returncode != 0 or not local_output.is_file():
-            raise RuntimeError("local OpenCode fallback backend failed")
-        with local_output.open("rb") as stream:
-            raw = stream.read(MAX_TRANSPORT_BYTES + 1)
-        if len(raw) > MAX_TRANSPORT_BYTES:
-            raise RuntimeError("local OpenCode output exceeds the review artifact limit")
-        findings = _opencode_findings(raw)
-        return ReviewArtifact(
-            request.repository,
-            request.pull_request,
-            request.base_sha,
-            request.head_sha,
-            request.worker_kind,
-            "requester",
-            request.model or metadata.model,
-            request.correlation_id,
-            findings,
-            "completed",
-        )
-    finally:
-        local_output.unlink(missing_ok=True)
-
-
 def _gateway_client() -> GatewayClient:
     context = None
     ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
@@ -236,12 +72,12 @@ def run_remote_review(metadata: RemoteReviewMetadata, *, fallback_policy: str) -
     if metadata.target != "remote":
         raise GatewayError("remote runner requires a remote target")
     client = _gateway_client()
-    local_runner = {"codex": _run_local_codex, "opencode": _run_local_opencode}.get(metadata.harness)
+    fallback = adapters.local_review_fallback(metadata.harness)
     local_fallback = None
-    if fallback_policy == "remote-unavailable" and local_runner is not None:
+    if fallback_policy == "remote-unavailable" and fallback is not None:
         def local_fallback() -> ReviewArtifact:
             try:
-                return local_runner(metadata, request)
+                return fallback.run(metadata, request)
             except Exception as exc:
                 raise LocalFallbackError(f"gateway unavailable; local {metadata.harness} fallback failed: {exc}") from exc
     return run_with_remote_fallback(request, lambda: client.submit(request), local_fallback)

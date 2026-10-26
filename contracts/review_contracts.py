@@ -18,6 +18,7 @@ _MAX_FINDINGS = 50
 _MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
 _ALLOWED_WORKERS = {"local-gemma", "codex", "opencode"}
+REVIEW_WORKER_KINDS = frozenset(_ALLOWED_WORKERS)
 _ALLOWED_FINISH = {"completed", "unavailable", "malformed", "timeout", "truncated"}
 _ALLOWED_SEVERITIES = {"red", "yellow", "green"}
 _ALLOWED_FINDING_KEYS = {"severity", "file", "line", "message", "confidence", "category", "reproduction"}
