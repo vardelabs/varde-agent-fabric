@@ -108,7 +108,7 @@ case "$(cat "$state/scenario")" in
   downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
   no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
   all-failed) answer "text" "$(turn "$model" main 2 2)" ;;
-  slow) sleep 6 ;;
+  slow) printf '%s' "$$" > "$state/slow.pid"; sleep 6 ;;
   text-auth)
     printf 'Warning: something unrelated\nError authenticating: FatalAuthenticationError: Manual authorization is required\n' >&2
     exit 41 ;;
@@ -162,6 +162,8 @@ check grep -qxF 'stdin=Task for this run:' "$record"
 check grep -qxF 'private-task-sentinel' "$record"
 check grep -qxF 'tmpdir=isolated' "$record"
 check grep -qF '"plan":{"enabled":false}' "$record"
+check grep -qF '"fileFiltering":{"respectGitIgnore":false,"respectGeminiIgnore":false}' "$record"
+check grep -qF '"privacy":{"usageStatisticsEnabled":false}' "$record"
 check grep -qF 'diff body' "$record"
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
 
@@ -180,6 +182,53 @@ printf '%s' ok > "$state/scenario"
   DISPATCH_OUTPUT="$TMP/out-direct-env" NODE_OPTIONS=--require=/must-not-load HTTPS_PROXY=http://must-not-proxy \
   "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1)
 check grep -qxF 'keys=' "$record"
+
+# An empty PATH entry would find a gemini or node planted in the reviewed workdir.
+mkdir -p "$TMP/planted-work"
+for planted in gemini node; do
+  printf '#!/bin/sh\ntouch "%s/planted-ran"\n' "$TMP" > "$TMP/planted-work/$planted"
+  chmod +x "$TMP/planted-work/$planted"
+done
+printf '%s' ok > "$state/scenario"
+planted_status=0
+(cd "$TMP/planted-work" && env HOME="$TMP/caller-home" PATH=":$TMP/bin:/usr/bin:/bin:." DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/planted-work" \
+  DISPATCH_OUTPUT="$TMP/out-planted" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || planted_status=$?
+check test "$planted_status" -eq 0
+check_not test -e "$TMP/planted-ran"
+
+# The CLI can read its workdir, so a scratch inside it is refused.
+mkdir -p "$TMP/work/tmp-inside"
+inside_status=0
+(cd "$TMP/work" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR="$TMP/work/tmp-inside" \
+  DISPATCH_OUTPUT="$TMP/out-inside" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>"$TMP/out-inside.stderr") || inside_status=$?
+check test "$inside_status" -eq 2
+check grep -qF 'TMPDIR outside the workdir' "$TMP/out-inside.stderr"
+check test -z "$(find "$TMP/work/tmp-inside" -mindepth 1)"
+
+# TERM sent to the backend alone stops the CLI at once, not after it finishes.
+printf '%s' slow > "$state/scenario"
+mkdir -p "$TMP/direct-runs"
+(cd "$TMP/work" && exec env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR="$TMP/direct-runs" \
+  DISPATCH_OUTPUT="$TMP/out-direct-term" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) &
+direct_pid=$!
+sleep 1
+term_sent=$SECONDS
+kill -TERM "$direct_pid"
+wait "$direct_pid" || true
+check test $((SECONDS - term_sent)) -le 2
+check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
+check test -z "$(find "$TMP/direct-runs" -mindepth 1 -maxdepth 1)"
+
+# A CLI that exits 75 for a reason other than a quota is not a limit.
+printf '{"session_id":"s","error":{"type":"Error","message":"other","code":75}}\n' > "$TMP/exit75.stderr"
+: > "$TMP/exit75.stdout"
+exit75_status=0
+python3 "$ROOT/dispatch/cli/backends/gemini_result.py" "$TMP/exit75.stdout" "$TMP/exit75.stderr" "$MODEL" 75 "$TMP/out-exit75" \
+  2>/dev/null || exit75_status=$?
+check test "$exit75_status" -eq 1
 
 # A system policy directory ranks above every policy the adapter can set, so a
 # run refuses while one holds a policy.

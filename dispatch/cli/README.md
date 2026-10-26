@@ -172,11 +172,16 @@ reports, not an alias. The prompt and the review diff go to the CLI on stdin, ne
 arguments. The input starts with a fixed line, because the CLI runs input that
 starts with `/` as a command, and an untrusted workdir's commands still load.
 
-The CLI gets only the environment the adapter builds, under `env -i`: `PATH`,
-the per-run home, a temp directory inside the run's private scratch, and the
-settings paths below. A proxy, `NODE_OPTIONS`, or an endpoint override never
-reaches it. The CLI writes the whole chat to its temp directory on an API error
-and never removes it, so that copy goes with the scratch.
+The CLI gets only the environment the adapter builds, under `env -i`: the
+absolute entries of `PATH`, the per-run home, a temp directory inside the run's
+private scratch, and the settings paths below. A proxy, `NODE_OPTIONS`, or an
+endpoint override never reaches it, and an empty or relative `PATH` entry can
+never find a `gemini` or `node` planted in the reviewed workdir. The CLI writes
+the whole chat to its temp directory on an API error and never removes it, so
+that copy goes with the scratch. The CLI can read its workdir, so a run refuses
+a `TMPDIR` inside it. The CLI runs as its own process group, so INT or TERM
+stops it at once and the scratch goes with it. Only SIGKILL, which no trap
+sees, can leave the scratch behind.
 
 It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
@@ -212,7 +217,10 @@ these values:
 - `tools.exclude` for `run_shell_command`, `enter_plan_mode`, and
   `exit_plan_mode`, and `general.plan.enabled` off, so no run can reach a mode
   or tool that executes.
-- Folder trust prompts and auto-update turned off.
+- `context.fileFiltering` ignoring the workdir's `.gitignore` and
+  `.geminiignore`, which would otherwise hide a reviewed file from the read
+  tools.
+- Folder trust prompts, auto-update, and usage statistics turned off.
 
 A Workspace admin of the signed-in account can require MCP servers through
 remote admin controls, which no local setting overrides; use a personal account.
@@ -246,7 +254,8 @@ run fails loudly with status 1 and its text is discarded. It is never reported
 as a limit. Calls on other models in utility roles, such as routing or loop
 detection, are normal. Subagents are also turned off in the adapter's settings,
 and so is the edit correction that rewrites an edit on another model.
-Any other CLI failure returns the CLI's status with its error type and message.
+Any other CLI failure returns the CLI's status with its error type and message,
+except that a status of 75, which means limit reached to the dispatcher, becomes 1.
 
 To sign in, run the CLI once, interactively, as the worker user, with the
 dedicated home. Choose "Sign in with Google" and finish the browser flow. The

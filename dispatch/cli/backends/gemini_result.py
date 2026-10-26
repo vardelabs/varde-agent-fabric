@@ -158,7 +158,10 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
         detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else _fatal_line(stderr)
-        raise RunFailed(cli_status or FAILED, f"gemini exited with status {cli_status}: {detail}"[:MAX_REASON_CHARS])
+        # 75 means limit reached to the dispatcher, so a CLI that exits 75 for
+        # another reason must not pass it through.
+        status = FAILED if cli_status in (0, LIMIT_REACHED) else cli_status
+        raise RunFailed(status, f"gemini exited with status {cli_status}: {detail}"[:MAX_REASON_CHARS])
     try:
         result = json.loads(stdout)
     except json.JSONDecodeError as exc:

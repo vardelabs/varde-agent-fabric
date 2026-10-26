@@ -27,6 +27,14 @@ case "$caller_home_real/" in
   "$gemini_home_real/"*) fail 'DISPATCH_GEMINI_HOME must not contain the caller home' ;;
 esac
 
+# The CLI runs in the reviewed workdir, so an empty or relative PATH entry would
+# resolve gemini, or the node its shebang names, from files under review.
+absolute_path=""
+IFS=: read -ra path_entries <<<"$PATH"
+for path_entry in "${path_entries[@]}"; do
+  [[ "$path_entry" != /* ]] || absolute_path+="${absolute_path:+:}$path_entry"
+done
+PATH="$absolute_path"
 command -v gemini >/dev/null 2>&1 || fail 'gemini CLI not found on PATH' 127
 
 model="$DISPATCH_MODEL"
@@ -53,9 +61,17 @@ unset DISPATCH_TASK DISPATCH_DIFF
 # mktemp -d makes the scratch directory 0700. It holds links to the sign-in, so
 # a signal exits through the EXIT trap too and it never outlives the run.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")"
-trap 'rm -rf -- "$scratch"' EXIT
+cli_group=""
+# Bash runs a trap only after its foreground child ends, so the CLI runs as its
+# own background process group and a signal stops that group first.
+stop_cli() { [[ -z "$cli_group" ]] || kill -TERM -- "-$cli_group" 2>/dev/null || true; }
+trap 'stop_cli; rm -rf -- "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
+case "$(realpath -- "$scratch")/" in
+  "${workdir_real%/}/"*) fail 'Gemini needs a TMPDIR outside the workdir, which the CLI can read' ;;
+esac
 # The prompt goes on stdin, never in process arguments that other users can read.
 printf '%s' "$prompt" > "$scratch/prompt"
 # The CLI dumps the whole chat to its temp directory on an API error and never
@@ -83,6 +99,7 @@ done
 # tools are excluded because the read-only policy still allows them, and text in
 # a reviewed diff could steer workdir content into a search or a fetch. Plan mode
 # and the shell are off too, so no run can reach a mode or tool that executes.
+# The workdir's ignore files would hide a reviewed file from the read tools.
 run_home="$scratch/home"
 mkdir -p "$run_home/.gemini"
 for entry in "$DISPATCH_GEMINI_HOME/.gemini"/*; do
@@ -102,6 +119,8 @@ cat > "$run_home/.gemini/settings.json" <<'EOF'
     "exclude": ["google_web_search", "web_fetch", "run_shell_command", "enter_plan_mode", "exit_plan_mode"],
     "disableLLMCorrection": true
   },
+  "context": {"fileFiltering": {"respectGitIgnore": false, "respectGeminiIgnore": false}},
+  "privacy": {"usageStatisticsEnabled": false},
   "experimental": {"enableAgents": false}
 }
 EOF
@@ -115,9 +134,14 @@ cli_env=(PATH="$PATH" HOME="$run_home" GEMINI_CLI_HOME="$run_home" TMPDIR="$scra
   GEMINI_CLI_TRUST_WORKSPACE=false)
 
 status=0
+set -m
 (cd -- "$DISPATCH_WORKDIR" && exec env -i "${cli_env[@]}" gemini \
   --prompt 'Follow the instructions above.' --output-format json \
   --model "$model" --approval-mode default) \
-  <"$scratch/prompt" >"$scratch/stdout" 2>"$scratch/stderr" || status=$?
+  <"$scratch/prompt" >"$scratch/stdout" 2>"$scratch/stderr" &
+cli_group=$!
+set +m
+wait "$cli_group" || status=$?
+cli_group=""
 python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/gemini_result.py" \
   "$scratch/stdout" "$scratch/stderr" "$model" "$status" "$DISPATCH_OUTPUT"
