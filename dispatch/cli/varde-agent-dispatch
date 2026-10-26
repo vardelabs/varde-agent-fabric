@@ -41,9 +41,17 @@ fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 # Private temp files this run creates. A signal exits through the EXIT trap too,
 # so an interrupted run leaves no copy of a backend's transcript behind.
 cleanup_files=()
+backend_job=""
+on_signal() {
+  if [[ -n "$backend_job" ]]; then
+    pkill -TERM -P "$backend_job" 2>/dev/null || true
+    kill -TERM "$backend_job" 2>/dev/null || true
+  fi
+  exit "$1"
+}
 trap 'rm -f -- "${cleanup_files[@]}"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # EX_TEMPFAIL: a backend exits with this when its provider usage limit is
 # reached, so a caller can wait or fall back instead of treating it as a failure.
@@ -269,7 +277,13 @@ backend_stderr="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-stderr.XXXXXX")"
 cleanup_files+=("$backend_stderr")
 # fd 3 keeps the backend's stdout apart; with pipefail the group returns the
 # backend's status, and the pipeline waits for tee before the copy is read.
-{ env -i "${backend_env[@]}" "$backend" 2>&1 1>&3 3>&- | tee -- "$backend_stderr" >&2; } 3>&1 || backend_status=$?
+# The job runs in the background and is waited on, because bash defers a trapped
+# signal until a foreground command ends; wait returns at once and the trap ends
+# the backend. Stdin is passed on explicitly: a background job would get /dev/null.
+{ env -i "${backend_env[@]}" "$backend" 2>&1 1>&3 3>&- | tee -- "$backend_stderr" >&2; } 3>&1 0<&0 &
+backend_job=$!
+wait "$backend_job" || backend_status=$?
+backend_job=""
 limit=""
 if ((backend_status != 0 && backend_status != LIMIT_REACHED_STATUS)); then
   limit="$(adapter_registry limit "$harness" "$backend_stderr" 2>/dev/null)" || limit=""
