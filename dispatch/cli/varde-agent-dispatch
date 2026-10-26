@@ -38,6 +38,25 @@ EOF
 
 fail() { printf 'varde-agent-dispatch: %s\n' "$1" >&2; exit "${2:-2}"; }
 
+# EX_TEMPFAIL: a backend exits with this when its provider usage limit is
+# reached, so a caller can wait or fall back instead of treating it as a failure.
+LIMIT_REACHED_STATUS=75
+
+# Append NAME=value for each variable the harness's adapter registers and the
+# caller has set. $2 is env (a direct run) or fallback-env (a local fallback).
+forward_adapter_env() {
+  local -n forward_target="$1"
+  local names name
+  # Run by path from this directory, which holds no Python modules: -m would put
+  # the caller's cwd first on sys.path, and a path in dispatch/adapters/ would let
+  # an adapter module shadow the standard library.
+  names="$(PYTHONPATH="$SELF_DIR/../.." python3 "$SELF_DIR/adapter_env.py" "$2" "$3")" \
+    || fail "could not read the adapter registration for $3" 3
+  while IFS= read -r name; do
+    if [[ -n "$name" && -n "${!name:-}" ]]; then forward_target+=("$name=${!name}"); fi
+  done <<< "$names"
+}
+
 harness=""; kind=""; task=""; workdir=""; diff=""; model=""; routes=""; route_target=""; route_harness_overridden=""; route_fallback_policy=""; route_fallback_harness=""; route_fallback_target=""; output=""
 repository=""; pull_request=""; base_sha=""; head_sha=""; correlation_id=""; paths=()
 model_from_cli=0; routes_from_cli=0; review_args_supplied=0
@@ -197,19 +216,12 @@ if [[ "$route_target" == "remote" ]]; then
     "DISPATCH_GATEWAY_CA_FILE=${DISPATCH_GATEWAY_CA_FILE:-}"
     "PYTHONPATH=$SELF_DIR/../.."
   )
-  if [[ "${route_fallback_policy:-none}" == "remote-unavailable" \
-    && "${route_fallback_harness:-}" == "opencode" && "${route_fallback_target:-}" == "local" ]]; then
-    if [[ -n "${DISPATCH_OPENCODE_HOME:-}" ]]; then
-      remote_environment+=("DISPATCH_OPENCODE_HOME=$DISPATCH_OPENCODE_HOME")
-    fi
-    if [[ -n "${DISPATCH_OPENCODE_MODELS_PATH:-}" ]]; then
-      remote_environment+=("DISPATCH_OPENCODE_MODELS_PATH=$DISPATCH_OPENCODE_MODELS_PATH")
-    fi
+  if [[ "${route_fallback_policy:-none}" == "remote-unavailable" && "${route_fallback_target:-}" == "local" ]]; then
+    forward_adapter_env remote_environment fallback-env "$route_fallback_harness"
   fi
   env -i "${remote_environment[@]}" python3 "$SELF_DIR/../remote_runner.py" "${remote_args[@]}" || remote_status=$?
   [[ "$remote_status" -eq 0 || ( "$kind" == "implement" && "$remote_status" -eq 6 ) ]] || exit "$remote_status"
 else
-sandbox="${DISPATCH_CODEX_SANDBOX:-}"
 route_target_arg=()
 route_metadata_args=()
 if [[ -n "$route_target" ]]; then
@@ -234,15 +246,17 @@ backend_env=(
   "DISPATCH_OUTPUT=$DISPATCH_OUTPUT"
   "DISPATCH_KIND=$DISPATCH_KIND"
 )
-[[ -n "${DISPATCH_OPENCODE_HOME:-}" ]] && backend_env+=("DISPATCH_OPENCODE_HOME=$DISPATCH_OPENCODE_HOME")
-[[ -n "${DISPATCH_OPENCODE_MODELS_PATH:-}" ]] && backend_env+=("DISPATCH_OPENCODE_MODELS_PATH=$DISPATCH_OPENCODE_MODELS_PATH")
-[[ -n "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" ]] && backend_env+=("DISPATCH_OPENCODE_ALLOW_WRITE=$DISPATCH_OPENCODE_ALLOW_WRITE")
 [[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
 [[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
 if ((${#route_target_arg[@]})); then backend_env+=("${route_target_arg[@]}"); fi
 if ((${#route_metadata_args[@]})); then backend_env+=("${route_metadata_args[@]}"); fi
-[[ -n "$sandbox" ]] && backend_env+=("DISPATCH_CODEX_SANDBOX=$sandbox")
-env -i "${backend_env[@]}" "$backend"
+forward_adapter_env backend_env env "$harness"
+backend_status=0
+env -i "${backend_env[@]}" "$backend" || backend_status=$?
+if ((backend_status == LIMIT_REACHED_STATUS)); then
+  fail "limit reached: the $harness backend reports its provider usage limit" "$LIMIT_REACHED_STATUS"
+fi
+((backend_status == 0)) || exit "$backend_status"
 fi
 
 [[ -s "$backend_output" ]] || fail 'backend completed without a non-empty output artifact' 5
