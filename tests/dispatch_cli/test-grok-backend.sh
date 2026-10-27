@@ -8,6 +8,12 @@ CLI="$ROOT/dispatch/cli/varde-agent-dispatch"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/grok-backend-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
+# The backend refuses a workdir below a .git or .hg, so the test tree needs a
+# temporary directory with none above it.
+for ancestor in $(d="$TMP"; while [[ "$d" != / ]]; do d="$(dirname "$d")"; printf '%s\n' "$d"; done); do
+  [[ ! -e "$ancestor/.git" && ! -e "$ancestor/.hg" ]] \
+    || { printf 'grok backend tests need a TMPDIR with no .git or .hg above it: %s\n' "$ancestor" >&2; exit 1; }
+done
 mkdir -p "$TMP/work" "$TMP/caller-home" "$TMP/bin" "$TMP/runs" "$TMP/state"
 printf 'diff body sentinel\n' > "$TMP/change.diff"
 MODEL=xai/grok-example
@@ -156,10 +162,21 @@ if command -v git >/dev/null 2>&1; then
   printf '%s' ok > "$state/scenario"
   direct out-repo-sub DISPATCH_WORKDIR="$TMP/repo/sub"
   check test "$status" -eq 2
-  check grep -qF 'top level of its git checkout' "$TMP/out-repo-sub.stderr"
+  check grep -qF 'top level of its git or Mercurial checkout' "$TMP/out-repo-sub.stderr"
   direct out-repo-top DISPATCH_WORKDIR="$TMP/repo"
   check test "$status" -eq 0
 fi
+# The same holds for a Mercurial marker, which needs no hg binary, and for a
+# workdir inside a .git directory, whose nearest marker is the checkout's.
+mkdir -p "$TMP/hgtree/.hg" "$TMP/hgtree/sub" "$TMP/gitdir-repo/.git/inner"
+printf '%s' ok > "$state/scenario"
+for nested in "$TMP/hgtree/sub" "$TMP/gitdir-repo/.git/inner"; do
+  direct out-nested DISPATCH_WORKDIR="$nested"
+  check test "$status" -eq 2
+  check grep -qF 'top level of its git or Mercurial checkout' "$TMP/out-nested.stderr"
+done
+direct out-hg-top DISPATCH_WORKDIR="$TMP/hgtree"
+check test "$status" -eq 0
 
 # Only the provider's own 429 event is a limit; a 403 says the plan is not
 # entitled; a CLI exit of 75 for another reason is not a limit.

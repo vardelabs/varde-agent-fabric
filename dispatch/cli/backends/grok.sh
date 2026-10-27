@@ -23,14 +23,15 @@ model="$DISPATCH_MODEL"
 [[ "${DISPATCH_KIND:-}" == review ]] || fail 'Grok supports only --kind review'
 [[ ! -d "$DISPATCH_OUTPUT" ]] || fail 'DISPATCH_OUTPUT must not be a directory'
 
-# OpenCode counts the whole enclosing git checkout as inside the workdir, so the
-# workdir must be that checkout's top level, where the checks below look.
-if command -v git >/dev/null 2>&1; then
-  toplevel="$(env -i PATH="$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-    git -c core.fsmonitor= -C "$workdir_real" rev-parse --show-toplevel 2>/dev/null)" || toplevel=""
-  [[ -z "$toplevel" || "$(realpath -- "$toplevel")" == "$workdir_real" ]] \
-    || fail 'Grok needs the workdir to be the top level of its git checkout'
-fi
+# OpenCode treats the folder of the nearest .git or .hg at or above the workdir
+# as inside it, so that folder must be the workdir itself, where the checks
+# below look.
+marker_dir="$workdir_real"
+until [[ -e "$marker_dir/.git" || -e "$marker_dir/.hg" || "$marker_dir" == / ]]; do
+  marker_dir="$(dirname -- "$marker_dir")"
+done
+[[ "$marker_dir" == "$workdir_real" || ! ( -e "$marker_dir/.git" || -e "$marker_dir/.hg" ) ]] \
+  || fail 'Grok needs the workdir to be the top level of its git or Mercurial checkout'
 
 # OpenCode decides whether a path is inside the workdir from the path text, so a
 # link in the reviewed tree would let its read tools reach a file outside it,
