@@ -231,8 +231,9 @@ these values:
   tools.
 - Folder trust prompts, auto-update, and usage statistics turned off.
 
-A Workspace admin of the signed-in account can require MCP servers through
-remote admin controls, which no local setting overrides; use a personal account.
+The administrator of the licensed account can require MCP servers through
+remote admin controls, which no local setting overrides. Use the backend only
+with an account whose admin controls require none, or that you administer.
 
 A review runs in the workdir with it untrusted
 (`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
