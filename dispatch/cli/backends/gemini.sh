@@ -29,16 +29,18 @@ esac
 
 # The CLI runs in the reviewed workdir, so a relative PATH entry, or one that
 # resolves inside the workdir, would find gemini, or the node its shebang names,
-# among files under review.
+# among files under review. Each kept entry is the resolved directory, never the
+# literal one, because a link in it could resolve differently from the workdir.
 workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
 outside_workdir_path=""
 IFS=: read -ra path_entries <<<"$PATH"
 for path_entry in "${path_entries[@]}"; do
   [[ "$path_entry" == /* ]] || continue
-  case "$(realpath -m -- "$path_entry" 2>/dev/null || printf '%s' "$path_entry")/" in
+  resolved_entry="$(realpath -- "$path_entry" 2>/dev/null)" && [[ -d "$resolved_entry" ]] || continue
+  case "${resolved_entry%/}/" in
     "${workdir_real%/}/"*) continue ;;
   esac
-  outside_workdir_path+="${outside_workdir_path:+:}$path_entry"
+  outside_workdir_path+="${outside_workdir_path:+:}$resolved_entry"
 done
 PATH="$outside_workdir_path"
 command -v gemini >/dev/null 2>&1 || fail 'gemini CLI not found on PATH' 127
@@ -78,13 +80,19 @@ process_tree() {
 # background. On a signal its whole tree is stopped, and the scratch is removed
 # only once the CLI can no longer write into it. It stays in this process group,
 # so a SIGKILL to the group still reaches it.
+any_alive() {
+  local pid
+  for pid in "$@"; do kill -0 "$pid" 2>/dev/null && return 0; done
+  return 1
+}
 stop_cli() {
   [[ -n "$cli_pid" ]] || return 0
   local tree
   tree="$(process_tree "$cli_pid")"
   # shellcheck disable=SC2086
   kill -TERM $tree 2>/dev/null || true
-  for _ in $(seq 50); do kill -0 "$cli_pid" 2>/dev/null || return 0; sleep 0.1; done
+  # shellcheck disable=SC2086
+  for _ in $(seq 50); do any_alive $tree || return 0; sleep 0.1; done
   # shellcheck disable=SC2086
   kill -KILL $tree 2>/dev/null || true
 }

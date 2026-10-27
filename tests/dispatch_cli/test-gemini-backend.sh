@@ -108,6 +108,9 @@ case "$(cat "$state/scenario")" in
   downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
   no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
   all-failed) answer "text" "$(turn "$model" main 2 2)" ;;
+  stubborn)
+    bash -c 'trap "" TERM; exec sleep 8' & printf '%s' "$!" > "$state/stubborn.pid"
+    printf '%s' "$$" > "$state/slow.pid"; sleep 8 & wait ;;
   slow) sleep 6 & printf '%s' "$!" > "$state/slow-child.pid"; printf '%s' "$$" > "$state/slow.pid"; wait ;;
   text-auth)
     printf 'Warning: something unrelated\nError authenticating: FatalAuthenticationError: Manual authorization is required\n' >&2
@@ -202,6 +205,23 @@ cp "$TMP/planted-work/gemini" "$TMP/planted-work/bash" "$TMP/planted-work/bin/"
 check test "$planted_status" -eq 0
 check_not test -e "$TMP/planted-ran"
 
+# A PATH entry is kept as its resolved directory. A link that resolves outside
+# the workdir from the backend but inside it from the CLI, which runs there,
+# cannot carry a planted gemini through.
+if [[ -e /proc/self/cwd ]]; then
+  # From the backend the link resolves to an empty directory outside the workdir.
+  mkdir -p "$TMP/planted-work/inner/bin" "$TMP/inner/bin"
+  cp "$TMP/planted-work/gemini" "$TMP/planted-work/inner/bin/gemini"
+  ln -s /proc/self/cwd/inner "$TMP/planted-work/cwd-link"
+  link_status=0
+  (cd "$TMP" && env HOME="$TMP/caller-home" PATH="$TMP/planted-work/cwd-link/bin:$TMP/bin:/usr/bin:/bin" \
+    DISPATCH_GEMINI_HOME="$TMP/gemini-home" DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t \
+    DISPATCH_WORKDIR="$TMP/planted-work" DISPATCH_OUTPUT="$TMP/out-cwd-link" \
+    /bin/bash "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || link_status=$?
+  check test "$link_status" -eq 0
+  check_not test -e "$TMP/planted-ran"
+fi
+
 # The CLI can read its workdir, so a scratch inside it is refused.
 mkdir -p "$TMP/work/tmp-inside"
 inside_status=0
@@ -234,6 +254,21 @@ wait "$direct_pid" || true
 check test $((SECONDS - term_sent)) -le 2
 check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
 check_not kill -0 "$(cat "$state/slow-child.pid")" 2>/dev/null
+
+# A CLI child that ignores TERM is killed once the wait runs out, even after the
+# CLI itself has exited.
+printf '%s' stubborn > "$state/scenario"
+rm -f "$state/stubborn.pid"
+(cd "$TMP/work" && exec env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR="$TMP/direct-runs" \
+  DISPATCH_OUTPUT="$TMP/out-stubborn" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) &
+stubborn_backend=$!
+for _ in $(seq 50); do [[ -s "$state/stubborn.pid" ]] && break; sleep 0.1; done
+kill -TERM "$stubborn_backend"
+wait "$stubborn_backend" || true
+check_not kill -0 "$(cat "$state/stubborn.pid")" 2>/dev/null
+check test -z "$(find "$TMP/direct-runs" -mindepth 1 -maxdepth 1)"
+printf '%s' slow > "$state/scenario"
 
 # The CLI stays in the backend's process group, so a SIGKILL to that group,
 # which no trap sees, still stops it.

@@ -173,7 +173,8 @@ arguments. The input starts with a fixed line, because the CLI runs input that
 starts with `/` as a command, and an untrusted workdir's commands still load.
 
 The CLI gets only the environment the adapter builds, under `env -i`: the
-absolute `PATH` entries that resolve outside the workdir, the per-run home, a temp directory inside the run's
+absolute `PATH` entries that resolve outside the workdir, each as its resolved
+directory, the per-run home, a temp directory inside the run's
 private scratch, and the settings paths below. A proxy, `NODE_OPTIONS`, or an
 endpoint override never reaches it, and no `PATH` entry can find a `gemini` or
 `node` planted in the reviewed workdir. The backend's own interpreter is found
@@ -182,8 +183,8 @@ reviewed files on it. The CLI writes
 the whole chat to its temp directory on an API error and never removes it, so
 that copy goes with the scratch. The CLI can read its workdir, so a run refuses
 a `TMPDIR` or a `DISPATCH_GEMINI_HOME` inside it. On INT or TERM the backend
-stops the CLI's whole process tree at once, waits for it, and then removes the
-scratch. The CLI stays in the backend's process group, so a SIGKILL to that
+stops the CLI's whole process tree at once, waits up to 5 s for every process in
+it, kills any that remain, and then removes the scratch. The CLI stays in the backend's process group, so a SIGKILL to that
 group stops it too; only that SIGKILL, which no trap sees, can leave the
 scratch behind.
 
