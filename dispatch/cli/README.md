@@ -305,7 +305,9 @@ refusal of a `TMPDIR` or sign-in home inside the workdir.
   only tools, so it can only steer the review.
 - **Workdir:** OpenCode treats the folder of the nearest `.git` or `.hg` at or
   above the workdir as inside it, so the workdir must be that checkout's top
-  level. It also decides
+  level. A stray marker above it, such as an empty `/tmp/.git`, makes every
+  workdir below it refused; place review workdirs where no `.git` or `.hg` sits
+  above them. It also decides
   from the path text whether a file is inside, so a run refuses a workdir that
   holds a link resolving outside it.
 - **Limits:** only OpenCode's own 429 or `*.quota` error event reads as "limit
