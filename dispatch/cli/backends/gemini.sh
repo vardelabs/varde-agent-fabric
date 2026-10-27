@@ -27,14 +27,20 @@ case "$caller_home_real/" in
   "$gemini_home_real/"*) fail 'DISPATCH_GEMINI_HOME must not contain the caller home' ;;
 esac
 
-# The CLI runs in the reviewed workdir, so an empty or relative PATH entry would
-# resolve gemini, or the node its shebang names, from files under review.
-absolute_path=""
+# The CLI runs in the reviewed workdir, so a relative PATH entry, or one that
+# resolves inside the workdir, would find gemini, or the node its shebang names,
+# among files under review.
+workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
+outside_workdir_path=""
 IFS=: read -ra path_entries <<<"$PATH"
 for path_entry in "${path_entries[@]}"; do
-  [[ "$path_entry" != /* ]] || absolute_path+="${absolute_path:+:}$path_entry"
+  [[ "$path_entry" == /* ]] || continue
+  case "$(realpath -m -- "$path_entry" 2>/dev/null || printf '%s' "$path_entry")/" in
+    "${workdir_real%/}/"*) continue ;;
+  esac
+  outside_workdir_path+="${outside_workdir_path:+:}$path_entry"
 done
-PATH="$absolute_path"
+PATH="$outside_workdir_path"
 command -v gemini >/dev/null 2>&1 || fail 'gemini CLI not found on PATH' 127
 
 model="$DISPATCH_MODEL"
@@ -86,7 +92,6 @@ trap 'stop_cli; rm -rf -- "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # The CLI can read its workdir, so neither the scratch nor the sign-in may be in it.
-workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
 for private_path in "$scratch" "$gemini_home_real"; do
   case "$private_path/" in
     "${workdir_real%/}/"*) fail 'Gemini needs its TMPDIR and DISPATCH_GEMINI_HOME outside the workdir, which the CLI can read' ;;

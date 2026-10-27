@@ -173,10 +173,12 @@ arguments. The input starts with a fixed line, because the CLI runs input that
 starts with `/` as a command, and an untrusted workdir's commands still load.
 
 The CLI gets only the environment the adapter builds, under `env -i`: the
-absolute entries of `PATH`, the per-run home, a temp directory inside the run's
+absolute `PATH` entries that resolve outside the workdir, the per-run home, a temp directory inside the run's
 private scratch, and the settings paths below. A proxy, `NODE_OPTIONS`, or an
-endpoint override never reaches it, and an empty or relative `PATH` entry can
-never find a `gemini` or `node` planted in the reviewed workdir. The CLI writes
+endpoint override never reaches it, and no `PATH` entry can find a `gemini` or
+`node` planted in the reviewed workdir. The backend's own interpreter is found
+on the caller's `PATH` before the backend runs, so a caller must never put
+reviewed files on it. The CLI writes
 the whole chat to its temp directory on an API error and never removes it, so
 that copy goes with the scratch. The CLI can read its workdir, so a run refuses
 a `TMPDIR` or a `DISPATCH_GEMINI_HOME` inside it. On INT or TERM the backend
@@ -237,7 +239,8 @@ The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
 error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
 code 429. Either one is enough. The CLI raises these for a 429 from the model
 API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
-never a limit, even when stderr logs a 429 that a retry cleared. On a failed
+never a limit, even when stderr logs a 429 that a retry cleared or stdout holds
+a quota-shaped object. On a failed
 run, a quota error counts only from the object that ends stderr, and only when
 its integer code, modulo 256, is the exit status, as the CLI's own report always is. A retry
 the CLI logged, or an object a tool error echoed before more output, is a plain

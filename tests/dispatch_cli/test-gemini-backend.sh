@@ -192,9 +192,13 @@ for planted in gemini bash; do
 done
 printf '%s' ok > "$state/scenario"
 planted_status=0
-(cd "$TMP" && env HOME="$TMP/caller-home" PATH=":$TMP/bin:/usr/bin:/bin:." DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+# The backend's own interpreter comes from the caller, before any guard runs, so
+# it is fixed here; the guard covers every lookup the backend itself makes.
+mkdir -p "$TMP/planted-work/bin"
+cp "$TMP/planted-work/gemini" "$TMP/planted-work/bash" "$TMP/planted-work/bin/"
+(cd "$TMP" && env HOME="$TMP/caller-home" PATH=":$TMP/planted-work/bin:$TMP/planted-work/bin/../bin:$TMP/bin:/usr/bin:/bin:." DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
   DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/planted-work" \
-  DISPATCH_OUTPUT="$TMP/out-planted" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || planted_status=$?
+  DISPATCH_OUTPUT="$TMP/out-planted" /bin/bash "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || planted_status=$?
 check test "$planted_status" -eq 0
 check_not test -e "$TMP/planted-ran"
 
@@ -268,6 +272,14 @@ long_status=0
 python3 "$ROOT/dispatch/cli/backends/gemini_result.py" "$TMP/long.stdout" "$TMP/long.stderr" "$MODEL" 173 "$TMP/out-long" \
   2>/dev/null || long_status=$?
 check test "$long_status" -eq 75
+
+# A run that exits 0 is never a limit, even with a quota-shaped object on stdout.
+printf '{"session_id":"s","error":{"type":"TerminalQuotaError","message":"quota","code":429}}\n' > "$TMP/ok-quota.stdout"
+: > "$TMP/ok-quota.stderr"
+ok_quota_status=0
+python3 "$ROOT/dispatch/cli/backends/gemini_result.py" "$TMP/ok-quota.stdout" "$TMP/ok-quota.stderr" "$MODEL" 0 "$TMP/out-ok-quota" \
+  2>/dev/null || ok_quota_status=$?
+check test "$ok_quota_status" -ne 75
 
 # A CLI that exits 75 for a reason other than a quota is not a limit.
 printf '{"session_id":"s","error":{"type":"Error","message":"other","code":75}}\n' > "$TMP/exit75.stderr"

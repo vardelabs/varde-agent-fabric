@@ -154,7 +154,7 @@ def classify(stdout: str, stderr: str, model: str, cli_status: int) -> str:
         error = _final_error(stderr)
     # A planted object that ends stderr counts only when its code is the status of
     # the death that followed, which narrows that case without closing it.
-    if error is not None and _is_quota_error(error) and (cli_status == 0 or _reports_exit(error, cli_status)):
+    if error is not None and _is_quota_error(error) and cli_status != 0 and _reports_exit(error, cli_status):
         raise RunFailed(LIMIT_REACHED, f"usage limit reached: {error.get('type', 'quota error')}")
     if cli_status != 0 or error is not None:
         detail = f"{error.get('type', 'error')}: {error.get('message', '')}" if error else _fatal_line(stderr)
