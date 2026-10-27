@@ -336,8 +336,17 @@ and one registration line. No other part of the dispatcher changes.
      `review` role, and its stamp is `cluster-unavailable-local-<name>`.
    - `implement_model` bounds the model an implement request may name for this
      backend. It needs the `implement` role.
-   - `parse_review(raw)` turns the backend's review output into findings. It
-     needs the `review` role.
+   - `parse_review(raw)` turns the backend's review output into findings that
+     satisfy the review contract. It needs the `review` role. The shared rules in
+     `dispatch/adapters/review_output.py` map model wording onto the contract:
+     - Severity aliases such as `critical` or `major` read as red, `minor` or
+       `warning` as yellow, and `nit` or `info` as green. An unknown severity is
+       red.
+     - `path` or `filename` read as `file`, and a `title` with a `body`,
+       `description`, or `detail` reads as the message. A finding with no text
+       it recognises keeps its raw JSON as the message.
+     - A fence that wraps the whole answer is unwrapped. Prose around JSON is
+       never rescued.
    - `detect_limit(stderr)` returns `quota`, `rate-limit`, or `None` from the
      backend's own error report. Match only the CLI's fatal report, never model
      text.

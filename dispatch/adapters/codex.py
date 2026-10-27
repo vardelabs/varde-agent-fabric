@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from contracts.review_contracts import ReviewArtifact
 from dispatch.adapters.base import LOCAL_REVIEW_CONTRACT, Adapter, LocalReviewFallback, caller_base_env
+from dispatch.adapters.review_output import normalized_findings
 
 if TYPE_CHECKING:
     from contracts.review_contracts import ReviewRequest
@@ -32,7 +33,8 @@ def _findings(payload: Any) -> tuple[Any, ...]:
 
 
 def parse_review(raw: bytes) -> tuple[Any, ...]:
-    return _findings(_load(raw))
+    """Codex writes only its final message, so it is parsed as strict JSON, then normalised."""
+    return normalized_findings(_load(raw))
 
 
 def detect_limit(diagnostic: str) -> str | None:
