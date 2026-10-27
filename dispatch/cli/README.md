@@ -192,7 +192,9 @@ It uses only the CLI's own Google sign-in, which needs a Gemini Code Assist
 Standard or Enterprise licence. Since 2026-06-18 Google no longer serves Gemini
 CLI to personal Google AI Pro, Ultra, or free individual accounts; their sign-in
 fails with "This client is no longer supported for Gemini Code Assist for
-individuals". Set `DISPATCH_GEMINI_HOME` to a
+individuals". Google stopped selling new Code Assist Standard and Enterprise
+subscriptions on 2026-10-09 and points new buyers to Antigravity, so this
+backend serves only an existing subscription. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
 rules as `DISPATCH_OPENCODE_HOME`.
 
