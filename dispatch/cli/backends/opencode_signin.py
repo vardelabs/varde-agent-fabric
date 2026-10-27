@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import sqlite3
 import sys
 
@@ -22,7 +23,8 @@ BUSY_TIMEOUT_SECONDS = 30
 
 
 def _connect(path: str, *, read_only: bool) -> sqlite3.Connection:
-    uri = f"file:{path}?mode={'ro' if read_only else 'rw'}"
+    # as_uri percent-encodes the path, so a ? or # in it cannot end the path early.
+    uri = f"{Path(path).absolute().as_uri()}?mode={'ro' if read_only else 'rw'}"
     return sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT_SECONDS)
 
 
@@ -38,13 +40,15 @@ def _create_private(path: str) -> None:
 def snapshot(signin_db: str, run_db: str, values_file: str, integration: str) -> None:
     """A consistent copy, made by SQLite itself, and the credential values it started from."""
     source = _connect(signin_db, read_only=True)
-    _create_private(run_db)
-    target = sqlite3.connect(run_db)
     try:
-        source.backup(target)
-        started_from = _values(target, integration)
+        _create_private(run_db)
+        target = sqlite3.connect(run_db)
+        try:
+            source.backup(target)
+            started_from = _values(target, integration)
+        finally:
+            target.close()
     finally:
-        target.close()
         source.close()
     _create_private(values_file)
     with open(values_file, "w", encoding="utf-8") as stream:

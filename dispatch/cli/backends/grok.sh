@@ -36,12 +36,16 @@ done
 # OpenCode decides whether a path is inside the workdir from the path text, so a
 # link in the reviewed tree would let its read tools reach a file outside it,
 # such as the sign-in database at its fixed place in the dedicated home.
-while IFS= read -r -d '' link; do
-  case "$(realpath -m -- "$link")/" in
-    "${workdir_real%/}/"*) ;;
-    *) fail "Grok refuses a workdir with a link that leaves it: ${link#"$workdir_real"/}" ;;
-  esac
-done < <(find "$workdir_real" -type l -print0)
+# Python resolves a dangling link too, which BSD realpath cannot.
+escaping_link="$(find "$workdir_real" -type l -print0 | python3 -c '
+import os, sys
+root = sys.argv[1].rstrip("/") + "/"
+for link in filter(None, sys.stdin.buffer.read().split(b"\0")):
+    if not (os.path.realpath(link).decode(errors="replace") + "/").startswith(root):
+        print(os.path.relpath(link, sys.argv[1].encode()).decode(errors="replace"))
+        break
+' "$workdir_real")"
+[[ -z "$escaping_link" ]] || fail "Grok refuses a workdir with a link that leaves it: $escaping_link"
 
 signin_db="$dedicated_home_real/.local/share/opencode/opencode.db"
 [[ -f "$signin_db" && ! -L "$signin_db" ]] || fail "Grok has no sign-in database in DISPATCH_GROK_HOME; run the sign-in first"

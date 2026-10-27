@@ -10,7 +10,9 @@ TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 # The backend refuses a workdir below a .git or .hg, so the test tree needs a
 # temporary directory with none above it.
-for ancestor in $(d="$TMP"; while [[ "$d" != / ]]; do d="$(dirname "$d")"; printf '%s\n' "$d"; done); do
+ancestor="$TMP"
+while [[ "$ancestor" != / ]]; do
+  ancestor="$(dirname "$ancestor")"
   [[ ! -e "$ancestor/.git" && ! -e "$ancestor/.hg" ]] \
     || { printf 'grok backend tests need a TMPDIR with no .git or .hg above it: %s\n' "$ancestor" >&2; exit 1; }
 done
@@ -37,6 +39,7 @@ pass=0
 check() { "$@"; pass=$((pass + 1)); }
 check_not() { if "$@"; then printf 'unexpected match: %s\n' "$*" >&2; exit 1; fi; pass=$((pass + 1)); }
 mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
+alive() { kill -0 "$1" 2>/dev/null; }
 
 # The fake records what it was given, then answers as the scenario file says.
 cat > "$TMP/bin/opencode" <<EOF
@@ -213,6 +216,16 @@ direct out-no-signin DISPATCH_GROK_HOME="$TMP/empty-home"
 check test "$status" -eq 2
 check grep -qF 'no sign-in database' "$TMP/out-no-signin.stderr"
 
+# A ? or # in the sign-in or scratch path cannot cut the database path short.
+odd_home="$TMP/odd?home#x"
+mkdir -p "$odd_home/.local/share/opencode" "$TMP/odd?runs#x"
+cp "$signin_db" "$odd_home/.local/share/opencode/opencode.db"
+printf '%s' ok > "$state/scenario"
+direct out-odd-path DISPATCH_GROK_HOME="$odd_home" TMPDIR="$TMP/odd?runs#x"
+check test "$status" -eq 0
+check test -z "$(find "$TMP" -maxdepth 1 -name 'odd' -o -maxdepth 1 -name 'odd?runs')"
+check test -z "$(find "$TMP/odd?runs#x" -mindepth 1 -maxdepth 1)"
+
 # A link that leaves the workdir could carry the read tools to the sign-in
 # database; a link that stays inside is fine.
 ln -s "$signin_db" "$TMP/work/leak"
@@ -253,7 +266,9 @@ HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GROK_HOME="$TMP/g
   DISPATCH_MODEL="$MODEL" "$CLI" --harness grok --kind review --diff "$TMP/change.diff" --task t \
   --workdir "$TMP/work" --output "$TMP/out-slow" >/dev/null 2>&1 &
 slow_pid=$!
-for _ in $(seq 50); do [[ -s "$state/slow.pid" ]] && break; sleep 0.1; done
+for _ in $(seq 50); do [[ -s "$state/slow.pid" && -s "$state/slow-child.pid" ]] && break; sleep 0.1; done
+check test -s "$state/slow.pid"
+check test -s "$state/slow-child.pid"
 check test -n "$(find "$TMP/runs" -mindepth 1 -maxdepth 1 -name 'grok-dispatch.*')"
 kill -TERM "$slow_pid"
 slow_status=0
@@ -261,7 +276,7 @@ wait "$slow_pid" || slow_status=$?
 check test "$slow_status" -eq 143
 for _ in $(seq 30); do [[ -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)" ]] && break; sleep 0.2; done
 check test -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)"
-check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
-check_not kill -0 "$(cat "$state/slow-child.pid")" 2>/dev/null
+check_not alive "$(cat "$state/slow.pid")"
+check_not alive "$(cat "$state/slow-child.pid")"
 
 printf 'grok backend tests: %s passed\n' "$pass"

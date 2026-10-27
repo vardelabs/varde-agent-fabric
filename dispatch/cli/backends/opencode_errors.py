@@ -17,15 +17,16 @@ ENTITLEMENT_STATUS = 403
 
 
 def error_events(lines: list[str]) -> list[dict]:
+    """Top-level error events, read the way the adapter's limit detector reads them."""
     events = []
     for line in lines:
-        if not line.startswith('{"type":"error"'):
+        if not line.startswith("{"):
             continue
         try:
             event = json.loads(line)
         except ValueError:
             continue
-        if isinstance(event, dict) and isinstance(event.get("error"), dict):
+        if isinstance(event, dict) and event.get("type") == "error" and isinstance(event.get("error"), dict):
             events.append(event)
     return events
 

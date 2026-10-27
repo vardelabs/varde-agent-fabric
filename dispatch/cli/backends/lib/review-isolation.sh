@@ -73,7 +73,7 @@ stop_cli() {
 # make_scratch <label> <variable> <prefix>: a 0700 scratch directory, absolute
 # because the CLI starts in the workdir, removed on every exit after the CLI has
 # stopped. The CLI can read its workdir, so neither the scratch nor the sign-in
-# may be in it. Sets scratch.
+# may be in it. Needs workdir_real and dedicated_home_real set first. Sets scratch.
 make_scratch() {
   local label="$1" variable="$2" private_path
   scratch="$(realpath -- "$(mktemp -d "${TMPDIR:-/tmp}/$3.XXXXXX")")"

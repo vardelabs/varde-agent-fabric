@@ -305,9 +305,8 @@ refusal of a `TMPDIR` or sign-in home inside the workdir.
   only tools, so it can only steer the review.
 - **Workdir:** OpenCode treats the folder of the nearest `.git` or `.hg` at or
   above the workdir as inside it, so the workdir must be that checkout's top
-  level. A stray marker above it, such as an empty `/tmp/.git`, makes every
-  workdir below it refused; place review workdirs where no `.git` or `.hg` sits
-  above them. It also decides
+  level. A stray marker, such as an empty `/tmp/.git`, therefore refuses every
+  workdir below it, so place review workdirs where none sits above them. It also decides
   from the path text whether a file is inside, so a run refuses a workdir that
   holds a link resolving outside it.
 - **Limits:** only OpenCode's own 429 or `*.quota` error event reads as "limit
@@ -320,6 +319,10 @@ dedicated home. It prints a URL and a code to enter on any device, then waits.
 bare environment. OpenCode also tries to open a browser with `xdg-open` and
 quits when there is none, so on a server put a no-op `xdg-open` first on
 `PATH`, for example `/path/to/grok-home/bin/xdg-open` linked to `/bin/true`.
+`opencode models --standalone` prints nothing in this setup, even for a
+configured provider, so it cannot confirm a sign-in. A one-prompt
+`opencode run --standalone --model xai/<model>` does, and a 403 there means the
+plan is not entitled.
 
 ```text
 env -i HOME=/path/to/grok-home PATH=/path/to/grok-home/bin:"$PATH" TERM="$TERM" OPENCODE_DISABLE_CHANNEL_DB=1 OPENCODE_DISABLE_AUTOUPDATE=1 opencode auth login xai --method device --standalone
