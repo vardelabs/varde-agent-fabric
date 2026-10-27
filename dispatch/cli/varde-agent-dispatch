@@ -18,7 +18,7 @@ usage() {
 Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind KIND --task TEXT --workdir DIR [options]
 
 Options:
-  --harness NAME   Backend name, codex or opencode
+  --harness NAME   A registered backend name, such as codex, opencode, or gemini
   --kind KIND      Work contract, review or implement (passthrough is legacy spelling; behavior is harness-specific)
   --task TEXT      Bounded task prompt
   --workdir DIR    Existing absolute directory (use a Git worktree for isolated review)
@@ -54,8 +54,12 @@ descendants() {
 }
 on_signal() {
   if [[ -n "$backend_job" ]]; then
-    local tree
-    tree="$(descendants "$backend_job")"
+    local tree stderr_copier
+    # tee is spared: it ends on its own when the backend's stderr closes, and
+    # killing it would let a backend's last stderr write raise SIGPIPE and kill
+    # the backend before its own cleanup trap runs.
+    stderr_copier="$(pgrep -x -P "$backend_job" tee 2>/dev/null || true)"
+    tree="$(descendants "$backend_job" | grep -vxF -- "${stderr_copier:-none}" || true)"
     # shellcheck disable=SC2086
     kill -TERM $tree "$backend_job" 2>/dev/null || true
   fi

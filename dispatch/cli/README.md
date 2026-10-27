@@ -63,7 +63,7 @@ dispatch/cli/varde-agent-dispatch \
   --output /path/to/review-artifact.json
 ```
 
-The current public backends are `codex` and `opencode`. The OpenCode adapter
+The current public backends are `codex`, `opencode`, and `gemini`. The OpenCode adapter
 supports CLI v2. Each backend is registered in `dispatch/adapters/`; see
 [Adding a Backend](#adding-a-backend). The dispatcher passes only an explicit
 runtime contract to a backend:
@@ -160,6 +160,116 @@ env -i HOME=/path/to/opencode-home PATH="$PATH" opencode auth list --standalone
 
 The prompt refuses a non-interactive stdin. Do not use `--answer` for a key:
 it puts the key in the process arguments, where other local users can read it.
+
+### Gemini CLI
+
+The `gemini` backend runs the Gemini CLI in headless mode
+(`--prompt`, `--output-format json`) and writes the final response text to the
+output. It serves `review` only; the dispatcher refuses `implement` and
+`passthrough` for it. Settings cannot confine an edit, so implement waits for an
+OS sandbox. It needs an explicit model id, which must be the full id the CLI
+reports, not an alias. The prompt and the review diff go to the CLI on stdin, never in its
+arguments. The input starts with a fixed line, because the CLI runs input that
+starts with `/` as a command, and an untrusted workdir's commands still load.
+
+The CLI gets only the environment the adapter builds, under `env -i`: the
+absolute `PATH` entries that resolve outside the workdir, each as its resolved
+directory, the per-run home, a temp directory inside the run's
+private scratch, and the settings paths below. A proxy, `NODE_OPTIONS`, or an
+endpoint override never reaches it, and no `PATH` entry can find a `gemini` or
+`node` planted in the reviewed workdir. The backend's own interpreter is found
+on the caller's `PATH` before the backend runs, so a caller must never put
+reviewed files on it. The CLI writes
+the whole chat to its temp directory on an API error and never removes it, so
+that copy goes with the scratch. The CLI can read its workdir, so a run refuses
+a `TMPDIR` or a `DISPATCH_GEMINI_HOME` inside it. On INT or TERM the backend
+stops the CLI's whole process tree at once, waits up to 5 s for every process in
+it, kills any that remain, and then removes the scratch. The CLI stays in the backend's process group, so a SIGKILL to that
+group stops it too; only that SIGKILL, which no trap sees, can leave the
+scratch behind.
+
+It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
+dedicated home that holds that sign-in, outside the caller home, under the same
+rules as `DISPATCH_OPENCODE_HOME`.
+
+Each run gets its own home, 0700, which `HOME` and `GEMINI_CLI_HOME` point to and
+which is removed when the run ends, by signal too. Its `.gemini/settings.json` is
+the adapter's. Only the sign-in files of the dedicated home's `.gemini` are linked
+in (`oauth_creds.json`, `google_accounts.json`, `installation_id`, and any
+`*credential*` file), so the CLI's session state stays in the per-run home and goes
+with it. A refreshed access token is not written back, because the CLI replaces
+the link with a new file, so each run refreshes from the stored sign-in. The
+dedicated home's own `settings.json` is never read. The CLI loads a system
+settings file above user settings, and system defaults below them, when root
+owns the file and every parent directory. So the adapter points both system
+paths (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`)
+at files in the private scratch that never exist, and neither loads. A run never
+adds workspace settings above the user settings (see below), so the adapter's
+settings are final, except against a root-owned system policy directory
+(`/etc/gemini-cli/policies`, or `/Library/Application Support/GeminiCli/policies`
+on macOS). The CLI reads it from a fixed path, and its rules rank above any the
+adapter can set, so a run refuses while it holds a policy. The settings set
+these values:
+
+- `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
+  or any other auth type. The dispatcher also forwards no key variable.
+- `advanced.ignoreLocalEnv`, so the CLI loads no plain `.env` file in or above
+  the folder it runs in. Without it, an untrusted workdir could set the CLI's
+  auth variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`.
+- `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
+  policy allows both, and text in a reviewed diff could steer workdir content
+  into a search or a fetch.
+- `tools.exclude` for `run_shell_command`, `enter_plan_mode`, and
+  `exit_plan_mode`, and `general.plan.enabled` off, so no run can reach a mode
+  or tool that executes.
+- `context.fileFiltering` ignoring the workdir's `.gitignore` and
+  `.geminiignore`, which would otherwise hide a reviewed file from the read
+  tools.
+- Folder trust prompts, auto-update, and usage statistics turned off.
+
+A Workspace admin of the signed-in account can require MCP servers through
+remote admin controls, which no local setting overrides; use a personal account.
+
+A review runs in the workdir with it untrusted
+(`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
+extensions do not load. The CLI then runs in `default` approval mode, where
+headless mode refuses every tool that needs approval, so the review writes
+nothing.
+
+The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
+error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
+code 429. Either one is enough. The CLI raises these for a 429 from the model
+API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
+never a limit, even when stderr logs a 429 that a retry cleared or stdout holds
+a quota-shaped object. On a failed
+run, a quota error counts only from the object that ends stderr, and only when
+its integer code, modulo 256, is the exit status, as the CLI's own report always is. A retry
+the CLI logged, or an object a tool error echoed before more output, is a plain
+failure. One case stays open: a model can make a tool error echo a quota-shaped
+object with an integer code, and if the CLI then dies without printing anything
+more, with that code as its status, the run reads as a limit. That case changes
+only the caller's retry or backoff choice; it reaches no data and no write scope.
+
+The adapter never accepts an answer from a model other than the one requested.
+In headless mode the CLI has no fallback handler, so with an explicit model and
+outside `plan` approval mode it reports a quota error rather than switching
+models. The adapter still reads `stats.models`: if any model other than the
+requested one answered a main or subagent turn, or the requested model answered
+no main turn, the
+run fails loudly with status 1 and its text is discarded. It is never reported
+as a limit. Calls on other models in utility roles, such as routing or loop
+detection, are normal. Subagents are also turned off in the adapter's settings,
+and so is the edit correction that rewrites an edit on another model.
+Any other CLI failure returns the CLI's status with its error type and message,
+except that a status of 75, which means limit reached to the dispatcher, becomes 1.
+
+To sign in, run the CLI once, interactively, as the worker user, with the
+dedicated home. Choose "Sign in with Google" and finish the browser flow. The
+CLI stores the credential in the dedicated home.
+
+```text
+env -i HOME=/path/to/gemini-home GEMINI_CLI_HOME=/path/to/gemini-home PATH="$PATH" TERM="$TERM" gemini
+```
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
