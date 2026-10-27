@@ -345,8 +345,9 @@ and one registration line. No other part of the dispatcher changes.
      - `path` or `filename` read as `file`, and a `title` with a `body`,
        `description`, or `detail` reads as the message. A finding with no text
        it recognises keeps its raw JSON as the message.
-     - A fence that wraps the whole answer is unwrapped. Prose around JSON is
-       never rescued.
+     - For OpenCode, whose answer streams as text events, a fence that wraps
+       the whole final answer is unwrapped. Codex writes only its final message,
+       which must be strict JSON. Prose around JSON is never rescued.
    - `detect_limit(stderr)` returns `quota`, `rate-limit`, or `None` from the
      backend's own error report. Match only the CLI's fatal report, never model
      text.
