@@ -179,9 +179,11 @@ endpoint override never reaches it, and an empty or relative `PATH` entry can
 never find a `gemini` or `node` planted in the reviewed workdir. The CLI writes
 the whole chat to its temp directory on an API error and never removes it, so
 that copy goes with the scratch. The CLI can read its workdir, so a run refuses
-a `TMPDIR` inside it. The CLI runs as its own process group, so INT or TERM
-stops it at once and the scratch goes with it. Only SIGKILL, which no trap
-sees, can leave the scratch behind.
+a `TMPDIR` or a `DISPATCH_GEMINI_HOME` inside it. On INT or TERM the backend
+stops the CLI's whole process tree at once, waits for it, and then removes the
+scratch. The CLI stays in the backend's process group, so a SIGKILL to that
+group stops it too; only that SIGKILL, which no trap sees, can leave the
+scratch behind.
 
 It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same

@@ -62,17 +62,36 @@ unset DISPATCH_TASK DISPATCH_DIFF
 # a signal exits through the EXIT trap too and it never outlives the run.
 # The CLI starts in the workdir, so its homes and temp directory must be absolute.
 scratch="$(realpath -- "$(mktemp -d "${TMPDIR:-/tmp}/gemini-dispatch.XXXXXX")")"
-cli_group=""
-# Bash runs a trap only after its foreground child ends, so the CLI runs as its
-# own background process group and a signal stops that group first.
-stop_cli() { [[ -z "$cli_group" ]] || kill -TERM -- "-$cli_group" 2>/dev/null || true; }
+cli_pid=""
+process_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null); do process_tree "$child"; done
+  printf '%s\n' "$1"
+}
+# Bash runs a trap only after its foreground child ends, so the CLI runs in the
+# background. On a signal its whole tree is stopped, and the scratch is removed
+# only once the CLI can no longer write into it. It stays in this process group,
+# so a SIGKILL to the group still reaches it.
+stop_cli() {
+  [[ -n "$cli_pid" ]] || return 0
+  local tree
+  tree="$(process_tree "$cli_pid")"
+  # shellcheck disable=SC2086
+  kill -TERM $tree 2>/dev/null || true
+  for _ in $(seq 50); do kill -0 "$cli_pid" 2>/dev/null || return 0; sleep 0.1; done
+  # shellcheck disable=SC2086
+  kill -KILL $tree 2>/dev/null || true
+}
 trap 'stop_cli; rm -rf -- "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# The CLI can read its workdir, so neither the scratch nor the sign-in may be in it.
 workdir_real="$(realpath -- "$DISPATCH_WORKDIR")"
-case "$scratch/" in
-  "${workdir_real%/}/"*) fail 'Gemini needs a TMPDIR outside the workdir, which the CLI can read' ;;
-esac
+for private_path in "$scratch" "$gemini_home_real"; do
+  case "$private_path/" in
+    "${workdir_real%/}/"*) fail 'Gemini needs its TMPDIR and DISPATCH_GEMINI_HOME outside the workdir, which the CLI can read' ;;
+  esac
+done
 # The prompt goes on stdin, never in process arguments that other users can read.
 printf '%s' "$prompt" > "$scratch/prompt"
 # The CLI dumps the whole chat to its temp directory on an API error and never
@@ -135,14 +154,12 @@ cli_env=(PATH="$PATH" HOME="$run_home" GEMINI_CLI_HOME="$run_home" TMPDIR="$scra
   GEMINI_CLI_TRUST_WORKSPACE=false)
 
 status=0
-set -m
 (cd -- "$DISPATCH_WORKDIR" && exec env -i "${cli_env[@]}" gemini \
   --prompt 'Follow the instructions above.' --output-format json \
   --model "$model" --approval-mode default) \
   <"$scratch/prompt" >"$scratch/stdout" 2>"$scratch/stderr" &
-cli_group=$!
-set +m
-wait "$cli_group" || status=$?
-cli_group=""
+cli_pid=$!
+wait "$cli_pid" || status=$?
+cli_pid=""
 python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/gemini_result.py" \
   "$scratch/stdout" "$scratch/stderr" "$model" "$status" "$DISPATCH_OUTPUT"

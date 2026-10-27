@@ -108,7 +108,7 @@ case "$(cat "$state/scenario")" in
   downgraded) answer "other model text" "$(turn fallback-model main 1 0)" ;;
   no-main) answer "text" "$(turn utility-model utility_router 1 0)" ;;
   all-failed) answer "text" "$(turn "$model" main 2 2)" ;;
-  slow) printf '%s' "$$" > "$state/slow.pid"; sleep 6 ;;
+  slow) sleep 6 & printf '%s' "$!" > "$state/slow-child.pid"; printf '%s' "$$" > "$state/slow.pid"; wait ;;
   text-auth)
     printf 'Warning: something unrelated\nError authenticating: FatalAuthenticationError: Manual authorization is required\n' >&2
     exit 41 ;;
@@ -185,13 +185,14 @@ check grep -qxF 'keys=' "$record"
 
 # An empty PATH entry would find a gemini or node planted in the reviewed workdir.
 mkdir -p "$TMP/planted-work"
-for planted in gemini node; do
+# The fake gemini's shebang looks up bash, as the real one looks up node.
+for planted in gemini bash; do
   printf '#!/bin/sh\ntouch "%s/planted-ran"\n' "$TMP" > "$TMP/planted-work/$planted"
   chmod +x "$TMP/planted-work/$planted"
 done
 printf '%s' ok > "$state/scenario"
 planted_status=0
-(cd "$TMP/planted-work" && env HOME="$TMP/caller-home" PATH=":$TMP/bin:/usr/bin:/bin:." DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+(cd "$TMP" && env HOME="$TMP/caller-home" PATH=":$TMP/bin:/usr/bin:/bin:." DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
   DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/planted-work" \
   DISPATCH_OUTPUT="$TMP/out-planted" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) || planted_status=$?
 check test "$planted_status" -eq 0
@@ -204,8 +205,16 @@ inside_status=0
   DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR="$TMP/work/tmp-inside" \
   DISPATCH_OUTPUT="$TMP/out-inside" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>"$TMP/out-inside.stderr") || inside_status=$?
 check test "$inside_status" -eq 2
-check grep -qF 'TMPDIR outside the workdir' "$TMP/out-inside.stderr"
+check grep -qF 'TMPDIR and DISPATCH_GEMINI_HOME outside the workdir' "$TMP/out-inside.stderr"
 check test -z "$(find "$TMP/work/tmp-inside" -mindepth 1)"
+mkdir -p "$TMP/work/home-inside/.gemini"
+home_inside_status=0
+(cd "$TMP/work" && env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/work/home-inside" \
+  DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" \
+  DISPATCH_OUTPUT="$TMP/out-home-inside" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>"$TMP/out-home-inside.stderr") \
+  || home_inside_status=$?
+check test "$home_inside_status" -eq 2
+check grep -qF 'DISPATCH_GEMINI_HOME outside the workdir' "$TMP/out-home-inside.stderr"
 
 # TERM sent to the backend alone stops the CLI at once, not after it finishes.
 printf '%s' slow > "$state/scenario"
@@ -220,6 +229,23 @@ kill -TERM "$direct_pid"
 wait "$direct_pid" || true
 check test $((SECONDS - term_sent)) -le 2
 check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
+check_not kill -0 "$(cat "$state/slow-child.pid")" 2>/dev/null
+
+# The CLI stays in the backend's process group, so a SIGKILL to that group,
+# which no trap sees, still stops it.
+if command -v setsid >/dev/null 2>&1; then
+  rm -f "$state/slow.pid"
+  (cd "$TMP/work" && exec setsid env HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GEMINI_HOME="$TMP/gemini-home" \
+    DISPATCH_MODEL="$MODEL" DISPATCH_KIND=review DISPATCH_TASK=t DISPATCH_WORKDIR="$TMP/work" TMPDIR="$TMP/direct-runs" \
+    DISPATCH_OUTPUT="$TMP/out-group-kill" "$ROOT/dispatch/cli/backends/gemini.sh" >/dev/null 2>&1) &
+  group_pid=$!
+  for _ in $(seq 50); do [[ -s "$state/slow.pid" ]] && break; sleep 0.1; done
+  kill -KILL -- "-$group_pid" 2>/dev/null || true
+  wait "$group_pid" 2>/dev/null || true
+  sleep 0.3
+  check_not kill -0 "$(cat "$state/slow.pid")" 2>/dev/null
+  rm -rf "$TMP/direct-runs"/gemini-dispatch.*
+fi
 check test -z "$(find "$TMP/direct-runs" -mindepth 1 -maxdepth 1)"
 
 # A relative TMPDIR still gives the CLI an absolute home and temp directory.
