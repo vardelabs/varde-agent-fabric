@@ -188,7 +188,11 @@ it, kills any that remain, and then removes the scratch. The CLI stays in the ba
 group stops it too; only that SIGKILL, which no trap sees, can leave the
 scratch behind.
 
-It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
+It uses only the CLI's own Google sign-in, which needs a Gemini Code Assist
+Standard or Enterprise licence. Since 2026-06-18 Google no longer serves Gemini
+CLI to personal Google AI Pro, Ultra, or free individual accounts; their sign-in
+fails with "This client is no longer supported for Gemini Code Assist for
+individuals". Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
 rules as `DISPATCH_OPENCODE_HOME`.
 
@@ -264,7 +268,8 @@ Any other CLI failure returns the CLI's status with its error type and message,
 except that a status of 75, which means limit reached to the dispatcher, becomes 1.
 
 To sign in, run the CLI once, interactively, as the worker user, with the
-dedicated home. Choose "Sign in with Google" and finish the browser flow. The
+dedicated home, with an account that holds that licence. Choose "Sign in with
+Google" and finish the browser flow. The
 CLI stores the credential in the dedicated home.
 
 ```text
