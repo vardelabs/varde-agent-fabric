@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from contracts.review_contracts import MAX_TRANSPORT_BYTES, ReviewArtifact
 from dispatch.adapters.base import LOCAL_REVIEW_CONTRACT, Adapter, LocalReviewFallback, caller_base_env
+from dispatch.adapters.review_output import normalized_findings, streamed_findings_payload
 
 if TYPE_CHECKING:
     from contracts.review_contracts import ReviewRequest
@@ -82,6 +83,11 @@ def opencode_findings(raw: bytes) -> tuple[dict[str, object], ...]:
             raise RuntimeError("local OpenCode returned a non-object finding")
         findings.append(item)
     return tuple(findings)
+
+
+def parse_review(raw: bytes) -> tuple[dict[str, object], ...]:
+    """OpenCode streams text events; the final one, unwrapped from a whole fence, holds the findings."""
+    return normalized_findings(streamed_findings_payload(_text_parts(raw)))
 
 
 def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> ReviewArtifact:
@@ -194,7 +200,7 @@ ADAPTER = Adapter(
         env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH"),
     ),
     implement_model=IMPLEMENT_MODEL,
-    parse_review=opencode_findings,
+    parse_review=parse_review,
     detect_limit=detect_limit,
     label="OpenCode",
 )
