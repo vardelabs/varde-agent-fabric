@@ -188,7 +188,17 @@ it, kills any that remain, and then removes the scratch. The CLI stays in the ba
 group stops it too; only that SIGKILL, which no trap sees, can leave the
 scratch behind.
 
-It uses only the CLI's own Google sign-in. Set `DISPATCH_GEMINI_HOME` to a
+It uses only the CLI's own Google sign-in, which needs a Gemini Code Assist
+Standard or Enterprise licence. Since 2026-06-18 Google no longer serves Gemini
+CLI to personal Google AI Pro, Ultra, or free individual accounts; their sign-in
+fails with "This client is no longer supported for Gemini Code Assist for
+individuals". Google stopped selling new Code Assist Standard and Enterprise
+subscriptions on 2026-10-09 and points new buyers to Antigravity, so this
+backend serves only an existing subscription. It also passes the CLI no Google
+Cloud project (`GOOGLE_CLOUD_PROJECT`), so it cannot serve a licence whose
+sign-in needs one; the CLI then fails with `ProjectIdRequiredError`. Check the
+sign-in with the real licensed account first, as "Adding a Backend" describes.
+Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
 rules as `DISPATCH_OPENCODE_HOME`.
 
@@ -227,8 +237,9 @@ these values:
   tools.
 - Folder trust prompts, auto-update, and usage statistics turned off.
 
-A Workspace admin of the signed-in account can require MCP servers through
-remote admin controls, which no local setting overrides; use a personal account.
+The administrator of the licensed account can require MCP servers through
+remote admin controls, which no local setting overrides. Use the backend only
+with an account whose admin controls require none, or that you administer.
 
 A review runs in the workdir with it untrusted
 (`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
@@ -264,7 +275,8 @@ Any other CLI failure returns the CLI's status with its error type and message,
 except that a status of 75, which means limit reached to the dispatcher, becomes 1.
 
 To sign in, run the CLI once, interactively, as the worker user, with the
-dedicated home. Choose "Sign in with Google" and finish the browser flow. The
+dedicated home, with an account that holds that licence. Choose "Sign in with
+Google" and finish the browser flow. The
 CLI stores the credential in the dedicated home.
 
 ```text
@@ -320,6 +332,14 @@ Remote reviews retain their existing route.
 `dispatch/adapters/` is the one registry for every role that calls a model,
 in this repository and in a deployment that imports it. A backend is two files
 and one registration line. No other part of the dispatcher changes.
+
+Before writing a backend that runs under a subscription or account sign-in,
+check that the sign-in works for the target account type, headless, as the
+service user the deployment will run it as, which has no login shell. Note
+where the credential is stored: a system keyring, for example, may not exist for
+that user. Tests against the CLI source or a stub cannot show this: they prove
+what the CLI does with a credential, never that the service still accepts that
+account type.
 
 1. `dispatch/cli/backends/<name>.sh`, executable. It reads the runtime contract
    above from its environment, runs the tool, and writes one artifact to
