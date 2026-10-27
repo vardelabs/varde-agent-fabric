@@ -26,6 +26,7 @@ db.execute("INSERT INTO credential VALUES ('other-1', 'other', 'Other', '{\"key\
 db.commit()
 EOF
 
+printf '%s' "$signin_db" > "$state/signin-path"
 pass=0
 check() { "$@"; pass=$((pass + 1)); }
 check_not() { if "$@"; then printf 'unexpected match: %s\n' "$*" >&2; exit 1; fi; pass=$((pass + 1)); }
@@ -64,6 +65,23 @@ PY
     text '[{"severity":"major","title":"Auth bypass","path":"app.py","line":"3"}]' ;;
   limit) printf '{"type":"error","error":{"type":"provider.rate_limit","status":429,"message":"slow down"}}\n'; exit 1 ;;
   not-entitled) printf '{"type":"error","error":{"type":"provider.api","status":403,"message":"The caller does not have permission"}}\n'; exit 1 ;;
+  stale)
+    python3 - "$(cat "$state/signin-path")" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("UPDATE credential SET value = '{\"refresh\":\"other-run\"}' WHERE id = 'xai-1'")
+db.commit()
+PY
+    text '[]' ;;
+  race)
+    python3 - "$(cat "$state/signin-path")" "$OPENCODE_DB" <<'PY'
+import sqlite3, sys
+for path, value in ((sys.argv[1], "other-run"), (sys.argv[2], "this-run")):
+    db = sqlite3.connect(path)
+    db.execute("UPDATE credential SET value = ? WHERE id = 'xai-1'", ('{"refresh":"%s"}' % value,))
+    db.commit()
+PY
+    text '[]' ;;
   exit-75) printf '{"type":"error","error":{"type":"provider.api","status":500}}\n'; exit 75 ;;
   slow) sleep 8 & printf '%s' "$!" > "$state/slow-child.pid"; printf '%s' "$$" > "$state/slow.pid"; wait ;;
 esac
@@ -87,6 +105,7 @@ direct() {  # direct <out-name> [env assignments...]: the backend outside the di
     DISPATCH_OUTPUT="$TMP/$name" "$@" /bin/bash "$ROOT/dispatch/cli/backends/grok.sh" \
     >/dev/null 2>"$TMP/$name.stderr") || status=$?
 }
+set_credential() { python3 -c 'import sqlite3,sys;d=sqlite3.connect(sys.argv[1]);d.execute("UPDATE credential SET value=? WHERE id=?",(sys.argv[3],sys.argv[2]));d.commit()' "$signin_db" "$1" "$2"; }
 credential() { python3 -c 'import sqlite3,sys;print((sqlite3.connect(sys.argv[1]).execute("SELECT value FROM credential WHERE id=?",(sys.argv[2],)).fetchone() or ["none"])[0])' "$signin_db" "$1"; }
 
 run ok out-review --kind review --diff "$TMP/change.diff" --task private-task-sentinel
@@ -104,9 +123,10 @@ check grep -qE "^tmpdir=$TMP/runs/grok-dispatch\.[A-Za-z0-9]+/tmp$" "$record"
 check grep -qE "^db=$TMP/runs/grok-dispatch\.[A-Za-z0-9]+/opencode\.db$" "$record"
 check grep -qxF 'project_config_off=1' "$record"
 check grep -qF '"enabled_providers":["xai"]' "$record"
-for action in shell edit webfetch websearch skill subagent question external_directory; do
-  check grep -qF "\"$action\":\"deny\"" "$record"
-done
+# Every tool is denied but the three that read the workdir, so code mode's
+# execute, and any tool a later release adds, is never offered.
+check grep -qF '"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","external_directory":"deny"}' "$record"
+check test "$(grep '^config=' "$record" | grep -o '"allow"' | wc -l)" -eq 3
 check grep -qxF 'leaked=' "$record"
 # The review is parsed by OpenCode's rules and normalised to the contract.
 check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-review")" \
@@ -118,6 +138,28 @@ check test "$(credential other-1)" = '{"key":"stored"}'
 check test "$(credential xai-2)" = none
 check test "$(python3 -c 'import sqlite3,sys;print(sqlite3.connect(sys.argv[1]).execute("SELECT count(*) FROM session").fetchone()[0])' "$signin_db")" = 0
 check test -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)"
+
+# A token another run refreshed since this run started is never overwritten,
+# whether this run left its copy alone or refreshed it too.
+for scenario in stale race; do
+  set_credential xai-1 '{"refresh":"stored"}'
+  run "$scenario" "out-$scenario" --kind review --diff "$TMP/change.diff" --task t
+  check test "$status" -eq 0
+  check test "$(credential xai-1)" = '{"refresh":"other-run"}'
+done
+
+# The read tools count the whole enclosing git checkout as inside the workdir, so
+# the workdir must be its top level.
+if command -v git >/dev/null 2>&1; then
+  mkdir -p "$TMP/repo/sub"
+  git -C "$TMP/repo" init -q
+  printf '%s' ok > "$state/scenario"
+  direct out-repo-sub DISPATCH_WORKDIR="$TMP/repo/sub"
+  check test "$status" -eq 2
+  check grep -qF 'top level of its git checkout' "$TMP/out-repo-sub.stderr"
+  direct out-repo-top DISPATCH_WORKDIR="$TMP/repo"
+  check test "$status" -eq 0
+fi
 
 # Only the provider's own 429 event is a limit; a 403 says the plan is not
 # entitled; a CLI exit of 75 for another reason is not a limit.

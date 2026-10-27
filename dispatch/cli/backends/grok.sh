@@ -23,6 +23,15 @@ model="$DISPATCH_MODEL"
 [[ "${DISPATCH_KIND:-}" == review ]] || fail 'Grok supports only --kind review'
 [[ ! -d "$DISPATCH_OUTPUT" ]] || fail 'DISPATCH_OUTPUT must not be a directory'
 
+# OpenCode counts the whole enclosing git checkout as inside the workdir, so the
+# workdir must be that checkout's top level, where the checks below look.
+if command -v git >/dev/null 2>&1; then
+  toplevel="$(env -i PATH="$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -c core.fsmonitor= -C "$workdir_real" rev-parse --show-toplevel 2>/dev/null)" || toplevel=""
+  [[ -z "$toplevel" || "$(realpath -- "$toplevel")" == "$workdir_real" ]] \
+    || fail 'Grok needs the workdir to be the top level of its git checkout'
+fi
+
 # OpenCode decides whether a path is inside the workdir from the path text, so a
 # link in the reviewed tree would let its read tools reach a file outside it,
 # such as the sign-in database at its fixed place in the dedicated home.
@@ -51,15 +60,16 @@ make_scratch Grok DISPATCH_GROK_HOME grok-dispatch
 # process arguments that other users can read.
 printf '%s' "$prompt" > "$scratch/prompt"
 mkdir -p "$scratch/home" "$scratch/tmp"
-python3 "$backends/opencode_signin.py" snapshot "$signin_db" "$scratch/opencode.db"
+python3 "$backends/opencode_signin.py" snapshot "$signin_db" "$scratch/opencode.db" "$scratch/signin-values.json" xai
 
 # The per-run home is empty, so no global config, agent, skill, plugin, or MCP
 # server loads, and project config is off, so none loads from the workdir. Only
-# the xAI provider is enabled. The plan agent cannot edit; these denies also stop
-# it running a command, reaching the web, starting a subagent or skill, asking a
-# question no one answers, or reading outside the workdir.
-config='{"enabled_providers":["xai"],"permission":{"shell":"deny","edit":"deny","webfetch":"deny",'
-config+='"websearch":"deny","skill":"deny","subagent":"deny","question":"deny","external_directory":"deny"}}'
+# the xAI provider is enabled. Every tool is denied but the three that read the
+# workdir: a deny list would miss a tool such as code mode's execute, which can
+# fetch from the network and move the session's directory, or one a later
+# release adds.
+config='{"enabled_providers":["xai"],"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow",'
+config+='"external_directory":"deny"}}'
 # The CLI gets only this environment, so a proxy, NODE_OPTIONS, or an endpoint
 # override never reaches it, even when this backend runs outside the dispatcher.
 cli_env=(PATH="$PATH" HOME="$scratch/home" TMPDIR="$scratch/tmp" OPENCODE_DB="$scratch/opencode.db"
@@ -71,7 +81,7 @@ cli_env=(PATH="$PATH" HOME="$scratch/home" TMPDIR="$scratch/tmp" OPENCODE_DB="$s
 run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
   'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model"
 # A refreshed token is kept even when the review failed.
-python3 "$backends/opencode_signin.py" writeback "$scratch/opencode.db" "$signin_db" xai \
+python3 "$backends/opencode_signin.py" writeback "$scratch/opencode.db" "$signin_db" "$scratch/signin-values.json" xai \
   || printf 'Grok could not keep a refreshed sign-in; the next run signs in from the stored one\n' >&2
 
 if ((status != 0)); then

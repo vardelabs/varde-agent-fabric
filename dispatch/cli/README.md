@@ -286,18 +286,27 @@ refusal of a `TMPDIR` or sign-in home inside the workdir.
 - **Sign-in:** OpenCode keeps sign-ins in the same SQLite database as its
   sessions, and a session holds the reviewed diff. Each run therefore works on a
   private copy of `DISPATCH_GROK_HOME/.local/share/opencode/opencode.db`, made
-  with SQLite's backup API. Afterwards, only a changed value of an existing
-  `xai` credential is written back, so a refreshed token is kept. No session
-  and no new credential flows back.
+  with SQLite's backup API. Afterwards, only a value the run itself changed,
+  of an existing `xai` credential, is written back, so a refreshed token is
+  kept. It is written only while the sign-in still holds the value the run
+  started from, so an earlier run never overwrites a token a later one
+  refreshed. No session and no new credential flows back.
 - **Configuration:** the per-run home is empty, so no global config, agent,
   skill, plugin, or MCP server loads. `OPENCODE_DISABLE_PROJECT_CONFIG=1` stops
   the workdir's `opencode.json`, `.opencode`, `.claude`, `.agents`, and
   instruction files loading. `--standalone` keeps the run off a shared
   background service. Only the `xai` provider is enabled, and the `plan` agent
-  runs with `shell`, `edit`, `webfetch`, `websearch`, `skill`, `subagent`,
-  `question`, and `external_directory` denied.
-- **Links:** OpenCode decides from the path text whether a file is inside the
-  workdir, so a run refuses a workdir that holds a link resolving outside it.
+  runs with every tool denied but `read`, `glob`, and `grep`. A deny list would
+  miss code mode's `execute`, which can reach the network and move the
+  session's directory, and any tool a later release adds.
+- **Instruction files:** after a read, OpenCode loads any `AGENTS.md` between
+  the file and the workdir as an instruction, and no setting stops it. That
+  gives reviewed text no more than the diff already has: the read tools are the
+  only tools, so it can only steer the review.
+- **Workdir:** OpenCode treats the whole enclosing git checkout as inside the
+  workdir, so the workdir must be that checkout's top level. It also decides
+  from the path text whether a file is inside, so a run refuses a workdir that
+  holds a link resolving outside it.
 - **Limits:** only OpenCode's own 429 or `*.quota` error event reads as "limit
   reached". A 403 is reported as a plan that is not entitled to the model. A CLI
   exit of 75 for any other reason becomes 1.
