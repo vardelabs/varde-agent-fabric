@@ -326,6 +326,14 @@ Remote reviews retain their existing route.
 in this repository and in a deployment that imports it. A backend is two files
 and one registration line. No other part of the dispatcher changes.
 
+Before writing a backend that runs under a subscription or account sign-in,
+check that the sign-in works for the target account type, headless, as the
+service user the deployment will run it as, which has no login shell. Note
+where the credential is stored: a system keyring, for example, may not exist for
+that user. Tests against the CLI source or a stub cannot show this: they prove
+what the CLI does with a credential, never that the service still accepts that
+account type.
+
 1. `dispatch/cli/backends/<name>.sh`, executable. It reads the runtime contract
    above from its environment, runs the tool, and writes one artifact to
    `DISPATCH_OUTPUT`. It exits 0 on success, 75 when the provider's usage limit
