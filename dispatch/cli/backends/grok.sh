@@ -59,7 +59,16 @@ if [[ -n "${DISPATCH_DIFF:-}" ]]; then
 fi
 unset DISPATCH_TASK DISPATCH_DIFF
 
-# The scratch holds the run's copy of the sign-in database, and its session.
+# The scratch holds the run's copy of the sign-in database, and its session. A
+# refreshed token is kept on every exit, a timeout's TERM included, once the CLI
+# has stopped writing it.
+keep_refreshed_signin() {
+  [[ -f "$scratch/signin-values.json" ]] || return 0
+  python3 "$backends/opencode_signin.py" writeback "$scratch/opencode.db" "$signin_db" \
+    "$scratch/signin-values.json" xai \
+    || printf 'Grok could not keep a refreshed sign-in; the next run signs in from the stored one\n' >&2
+}
+before_scratch_removed=keep_refreshed_signin
 make_scratch Grok DISPATCH_GROK_HOME grok-dispatch
 # The prompt goes on stdin, which OpenCode appends to its message, never in
 # process arguments that other users can read.
@@ -85,9 +94,6 @@ cli_env=(PATH="$PATH" HOME="$scratch/home" TMPDIR="$scratch/tmp" OPENCODE_DB="$s
 # configuration was fixed when it started.
 run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
   'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model"
-# A refreshed token is kept even when the review failed.
-python3 "$backends/opencode_signin.py" writeback "$scratch/opencode.db" "$signin_db" "$scratch/signin-values.json" xai \
-  || printf 'Grok could not keep a refreshed sign-in; the next run signs in from the stored one\n' >&2
 
 if ((status != 0)); then
   python3 "$backends/opencode_errors.py" "$scratch/stdout" >&2

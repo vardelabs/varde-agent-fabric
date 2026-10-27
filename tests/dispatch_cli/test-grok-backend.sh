@@ -92,7 +92,14 @@ for path, value in ((sys.argv[1], "other-run"), (sys.argv[2], "this-run")):
 PY
     text '[]' ;;
   exit-75) printf '{"type":"error","error":{"type":"provider.api","status":500}}\n'; exit 75 ;;
-  slow) sleep 8 & printf '%s' "$!" > "$state/slow-child.pid"; printf '%s' "$$" > "$state/slow.pid"; wait ;;
+  slow)
+    python3 - "$OPENCODE_DB" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("UPDATE credential SET value = '{\"refresh\":\"before-term\"}' WHERE id = 'xai-1'")
+db.commit()
+PY
+    sleep 8 & printf '%s' "$!" > "$state/slow-child.pid"; printf '%s' "$$" > "$state/slow.pid"; wait ;;
 esac
 EOF
 chmod +x "$TMP/bin/opencode"
@@ -259,7 +266,8 @@ check grep -qF 'TMPDIR and DISPATCH_GROK_HOME outside the workdir' "$TMP/out-tmp
 rm -rf "$TMP/work/tmp-inside"
 
 # TERM through the dispatcher stops the CLI's whole tree and removes the scratch,
-# with the run's copy of the sign-in in it.
+# with the run's copy of the sign-in in it, after keeping a token it refreshed.
+set_credential xai-1 '{"refresh":"stored"}'
 printf '%s' slow > "$state/scenario"
 rm -f "$state/slow.pid"
 HOME="$TMP/caller-home" PATH="$TMP/bin:/usr/bin:/bin" DISPATCH_GROK_HOME="$TMP/grok-home" TMPDIR="$TMP/runs" \
@@ -278,5 +286,6 @@ for _ in $(seq 30); do [[ -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)" ]] &&
 check test -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)"
 check_not alive "$(cat "$state/slow.pid")"
 check_not alive "$(cat "$state/slow-child.pid")"
+check test "$(credential xai-1)" = '{"refresh":"before-term"}'
 
 printf 'grok backend tests: %s passed\n' "$pass"

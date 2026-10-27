@@ -74,10 +74,13 @@ stop_cli() {
 # because the CLI starts in the workdir, removed on every exit after the CLI has
 # stopped. The CLI can read its workdir, so neither the scratch nor the sign-in
 # may be in it. Needs workdir_real and dedicated_home_real set first. Sets scratch.
+# A caller that must keep something from the scratch names a function in
+# before_scratch_removed; it runs on every exit, signals included, once the CLI
+# has stopped.
 make_scratch() {
   local label="$1" variable="$2" private_path
   scratch="$(realpath -- "$(mktemp -d "${TMPDIR:-/tmp}/$3.XXXXXX")")"
-  trap 'stop_cli; rm -rf -- "$scratch"' EXIT
+  trap 'stop_cli; ${before_scratch_removed:+"$before_scratch_removed"}; rm -rf -- "$scratch"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   for private_path in "$scratch" "$dedicated_home_real"; do
