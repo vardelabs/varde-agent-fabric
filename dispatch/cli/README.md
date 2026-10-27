@@ -271,6 +271,45 @@ CLI stores the credential in the dedicated home.
 env -i HOME=/path/to/gemini-home GEMINI_CLI_HOME=/path/to/gemini-home PATH="$PATH" TERM="$TERM" gemini
 ```
 
+### Grok
+
+The `grok` backend reviews with Grok through OpenCode's built-in xAI provider,
+under the **SuperGrok Subscription** sign-in, never an API key. It serves
+`review` only and needs an `xai/<model>` id. Its output is OpenCode's event
+stream, so the adapter uses OpenCode's review parser and limit detector. It
+shares the Gemini backend's isolation (`backends/lib/review-isolation.sh`): the
+dedicated home rules, `PATH` entries resolved and kept outside the workdir, the
+CLI under `env -i`, a private scratch with its own temp directory that is
+removed on every exit once the CLI's whole process tree has stopped, and a
+refusal of a `TMPDIR` or sign-in home inside the workdir.
+
+- **Sign-in:** OpenCode keeps sign-ins in the same SQLite database as its
+  sessions, and a session holds the reviewed diff. Each run therefore works on a
+  private copy of `DISPATCH_GROK_HOME/.local/share/opencode/opencode.db`, made
+  with SQLite's backup API. Afterwards, only a changed value of an existing
+  `xai` credential is written back, so a refreshed token is kept. No session
+  and no new credential flows back.
+- **Configuration:** the per-run home is empty, so no global config, agent,
+  skill, plugin, or MCP server loads. `OPENCODE_DISABLE_PROJECT_CONFIG=1` stops
+  the workdir's `opencode.json`, `.opencode`, `.claude`, `.agents`, and
+  instruction files loading. `--standalone` keeps the run off a shared
+  background service. Only the `xai` provider is enabled, and the `plan` agent
+  runs with `shell`, `edit`, `webfetch`, `websearch`, `skill`, `subagent`,
+  `question`, and `external_directory` denied.
+- **Links:** OpenCode decides from the path text whether a file is inside the
+  workdir, so a run refuses a workdir that holds a link resolving outside it.
+- **Limits:** only OpenCode's own 429 or `*.quota` error event reads as "limit
+  reached". A 403 is reported as a plan that is not entitled to the model. A CLI
+  exit of 75 for any other reason becomes 1.
+
+To sign in, run OpenCode once, interactively, as the worker user, with the
+dedicated home, and choose xAI, then "SuperGrok Subscription". It prints a URL
+and a code to enter on any device.
+
+```text
+env -i HOME=/path/to/grok-home PATH="$PATH" TERM="$TERM" OPENCODE_DISABLE_CHANNEL_DB=1 OPENCODE_DISABLE_AUTOUPDATE=1 opencode auth login
+```
+
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
 oversized input before the backend reads it. The default Codex sandbox is
