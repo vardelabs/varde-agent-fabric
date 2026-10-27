@@ -194,7 +194,11 @@ CLI to personal Google AI Pro, Ultra, or free individual accounts; their sign-in
 fails with "This client is no longer supported for Gemini Code Assist for
 individuals". Google stopped selling new Code Assist Standard and Enterprise
 subscriptions on 2026-10-09 and points new buyers to Antigravity, so this
-backend serves only an existing subscription. Set `DISPATCH_GEMINI_HOME` to a
+backend serves only an existing subscription. It also passes the CLI no Google
+Cloud project (`GOOGLE_CLOUD_PROJECT`), so it cannot serve a licence whose
+sign-in needs one; the CLI then fails with `ProjectIdRequiredError`. Check the
+sign-in with the real licensed account first, as "Adding a Backend" describes.
+Set `DISPATCH_GEMINI_HOME` to a
 dedicated home that holds that sign-in, outside the caller home, under the same
 rules as `DISPATCH_OPENCODE_HOME`.
 
