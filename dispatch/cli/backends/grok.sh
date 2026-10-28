@@ -12,6 +12,8 @@ set -euo pipefail
 backends="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 # shellcheck source=lib/review-isolation.sh
 . "$backends/lib/review-isolation.sh"
+# shellcheck source=lib/review-steps.sh
+. "$backends/lib/review-steps.sh"
 
 require_dedicated_home Grok DISPATCH_GROK_HOME
 keep_path_outside_workdir
@@ -81,9 +83,10 @@ python3 "$backends/opencode_signin.py" snapshot "$signin_db" "$scratch/opencode.
 # the xAI provider is enabled. Every tool is denied but the three that read the
 # workdir: a deny list would miss a tool such as code mode's execute, which can
 # fetch from the network and move the session's directory, or one a later
-# release adds.
+# release adds. The plan agent's step limit ends a review that never stops
+# exploring.
 config='{"enabled_providers":["xai"],"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow",'
-config+='"external_directory":"deny"}}'
+config+='"external_directory":"deny"},"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
 # The CLI gets only this environment, so a proxy, NODE_OPTIONS, or an endpoint
 # override never reaches it, even when this backend runs outside the dispatcher.
 cli_env=(PATH="$PATH" HOME="$scratch/home" TMPDIR="$scratch/tmp" OPENCODE_DB="$scratch/opencode.db"
