@@ -68,7 +68,13 @@ model="$DISPATCH_MODEL"
 }
 
 case "${DISPATCH_KIND:-}" in
-  review) agent='plan' ;;
+  review)
+    agent='plan'
+    # shellcheck source=lib/review-steps.sh
+    . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/lib/review-steps.sh"
+    # Inline config merges over the native config, so only the step limit changes.
+    export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
+    ;;
   implement|passthrough)
     [[ "${DISPATCH_OPENCODE_ALLOW_WRITE:-}" == 1 ]] || {
       printf 'OpenCode implementation requires DISPATCH_OPENCODE_ALLOW_WRITE=1 (kind: %s)\n' "$DISPATCH_KIND" >&2
