@@ -8,9 +8,13 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
-from contracts.review_contracts import MAX_TRANSPORT_BYTES, ReviewArtifact
+from contracts.review_contracts import ReviewArtifact
 from dispatch.adapters.base import LOCAL_REVIEW_CONTRACT, Adapter, LocalReviewFallback, caller_base_env
 from dispatch.adapters.review_output import normalized_findings, streamed_findings_payload
+
+# The output is OpenCode's whole event stream, which carries the text of every file a tool read, and the
+# findings are parsed out of it; the artifact built from them is bounded by the contract's findings caps.
+MAX_EVENT_STREAM_BYTES = 16 * 1024 * 1024
 
 if TYPE_CHECKING:
     from contracts.review_contracts import ReviewRequest
@@ -126,9 +130,9 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
         if result.returncode != 0 or not local_output.is_file():
             raise RuntimeError("local OpenCode fallback backend failed")
         with local_output.open("rb") as stream:
-            raw = stream.read(MAX_TRANSPORT_BYTES + 1)
-        if len(raw) > MAX_TRANSPORT_BYTES:
-            raise RuntimeError("local OpenCode output exceeds the review artifact limit")
+            raw = stream.read(MAX_EVENT_STREAM_BYTES + 1)
+        if len(raw) > MAX_EVENT_STREAM_BYTES:
+            raise RuntimeError("local OpenCode event stream exceeds its size limit")
         findings = opencode_findings(raw)
         return ReviewArtifact(
             request.repository,
