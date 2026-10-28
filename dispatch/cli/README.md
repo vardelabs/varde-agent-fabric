@@ -116,7 +116,7 @@ The OpenCode adapter maps `review` to its `plan` agent and
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.
-A review caps the `plan` agent at the step limit in `backends/lib/review-steps.sh`,
+On 2.x a review caps the `plan` agent at the step limit in `backends/lib/review-steps.sh`,
 after which OpenCode takes the tools away and the model must answer, so a
 review that keeps exploring still writes findings before its time budget ends.
 The `grok` backend applies the same limit.
