@@ -94,6 +94,14 @@ if (( BASH_REMATCH[1] >= 2 )); then
   # in the workdir from loading. Without --standalone the run spawns a shared
   # background service that outlives this dispatch.
   export OPENCODE_DISABLE_PROJECT_CONFIG=1
+  if [[ "$agent" == plan ]]; then
+    # shellcheck source=lib/review-steps.sh
+    . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/lib/review-steps.sh"
+    # Inline config merges over the native config, so only the step limit
+    # changes. 1.x has no step limit and would pass an unknown agent key on to
+    # the provider as a model option.
+    export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
+  fi
   args=(opencode run "$prompt" --standalone --format json --agent "$agent" --model "$model")
 else
   args=(opencode run "$prompt" --pure --format json --agent "$agent" --model "$model" --dir "$DISPATCH_WORKDIR")
