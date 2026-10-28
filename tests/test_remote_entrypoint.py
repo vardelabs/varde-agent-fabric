@@ -13,7 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contracts.review_contracts import ContractError, ReviewArtifact, ReviewRequest
+from contracts.review_contracts import MAX_TRANSPORT_BYTES, ContractError, ReviewArtifact, ReviewRequest
 from dispatch.gateway_client import GatewayError, GatewayUnavailable
 from tests.adapter_doubles import patch_local_review
 from dispatch.remote_runner import RemoteReviewMetadata, build_review_request, run_remote_review
@@ -159,7 +159,7 @@ class RemoteEntrypointTests(unittest.TestCase):
         self.assertEqual(env["DISPATCH_DIFF"], str(diff))
         self.assertNotIn("DISPATCH_GATEWAY_TOKEN", env)
 
-    def test_opencode_local_fallback_runs_real_adapter_with_same_model_and_home(self):
+    def _run_real_opencode_fallback(self, prior_events: str = ""):
         model = "opencode-go/kimi-k3"
         with tempfile.TemporaryDirectory() as workdir:
             root = Path(workdir)
@@ -169,7 +169,7 @@ class RemoteEntrypointTests(unittest.TestCase):
             caller_home.mkdir()
             opencode_home.mkdir()
             fake_bin.mkdir()
-            events = json.dumps({"type": "text", "part": {"text": json.dumps([
+            events = prior_events + json.dumps({"type": "text", "part": {"text": json.dumps([
                 {"severity": "red", "message": "verified finding"}
             ])}}) + "\n" + json.dumps({"type": "step_finish"}) + "\n"
             (opencode_home / "events.jsonl").write_text(events, encoding="utf-8")
@@ -211,10 +211,21 @@ cat "$HOME/events.jsonl"
                     except GatewayUnavailable as exc:
                         self.fail(f"expected local OpenCode fallback, got remote failure: {exc}")
         self.assertEqual(result.provider, model)
+        return result
+
+    def test_opencode_local_fallback_runs_real_adapter_with_same_model_and_home(self):
+        result = self._run_real_opencode_fallback()
         self.assertEqual(result.worker_kind, "opencode")
         self.assertEqual(result.execution_location, "requester")
         self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
         self.assertEqual(result.fallback, "cluster-unavailable-local-opencode")
+
+    def test_opencode_fallback_reads_a_stream_longer_than_the_transport_limit(self):
+        # A review that reads files streams their text as tool events before its small final findings.
+        read = json.dumps({"type": "tool_use", "part": {"tool": "read", "state": {"output": "x" * 10240}}}) + "\n"
+        reads = read * (MAX_TRANSPORT_BYTES // len(read) + 2)
+        result = self._run_real_opencode_fallback(reads)
+        self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
 
     def test_opencode_fallback_does_not_run_for_http_400(self):
         metadata = self.metadata(harness="opencode", model="opencode-go/qwen3.8-flash")
