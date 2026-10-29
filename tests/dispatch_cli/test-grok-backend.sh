@@ -144,7 +144,7 @@ check grep -qF '"enabled_providers":["xai"]' "$record"
 check grep -qF '"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","external_directory":"deny"}' "$record"
 check test "$(grep '^config=' "$record" | grep -o '"allow"' | wc -l)" -eq 3
 # A review that never stops exploring is cut to a text answer at the step limit.
-check grep -qF '"agent":{"plan":{"steps":16}}' "$record"
+check grep -qF '"agent":{"plan":{"steps":10}}' "$record"
 check grep -qxF 'leaked=' "$record"
 # The review is parsed by OpenCode's rules and normalised to the contract.
 check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-review")" \
