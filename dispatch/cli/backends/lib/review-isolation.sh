@@ -59,6 +59,7 @@ any_alive() {
 # only once the CLI can no longer write into it. It stays in this process group,
 # so a SIGKILL to the group still reaches it.
 stop_cli() {
+  if declare -F stop_watchdog >/dev/null; then stop_watchdog; fi
   [[ -n "$cli_pid" ]] || return 0
   local tree
   tree="$(process_tree "$cli_pid")"
@@ -91,13 +92,16 @@ make_scratch() {
 }
 
 # run_cli <stdin> <stdout> <stderr> <command...>: runs the CLI in the workdir
-# with only the environment in cli_env, and sets status.
+# with only the environment in cli_env, and sets status. A non-empty
+# cli_time_limit stops it after that many seconds (watch_pid, review-steps.sh).
 run_cli() {
   local stdin="$1" stdout="$2" stderr="$3"
   shift 3
   status=0
   (cd -- "$DISPATCH_WORKDIR" && exec env -i "${cli_env[@]}" "$@") <"$stdin" >"$stdout" 2>"$stderr" &
   cli_pid=$!
+  if [[ -n "${cli_time_limit:-}" ]]; then watch_pid "$cli_time_limit" "$cli_pid"; fi
   wait "$cli_pid" || status=$?
+  if [[ -n "${cli_time_limit:-}" ]]; then stop_watchdog; fi
   cli_pid=""
 }

@@ -116,10 +116,13 @@ The OpenCode adapter maps `review` to its `plan` agent and
 provider authentication from OpenCode's native user configuration. The
 dispatcher does not pass OpenCode provider keys or add OpenCode as a Codex
 fallback. Review diffs are attached with OpenCode's native `--file` option.
-On 2.x a review caps the `plan` agent at the step limit in `backends/lib/review-steps.sh`,
-after which OpenCode takes the tools away and the model must answer, so a
-review that keeps exploring still writes findings before its time budget ends.
-The `grok` backend applies the same limit.
+On 2.x, when a review's final text is not findings, the backend resumes the
+run's session once, with every tool denied, and asks for the findings alone.
+That covers a run OpenCode ends at the `plan` agent's step limit, whose forced
+turn writes a work summary. With `DISPATCH_DEADLINE_EPOCH` (unix seconds), the
+exploring run stops early enough to leave the final turn its time, and a review
+with too little time left fails with exit status 124. The limits are in
+`backends/lib/review-steps.sh`. The `grok` backend does the same.
 The adapter reads `opencode --version` and supports the 1.x and 2.x CLIs. On
 1.x it invokes `--pure`, `--format json`, `--agent`, `--model`, `--dir`, and
 `--file`. On 2.x, which removed `--pure` and `--dir`, it runs from the workdir

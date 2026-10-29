@@ -67,6 +67,12 @@ model="$DISPATCH_MODEL"
   exit 2
 }
 
+backends="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+# shellcheck source=lib/review-steps.sh
+. "$backends/lib/review-steps.sh"
+final_turn=""
+review_deadline=""
+
 case "${DISPATCH_KIND:-}" in
   review) agent='plan' ;;
   implement|passthrough)
@@ -95,12 +101,12 @@ if (( BASH_REMATCH[1] >= 2 )); then
   # background service that outlives this dispatch.
   export OPENCODE_DISABLE_PROJECT_CONFIG=1
   if [[ "$agent" == plan ]]; then
-    # shellcheck source=lib/review-steps.sh
-    . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/lib/review-steps.sh"
     # Inline config merges over the native config, so only the step limit
     # changes. 1.x has no step limit and would pass an unknown agent key on to
-    # the provider as a model option.
+    # the provider as a model option, so it gets no final turn either.
     export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
+    final_turn=1
+    read_review_deadline
   fi
   args=(opencode run "$prompt" --standalone --format json --agent "$agent" --model "$model")
 else
@@ -130,20 +136,73 @@ fi
 # OpenCode reads provider authentication from its native per-user config. The
 # dispatcher gives it only the dedicated OpenCode home and no provider secret.
 temporary_output="$(mktemp "${DISPATCH_OUTPUT}.opencode.XXXXXX")"
-cleanup() { rm -f -- "$temporary_output"; }
+final_output=""
+opencode_pid=""
+# A TERM or INT to this backend ends the CLI's whole tree too, which runs in the
+# background so the watchdog can reach it.
+cleanup() {
+  stop_watchdog
+  [[ -z "$opencode_pid" ]] || stop_tree "$opencode_pid"
+  rm -f -- "$temporary_output" ${final_output:+"$final_output" "$final_output.combined"}
+}
 trap cleanup EXIT
-# v2 has no --dir and resolves the project from the working directory. Both
-# CLIs append a non-terminal stdin to the prompt and block until it closes.
-status=0
-(cd -- "$DISPATCH_WORKDIR" && exec "${args[@]}") </dev/null >"$temporary_output" || status=$?
-if ((status != 0)); then
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# run_opencode <time limit> <output> <command...>: sets status. v2 has no --dir
+# and resolves the project from the working directory. Both CLIs append a
+# non-terminal stdin to the prompt and block until it closes.
+run_opencode() {
+  local limit="$1" output="$2"
+  shift 2
+  status=0
+  (cd -- "$DISPATCH_WORKDIR" && exec "$@") </dev/null >"$output" &
+  opencode_pid=$!
+  watch_pid "$limit" "$opencode_pid"
+  wait "$opencode_pid" || status=$?
+  stop_watchdog
+  opencode_pid=""
+}
+report_failed_run() {
   # `--format json` reports failures as error events on stdout, so stderr alone
   # is empty. Only top-level error events are copied: other events, including
   # tool results with a nested error type, can quote files the agent read.
   printf 'opencode run failed with exit status %d\n' "$status" >&2
-  grep -E '^\{"type":"error"' -- "$temporary_output" | tail -c 4096 >&2 \
+  grep -E '^\{"type":"error"' -- "$1" | tail -c 4096 >&2 \
     || printf 'opencode reported no error event\n' >&2
   exit "$status"
+}
+out_of_time() { printf '%s\n' "$review_out_of_time" >&2; exit 124; }
+
+explore_limit="$(review_explore_limit)"
+[[ -z "$explore_limit" ]] || ((explore_limit > 0)) || out_of_time
+run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
+((status == 0)) || stopped_by_watchdog || report_failed_run "$temporary_output"
+
+# A review stopped at its step limit has written no findings, and one stopped
+# at its time cut may hold only an early snapshot, so its session is resumed
+# once, with every tool denied, to write them (review_final.py finalize). A cut run
+# with no session to resume is out of time; an uncut stream that names none
+# goes to the caller's parser as it is.
+if [[ -n "$final_turn" ]] \
+  && { stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$temporary_output"; }; then
+  if ! session="$(python3 "$backends/review_final.py" session "$temporary_output")"; then
+    ! stopped_by_watchdog || out_of_time
+  else
+    seconds_left="$(review_seconds_left)"
+    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || out_of_time
+    final_output="$(mktemp "${DISPATCH_OUTPUT}.opencode-final.XXXXXX")"
+    export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}},"permission":'"$review_final_permission"'}'
+    run_opencode "${seconds_left:+$((seconds_left - 5))}" "$final_output" opencode run "$review_final_prompt" \
+      --session "$session" --standalone --format json --agent plan --model "$model"
+    ! stopped_by_watchdog || out_of_time
+    ((status == 0)) || report_failed_run "$final_output"
+    python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined" || {
+      printf 'OpenCode review final turn wrote no valid findings\n' >&2
+      exit 1
+    }
+    mv -f -- "$final_output.combined" "$temporary_output"
+  fi
 fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
+rm -f -- ${final_output:+"$final_output" "$final_output.combined"}
 trap - EXIT

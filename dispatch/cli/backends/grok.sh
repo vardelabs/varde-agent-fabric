@@ -83,8 +83,8 @@ python3 "$backends/opencode_signin.py" snapshot "$signin_db" "$scratch/opencode.
 # the xAI provider is enabled. Every tool is denied but the three that read the
 # workdir: a deny list would miss a tool such as code mode's execute, which can
 # fetch from the network and move the session's directory, or one a later
-# release adds. The plan agent's step limit ends a review that never stops
-# exploring.
+# release adds. The plan agent's step limit is a backstop for a review that
+# never stops exploring; the final turn below writes the findings.
 config='{"enabled_providers":["xai"],"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow",'
 config+='"external_directory":"deny"},"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
 # The CLI gets only this environment, so a proxy, NODE_OPTIONS, or an endpoint
@@ -93,15 +93,45 @@ cli_env=(PATH="$PATH" HOME="$scratch/home" TMPDIR="$scratch/tmp" OPENCODE_DB="$s
   OPENCODE_CONFIG_CONTENT="$config" OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CHANNEL_DB=1
   OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_DISABLE_FILEWATCHER=1)
 
+report_failed_run() {
+  python3 "$backends/opencode_errors.py" "$1" >&2
+  # 75 means limit reached to the dispatcher, which reads that from the events.
+  exit $((status == 75 ? 1 : status))
+}
+
+read_review_deadline
+cli_time_limit="$(review_explore_limit)"
+[[ -z "$cli_time_limit" ]] || ((cli_time_limit > 0)) || fail "$review_out_of_time" 124
 # Without --standalone the run attaches to a shared background service, whose
 # configuration was fixed when it started.
 run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
   'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model"
+((status == 0)) || stopped_by_watchdog || report_failed_run "$scratch/stdout"
 
-if ((status != 0)); then
-  python3 "$backends/opencode_errors.py" "$scratch/stdout" >&2
-  # 75 means limit reached to the dispatcher, which reads that from the events.
-  exit $((status == 75 ? 1 : status))
+# A run stopped at its step limit has written no findings, and one stopped at
+# its time cut may hold only an early snapshot, so its session is resumed once,
+# with every tool denied, to write them (review_final.py finalize). A cut run with no
+# session to resume is out of time; an uncut stream that names none goes to the
+# caller's parser as it is.
+if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; then
+  if ! session="$(python3 "$backends/review_final.py" session "$scratch/stdout")"; then
+    ! stopped_by_watchdog || fail "$review_out_of_time" 124
+  else
+    seconds_left="$(review_seconds_left)"
+    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124
+    final_config='{"enabled_providers":["xai"],"permission":'"$review_final_permission"'}'
+    for index in "${!cli_env[@]}"; do
+      [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
+    done
+    cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
+    run_cli /dev/null "$scratch/final-stdout" "$scratch/final-stderr" opencode run "$review_final_prompt" \
+      --session "$session" --standalone --format json --agent plan --model "$model"
+    ! stopped_by_watchdog || fail "$review_out_of_time" 124
+    ((status == 0)) || report_failed_run "$scratch/final-stdout"
+    python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined" \
+      || fail 'Grok review final turn wrote no valid findings' 1
+    mv -f -- "$scratch/combined" "$scratch/stdout"
+  fi
 fi
 output_dir="$(dirname -- "$DISPATCH_OUTPUT")"
 staged="$(mktemp "$output_dir/.grok-output.XXXXXX")"
