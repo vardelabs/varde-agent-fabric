@@ -69,6 +69,12 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
     else text "$summary"; fi ;;
   summary-twice) session_start; text "$summary" ;;
+  early-findings-no-session)
+    text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait ;;
+  early-findings-silent-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then printf '{"type":"step_finish","part":{}}\n'
+    else text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   early-findings-hang)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Full","path":"app.py","line":"4"}]'
@@ -363,6 +369,23 @@ direct out-early-findings DISPATCH_DEADLINE_EPOCH="$((started + 36))"
 check test "$status" -eq 0
 check test "$(wc -l < "$state/calls")" -eq 2
 check grep -qF 'Full' "$TMP/out-early-findings"
+printf '%s' hang > "$state/scenario"
+
+# A cut run with no session to resume is out of time, never a clean early [].
+: > "$state/calls"
+printf '%s' early-findings-no-session > "$state/scenario"
+direct out-no-session DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
+check test "$status" -eq 124
+check test "$(wc -l < "$state/calls")" -eq 1
+check_not test -e "$TMP/out-no-session"
+
+# The final turn's own text must be findings; an earlier snapshot does not count.
+: > "$state/calls"
+printf '%s' early-findings-silent-final > "$state/scenario"
+direct out-silent-final DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
+check test "$status" -eq 1
+check grep -qF 'final turn wrote no findings' "$TMP/out-silent-final.stderr"
+check_not test -e "$TMP/out-silent-final"
 printf '%s' hang > "$state/scenario"
 
 # The dispatcher passes the deadline on to the backend.

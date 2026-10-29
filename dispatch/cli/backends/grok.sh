@@ -110,23 +110,27 @@ run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
 
 # A run stopped at its step limit has written no findings, and one stopped at
 # its time cut may hold only an early snapshot, so its session is resumed once,
-# with every tool denied, to write them. A stream that names no session goes to
-# the caller's parser as it is.
-if { stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; } \
-  && session="$(python3 "$backends/review_final.py" session "$scratch/stdout")"; then
-  seconds_left="$(review_seconds_left)"
-  [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124
-  final_config='{"enabled_providers":["xai"],"permission":{"*":"deny"}}'
-  for index in "${!cli_env[@]}"; do
-    [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
-  done
-  cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
-  run_cli /dev/null "$scratch/final-stdout" "$scratch/final-stderr" opencode run "$review_final_prompt" \
-    --session "$session" --standalone --format json --agent plan --model "$model"
-  cat -- "$scratch/final-stdout" >> "$scratch/stdout"
-  ((status == 0)) || { stopped_by_watchdog && fail "$review_out_of_time" 124; } || report_failed_run "$scratch/final-stdout"
-  python3 "$backends/review_final.py" has-findings "$scratch/stdout" \
-    || fail 'Grok review final turn wrote no findings' 1
+# with every tool denied, and that turn alone must write them. A cut run with no
+# session to resume is out of time; an uncut stream that names none goes to the
+# caller's parser as it is.
+if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; then
+  if ! session="$(python3 "$backends/review_final.py" session "$scratch/stdout")"; then
+    ! stopped_by_watchdog || fail "$review_out_of_time" 124
+  else
+    seconds_left="$(review_seconds_left)"
+    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124
+    final_config='{"enabled_providers":["xai"],"permission":{"*":"deny"}}'
+    for index in "${!cli_env[@]}"; do
+      [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
+    done
+    cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
+    run_cli /dev/null "$scratch/final-stdout" "$scratch/final-stderr" opencode run "$review_final_prompt" \
+      --session "$session" --standalone --format json --agent plan --model "$model"
+    ((status == 0)) || { stopped_by_watchdog && fail "$review_out_of_time" 124; } || report_failed_run "$scratch/final-stdout"
+    python3 "$backends/review_final.py" has-findings "$scratch/final-stdout" \
+      || fail 'Grok review final turn wrote no findings' 1
+    cat -- "$scratch/final-stdout" >> "$scratch/stdout"
+  fi
 fi
 output_dir="$(dirname -- "$DISPATCH_OUTPUT")"
 staged="$(mktemp "$output_dir/.grok-output.XXXXXX")"
