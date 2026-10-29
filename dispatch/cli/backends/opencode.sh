@@ -191,7 +191,7 @@ if [[ -n "$final_turn" ]] \
     seconds_left="$(review_seconds_left)"
     [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || out_of_time
     final_output="$(mktemp "${DISPATCH_OUTPUT}.opencode-final.XXXXXX")"
-    export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}},"permission":{"*":"deny"}}'
+    export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}},"permission":'"$review_final_permission"'}'
     run_opencode "${seconds_left:+$((seconds_left - 5))}" "$final_output" opencode run "$review_final_prompt" \
       --session "$session" --standalone --format json --agent plan --model "$model"
     ! stopped_by_watchdog || out_of_time

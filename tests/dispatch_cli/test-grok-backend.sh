@@ -411,7 +411,7 @@ done <<<"$outcome_table"
 
 # The final turn resumes the run's session with every tool denied.
 check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls.summary-none")
-check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny"}}' <(sed -n 2p "$state/calls.summary-none")
+check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny","read":"deny","glob":"deny","grep":"deny",' <(sed -n 2p "$state/calls.summary-none")
 check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-table-summary-none")" \
   = "({'severity': 'red', 'message': 'Late', 'file': 'app.py', 'line': 2},)"
 # A run cut mid-event keeps its step events, but not the cut line or its prose.

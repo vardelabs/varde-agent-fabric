@@ -15,6 +15,9 @@ review_final_reserve_s=90
 # of time rather than being killed partway through one.
 review_final_min_s=10
 review_stop_grace_s=5
+# The final turn's config merges over the native one, where a tool can be
+# allowed by name, so each read tool is denied by name as well as by "*".
+review_final_permission='{"*":"deny","read":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","edit":"deny","webfetch":"deny","external_directory":"deny"}'
 review_out_of_time='review ran out of time before its findings turn'
 review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. Write [] if you found nothing.'
 
@@ -76,6 +79,8 @@ stop_watchdog() {
     [[ -z "$sleeper" ]] || kill $sleeper 2>/dev/null || true
   fi
   wait "$watchdog_pid" 2>/dev/null || true
+  # It may have fired after the check above, while being stopped.
+  [[ ! -e "$watchdog_fired" ]] || review_cut=1
   rm -f -- "$watchdog_fired"
   watchdog_pid=""
 }

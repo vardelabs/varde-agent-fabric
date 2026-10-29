@@ -119,7 +119,7 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
   else
     seconds_left="$(review_seconds_left)"
     [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124
-    final_config='{"enabled_providers":["xai"],"permission":{"*":"deny"}}'
+    final_config='{"enabled_providers":["xai"],"permission":'"$review_final_permission"'}'
     for index in "${!cli_env[@]}"; do
       [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
     done
