@@ -2,10 +2,14 @@
 
 Usage: review_final.py session STREAM_FILE
        review_final.py has-findings STREAM_FILE
+       review_final.py combine EXPLORING_STREAM FINAL_STREAM OUTPUT_FILE
 
-`session` prints the run's session id. `has-findings` exits 0 when the stream's
-final text parses as findings the way the caller's review parser reads them.
-Neither prints any event text, which can quote files the agent read.
+`session` prints the run's session id. `has-findings` exits 0 when the stream
+parses as findings under every OpenCode review parser a caller may use.
+`combine` writes the exploring run's events without its text and without a
+line cut short, then the final turn's events, so the final turn's text is the
+only text a parser sees and the step and tool counts stay. None prints any
+event text, which can quote files the agent read.
 """
 from __future__ import annotations
 
@@ -38,14 +42,31 @@ def session_id(raw: bytes) -> str | None:
 def has_findings(raw: bytes) -> bool:
     try:
         opencode.parse_review(raw)
+        opencode.opencode_findings(raw)
     except (RuntimeError, ValueError, TypeError, KeyError):
         return False
     return True
 
 
+def combined(exploring: bytes, final: bytes) -> bytes:
+    kept = []
+    for line in exploring.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not (isinstance(event, dict) and event.get("type") == "text"):
+            kept.append(line)
+    return b"".join(line + b"\n" for line in (*kept, *final.splitlines()))
+
+
 def main(argv: list[str]) -> int:
+    if argv[1:2] == ["combine"] and len(argv) == 5:
+        Path(argv[4]).write_bytes(combined(Path(argv[2]).read_bytes(), Path(argv[3]).read_bytes()))
+        return 0
     if len(argv) != 3 or argv[1] not in ("session", "has-findings"):
-        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+        print("usage: review_final.py session|has-findings STREAM_FILE | combine EXPLORING FINAL OUTPUT",
+              file=sys.stderr)
         return 2
     raw = Path(argv[2]).read_bytes()
     if argv[1] == "has-findings":

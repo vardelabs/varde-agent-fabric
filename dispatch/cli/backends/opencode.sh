@@ -143,7 +143,7 @@ opencode_pid=""
 cleanup() {
   stop_watchdog
   [[ -z "$opencode_pid" ]] || stop_tree "$opencode_pid"
-  rm -f -- "$temporary_output" ${final_output:+"$final_output"}
+  rm -f -- "$temporary_output" ${final_output:+"$final_output" "$final_output.combined"}
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -180,7 +180,7 @@ run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
 
 # A review stopped at its step limit has written no findings, and one stopped
 # at its time cut may hold only an early snapshot, so its session is resumed
-# once, with every tool denied, and that turn alone must write them. A cut run
+# once, with every tool denied, and that turn's text alone is kept. A cut run
 # with no session to resume is out of time; an uncut stream that names none
 # goes to the caller's parser as it is.
 if [[ -n "$final_turn" ]] \
@@ -195,13 +195,14 @@ if [[ -n "$final_turn" ]] \
     run_opencode "${seconds_left:+$((seconds_left - 5))}" "$final_output" opencode run "$review_final_prompt" \
       --session "$session" --standalone --format json --agent plan --model "$model"
     ((status == 0)) || { stopped_by_watchdog && out_of_time; } || report_failed_run "$final_output"
-    python3 "$backends/review_final.py" has-findings "$final_output" || {
+    python3 "$backends/review_final.py" combine "$temporary_output" "$final_output" "$final_output.combined"
+    mv -f -- "$final_output.combined" "$temporary_output"
+    python3 "$backends/review_final.py" has-findings "$temporary_output" || {
       printf 'OpenCode review final turn wrote no findings\n' >&2
       exit 1
     }
-    cat -- "$final_output" >> "$temporary_output"
   fi
 fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
-rm -f -- ${final_output:+"$final_output"}
+rm -f -- ${final_output:+"$final_output" "$final_output.combined"}
 trap - EXIT

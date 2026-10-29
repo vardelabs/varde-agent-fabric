@@ -69,6 +69,14 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
     else text "$summary"; fi ;;
   summary-twice) session_start; text "$summary" ;;
+  partial-line-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Whole","path":"app.py","line":"5"}]'
+    else text 'Exploring.'; printf '{"type":"tool_use","part":{"tool":"re'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  fenced-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[]\n```'
+    else text "$summary"; fi ;;
   early-findings-no-session)
     text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait ;;
   early-findings-silent-final)
@@ -386,6 +394,26 @@ direct out-silent-final DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
 check test "$status" -eq 1
 check grep -qF 'final turn wrote no findings' "$TMP/out-silent-final.stderr"
 check_not test -e "$TMP/out-silent-final"
+printf '%s' hang > "$state/scenario"
+
+# A run cut mid-event keeps its step and tool events but not the cut line or its
+# own text, so the output parses under every OpenCode parser.
+: > "$state/calls"
+printf '%s' partial-line-hang > "$state/scenario"
+direct out-partial DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
+check test "$status" -eq 0
+check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch.adapters import opencode;r=open(sys.argv[1],"rb").read();opencode.opencode_findings(r);print(opencode.parse_review(r))' "$TMP/out-partial")" \
+  = "({'severity': 'red', 'message': 'Whole', 'file': 'app.py', 'line': 5},)"
+check grep -qF '"type":"step_start"' "$TMP/out-partial"
+check_not grep -qF 'Exploring.' "$TMP/out-partial"
+
+# A final turn that only one OpenCode parser accepts, a fenced array, fails at
+# the backend rather than at a stricter caller.
+: > "$state/calls"
+printf '%s' fenced-final > "$state/scenario"
+direct out-fenced
+check test "$status" -eq 1
+check grep -qF 'final turn wrote no findings' "$TMP/out-fenced.stderr"
 printf '%s' hang > "$state/scenario"
 
 # The dispatcher passes the deadline on to the backend.
