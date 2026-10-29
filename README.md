@@ -23,7 +23,7 @@ concerns separate:
 - workers return validated artifacts
 - an outer orchestrator owns policy and outward actions
 
-A worker does not receive repository-write, shell, GitHub, or Discord authority
+A worker does not receive repository-write, shell, GitHub, or chat authority
 merely because it can run a model or a harness.
 
 ## Requirements
