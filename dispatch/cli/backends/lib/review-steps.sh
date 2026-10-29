@@ -8,8 +8,9 @@
 # findings alone. The step limit is only a backstop.
 review_step_limit=30
 # With a deadline (DISPATCH_DEADLINE_EPOCH, unix seconds), the exploring run is
-# stopped this many seconds before it, or a third of the time left if that is
-# less, leaving the final turn its time.
+# stopped early enough to leave the final turn a third of the time left, and at
+# least this many seconds where half the time left allows it. A final turn over
+# a large tree's session can take minutes, so the share grows with the budget.
 review_final_reserve_s=90
 # Below this many seconds left there is no final turn; the review fails as out
 # of time rather than being killed partway through one.
@@ -19,6 +20,15 @@ review_stop_grace_s=5
 # allowed by name, so each read tool is denied by name as well as by "*".
 review_final_permission='{"*":"deny","read":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","edit":"deny","webfetch":"deny","external_directory":"deny"}'
 review_out_of_time='review ran out of time before its findings turn'
+# Seconds each run took, printed with an out-of-time exit as bare numbers so a
+# caller can see which phase used the time.
+review_explored_s=""
+review_final_s=""
+review_out_of_time_exit() {
+  printf '%s\n' "$review_out_of_time" >&2
+  printf 'review phases explored_s=%s final_s=%s\n' "${review_explored_s:-none}" "${review_final_s:-none}" >&2
+  exit 124
+}
 review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. Write [] if you found nothing.'
 
 # Sets review_deadline to the validated deadline, or empty when none was given.
@@ -40,9 +50,10 @@ review_seconds_left() {
 # Prints the seconds the exploring run may take, or nothing without a deadline.
 review_explore_limit() {
   [[ -n "$review_deadline" ]] || return 0
-  local left reserve
+  local left reserve floor
   left="$(review_seconds_left)"
-  reserve=$((left / 3 < review_final_reserve_s ? left / 3 : review_final_reserve_s))
+  floor=$((left / 2 < review_final_reserve_s ? left / 2 : review_final_reserve_s))
+  reserve=$((left / 3 > floor ? left / 3 : floor))
   # The watchdog may take review_stop_grace_s more to stop a run that ignores TERM.
   printf '%d\n' $((left - reserve - review_stop_grace_s))
 }
