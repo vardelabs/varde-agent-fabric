@@ -95,6 +95,14 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'
     else text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'; text '[{"severity":"major","title":"B",'; text '"path":"b.py","line":"2"}]'
       sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  final-drops-its-own)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Own","path":"o.py","line":"1"}]'; text '[]'
+    else text "$summary"; fi ;;
+  too-many-parts)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else for _ in $(seq 501); do text 'Still reading.'; done; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   split-final)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Two parts",'; text '"path":"app.py","line":"9"}]'
@@ -389,6 +397,8 @@ split-snapshot-kept|36|0|2|1
 split-final|none|0|2|1
 blank-final|36|1|2|-
 split-beside-snapshot|36|1|2|-
+final-drops-its-own|none|1|2|-
+too-many-parts|36|1|2|-
 dropped-finding|36|1|2|-
 early-findings-silent-final|36|1|2|-
 early-findings-no-session|36|124|1|-

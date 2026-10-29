@@ -8,7 +8,7 @@ Usage: review_final.py session STREAM_FILE
 parses as findings under the OpenCode review parser. `finalize` takes the
 findings from the final turn's own text, its last part or its parts joined,
 allowing a fenced clean list only as the review's only text, and refuses a
-final list that drops a finding any earlier snapshot held, even one split
+final list that drops a finding any snapshot in either run held, even one split
 across text parts. It then writes the exploring run's non-text events and one
 text event holding the findings as plain JSON, which every OpenCode parser
 reads alike. None prints any event text, which can quote files the agent read.
@@ -64,14 +64,16 @@ def has_findings(raw: bytes) -> bool:
     return True
 
 
-# Text parts searched for earlier snapshots, every contiguous run of them, so the
-# search stays bounded on a long stream.
-MAX_SNAPSHOT_PARTS = 200
+# Every contiguous run of text parts is searched for snapshots; a stream with
+# more parts than this is refused rather than searched only in part.
+MAX_SNAPSHOT_PARTS = 500
 
 
-def snapshot_findings(texts: list[str]) -> list[object]:
-    """Every finding an earlier snapshot held, read from any contiguous run of text parts."""
-    parts = texts[-MAX_SNAPSHOT_PARTS:]
+def snapshot_findings(texts: list[str]) -> list[object] | None:
+    """Every finding a snapshot held, read from any contiguous run of text parts."""
+    parts = [text for text in texts if text.strip()]
+    if len(parts) > MAX_SNAPSHOT_PARTS:
+        return None
     found: list[object] = []
     for start in range(len(parts)):
         for end in range(start + 1, len(parts) + 1):
@@ -110,7 +112,8 @@ def finalized(exploring: bytes, final: bytes) -> bytes | None:
     if not final_texts:
         return None
     findings = final_findings(exploring_texts, final_texts)
-    if findings is None or not all(earlier in findings for earlier in snapshot_findings(exploring_texts)):
+    snapshots = snapshot_findings(exploring_texts + final_texts)
+    if findings is None or snapshots is None or not all(earlier in findings for earlier in snapshots):
         return None
     kept = [line for line, event in exploring_events if text_of(event) is None]
     canonical = json.dumps({"type": "text", "part": {"text": json.dumps(findings)}}).encode()
