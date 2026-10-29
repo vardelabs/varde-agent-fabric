@@ -24,7 +24,8 @@ review_final_prompt='Tools are no longer available. Write your review findings n
 # Sets review_deadline to the validated deadline, or empty when none was given.
 read_review_deadline() {
   review_deadline="${DISPATCH_DEADLINE_EPOCH:-}"
-  [[ -z "$review_deadline" || "$review_deadline" =~ ^[0-9]{1,12}$ ]] || {
+  # A leading zero would make bash arithmetic read the value as octal.
+  [[ -z "$review_deadline" || "$review_deadline" =~ ^[1-9][0-9]{0,11}$ ]] || {
     printf 'DISPATCH_DEADLINE_EPOCH must be unix seconds\n' >&2
     exit 2
   }

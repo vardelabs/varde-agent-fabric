@@ -428,7 +428,9 @@ DISPATCH_DEADLINE_EPOCH="$((started + 36))" run hang out-hang-dispatched --kind 
 check test "$status" -eq 0
 check test "$(($(date +%s) - started))" -lt 36
 check grep -qF -- '--session ses_test1' <(sed -n 2p "$state/calls")
-direct out-bad-deadline DISPATCH_DEADLINE_EPOCH=soon
-check test "$status" -eq 2
+for bad_deadline in soon 01700000008 0; do
+  direct out-bad-deadline DISPATCH_DEADLINE_EPOCH="$bad_deadline"
+  check test "$status" -eq 2
+done
 
 printf 'grok backend tests: %s passed\n' "$pass"
