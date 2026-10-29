@@ -5,11 +5,12 @@ Usage: review_final.py session STREAM_FILE
        review_final.py combine EXPLORING_STREAM FINAL_STREAM OUTPUT_FILE
 
 `session` prints the run's session id. `has-findings` exits 0 when the stream
-parses as findings under every OpenCode review parser a caller may use.
-`combine` writes the exploring run's events without its text and without a
-line cut short, then the final turn's events, so the final turn's text is the
-only text a parser sees and the step and tool counts stay. None prints any
-event text, which can quote files the agent read.
+parses as findings under the OpenCode review parser. `combine` writes the
+exploring run's events, less a line cut short and any text that is not a
+findings snapshot, then the final turn's events. A summary or other prose
+cannot stand as the final text, while an earlier snapshot stays, so the parser
+still refuses a final turn that drops a finding it held. None prints any event
+text, which can quote files the agent read.
 """
 from __future__ import annotations
 
@@ -42,7 +43,6 @@ def session_id(raw: bytes) -> str | None:
 def has_findings(raw: bytes) -> bool:
     try:
         opencode.parse_review(raw)
-        opencode.opencode_findings(raw)
     except (RuntimeError, ValueError, TypeError, KeyError):
         return False
     return True
@@ -55,7 +55,7 @@ def combined(exploring: bytes, final: bytes) -> bytes:
             event = json.loads(line)
         except ValueError:
             continue
-        if not (isinstance(event, dict) and event.get("type") == "text"):
+        if not (isinstance(event, dict) and event.get("type") == "text") or has_findings(line):
             kept.append(line)
     return b"".join(line + b"\n" for line in (*kept, *final.splitlines()))
 

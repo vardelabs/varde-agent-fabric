@@ -16,7 +16,7 @@ review_final_reserve_s=90
 review_final_min_s=10
 review_stop_grace_s=5
 review_out_of_time='review ran out of time before its findings turn'
-review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, and nothing else. Write [] if you found nothing.'
+review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. Write [] if you found nothing.'
 
 # Sets review_deadline to the validated deadline, or empty when none was given.
 read_review_deadline() {

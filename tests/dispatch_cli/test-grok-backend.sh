@@ -77,6 +77,14 @@ case "$(cat "$state/scenario")" in
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[]\n```'
     else text "$summary"; fi ;;
+  dropped-finding)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  final-cut-clean-exit)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
+    else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   early-findings-no-session)
     text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait ;;
   early-findings-silent-final)
@@ -341,7 +349,7 @@ check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import ada
 printf '%s' summary-twice > "$state/scenario"
 direct out-summary-twice
 check test "$status" -eq 1
-check grep -qF 'final turn wrote no findings' "$TMP/out-summary-twice.stderr"
+check grep -qF 'final turn wrote no valid findings' "$TMP/out-summary-twice.stderr"
 check test "$(wc -l < "$state/calls")" -eq 2
 check_not test -e "$TMP/out-summary-twice"
 
@@ -392,7 +400,7 @@ check_not test -e "$TMP/out-no-session"
 printf '%s' early-findings-silent-final > "$state/scenario"
 direct out-silent-final DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
 check test "$status" -eq 1
-check grep -qF 'final turn wrote no findings' "$TMP/out-silent-final.stderr"
+check grep -qF 'final turn wrote no valid findings' "$TMP/out-silent-final.stderr"
 check_not test -e "$TMP/out-silent-final"
 printf '%s' hang > "$state/scenario"
 
@@ -407,13 +415,29 @@ check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch.adapters i
 check grep -qF '"type":"step_start"' "$TMP/out-partial"
 check_not grep -qF 'Exploring.' "$TMP/out-partial"
 
-# A final turn that only one OpenCode parser accepts, a fenced array, fails at
-# the backend rather than at a stricter caller.
+# A fenced final array is findings, as the review parser reads it.
 : > "$state/calls"
 printf '%s' fenced-final > "$state/scenario"
 direct out-fenced
+check test "$status" -eq 0
+check test "$(wc -l < "$state/calls")" -eq 2
+
+# A final turn that drops a finding an earlier snapshot held is refused, never
+# published as a clean review.
+: > "$state/calls"
+printf '%s' dropped-finding > "$state/scenario"
+direct out-dropped DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
 check test "$status" -eq 1
-check grep -qF 'final turn wrote no findings' "$TMP/out-fenced.stderr"
+check grep -qF 'final turn wrote no valid findings' "$TMP/out-dropped.stderr"
+check_not test -e "$TMP/out-dropped"
+
+# A final turn its watchdog cut is out of time, even when the CLI then exits 0
+# with a snapshot.
+: > "$state/calls"
+printf '%s' final-cut-clean-exit > "$state/scenario"
+direct out-final-cut DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
+check test "$status" -eq 124
+check_not test -e "$TMP/out-final-cut"
 printf '%s' hang > "$state/scenario"
 
 # The dispatcher passes the deadline on to the backend.

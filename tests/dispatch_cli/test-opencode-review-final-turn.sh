@@ -52,7 +52,7 @@ expect test -z "$(find "$TMP/limit" -maxdepth 1 -name 'out.opencode*')"
 # A final turn that writes a summary again fails once, with no second resume.
 review stubborn stubborn
 expect test "$status" -eq 1
-expect grep -qF 'final turn wrote no findings' "$TMP/stubborn/stderr"
+expect grep -qF 'final turn wrote no valid findings' "$TMP/stubborn/stderr"
 expect test "$(grep -cvx tools "$TMP/stubborn/turns")" -eq 3
 expect test ! -e "$TMP/stubborn/out"
 
