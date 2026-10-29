@@ -86,6 +86,10 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  split-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Two parts",'; text '"path":"app.py","line":"9"}]'
+    else text "$summary"; fi ;;
   fenced-final-findings)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[{"severity":"major","title":"Fenced","path":"app.py","line":"8"}]\n```'
@@ -373,6 +377,7 @@ early-findings-hang|36|0|2|1
 partial-line-hang|36|0|2|1
 split-snapshot-dropped|36|1|2|-
 split-snapshot-kept|36|0|2|1
+split-final|none|0|2|1
 dropped-finding|36|1|2|-
 early-findings-silent-final|36|1|2|-
 early-findings-no-session|36|124|1|-

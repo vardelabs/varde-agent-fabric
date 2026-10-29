@@ -76,17 +76,24 @@ def split_snapshot(texts: list[str]) -> list[object]:
     return joined or []
 
 
+def final_value(exploring_texts: list[str], final_texts: list[str]) -> object | None:
+    """The final turn's findings value by the parser's rules, its parts read in turn and then joined."""
+    for texts in (exploring_texts + final_texts, [*exploring_texts, "".join(final_texts)]):
+        try:
+            return streamed_findings_payload(texts)
+        except (RuntimeError, ValueError):
+            continue
+    return None
+
+
 def finalized(exploring: bytes, final: bytes) -> bytes | None:
     exploring_events = events(exploring)
     exploring_texts = [text for _, event in exploring_events if (text := text_of(event)) is not None]
     final_texts = [text for _, event in events(final) if (text := text_of(event)) is not None]
     if not final_texts:
         return None
-    try:
-        value = streamed_findings_payload(exploring_texts + final_texts)
-    except (RuntimeError, ValueError):
-        return None
-    findings = extract_findings(value)
+    value = final_value(exploring_texts, final_texts)
+    findings = None if value is None else extract_findings(value)
     if findings is None or not all(earlier in findings for earlier in split_snapshot(exploring_texts)):
         return None
     kept = [line for line, event in exploring_events if text_of(event) is None]
