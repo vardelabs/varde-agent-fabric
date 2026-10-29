@@ -137,20 +137,30 @@ fi
 # dispatcher gives it only the dedicated OpenCode home and no provider secret.
 temporary_output="$(mktemp "${DISPATCH_OUTPUT}.opencode.XXXXXX")"
 final_output=""
-cleanup() { stop_watchdog; rm -f -- "$temporary_output" ${final_output:+"$final_output"}; }
+opencode_pid=""
+# A TERM or INT to this backend ends the CLI's whole tree too, which runs in the
+# background so the watchdog can reach it.
+cleanup() {
+  stop_watchdog
+  [[ -z "$opencode_pid" ]] || stop_tree "$opencode_pid"
+  rm -f -- "$temporary_output" ${final_output:+"$final_output"}
+}
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # run_opencode <time limit> <output> <command...>: sets status. v2 has no --dir
 # and resolves the project from the working directory. Both CLIs append a
 # non-terminal stdin to the prompt and block until it closes.
 run_opencode() {
-  local limit="$1" output="$2" pid
+  local limit="$1" output="$2"
   shift 2
   status=0
   (cd -- "$DISPATCH_WORKDIR" && exec "$@") </dev/null >"$output" &
-  pid=$!
-  watch_pid "$limit" "$pid"
-  wait "$pid" || status=$?
+  opencode_pid=$!
+  watch_pid "$limit" "$opencode_pid"
+  wait "$opencode_pid" || status=$?
   stop_watchdog
+  opencode_pid=""
 }
 report_failed_run() {
   # `--format json` reports failures as error events on stdout, so stderr alone
@@ -168,10 +178,12 @@ explore_limit="$(review_explore_limit)"
 run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
 ((status == 0)) || stopped_by_watchdog || report_failed_run "$temporary_output"
 
-# A review stopped at its time cut or its step limit has written no findings,
-# so its session is resumed once, with every tool denied, to write them. A
-# stream that names no session goes to the caller's parser as it is.
-if [[ -n "$final_turn" ]] && ! python3 "$backends/review_final.py" has-findings "$temporary_output" \
+# A review stopped at its step limit has written no findings, and one stopped
+# at its time cut may hold only an early snapshot, so its session is resumed
+# once, with every tool denied, to write them. A stream that names no session
+# goes to the caller's parser as it is.
+if [[ -n "$final_turn" ]] \
+  && { stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$temporary_output"; } \
   && session="$(python3 "$backends/review_final.py" session "$temporary_output")"; then
   seconds_left="$(review_seconds_left)"
   [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || out_of_time

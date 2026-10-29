@@ -108,10 +108,11 @@ run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
   'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model"
 ((status == 0)) || stopped_by_watchdog || report_failed_run "$scratch/stdout"
 
-# A run stopped at its time cut or its step limit has written no findings, so
-# its session is resumed once, with every tool denied, to write them. A stream
-# that names no session goes to the caller's parser as it is.
-if ! python3 "$backends/review_final.py" has-findings "$scratch/stdout" \
+# A run stopped at its step limit has written no findings, and one stopped at
+# its time cut may hold only an early snapshot, so its session is resumed once,
+# with every tool denied, to write them. A stream that names no session goes to
+# the caller's parser as it is.
+if { stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; } \
   && session="$(python3 "$backends/review_final.py" session "$scratch/stdout")"; then
   seconds_left="$(review_seconds_left)"
   [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124

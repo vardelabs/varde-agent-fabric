@@ -66,4 +66,31 @@ expect test "$(grep -cx tools "$TMP/deadline/turns")" -lt $((review_step_limit -
 expect test "$(tail -n 1 "$TMP/deadline/turns")" = findings
 expect test "$(findings "$TMP/deadline/out")" -eq 1
 
+# TERM to the backend ends the CLI it runs: the provider sees no turn after it.
+review_in_background() {
+  local name="$1" home="$TMP/$1/opencode-home"
+  mkdir -p "$TMP/$name/caller-home" "$home/.config/opencode" "$TMP/$name/work"
+  printf 'diff body\n' > "$TMP/$name/change.diff"
+  python3 "$ROOT/tests/dispatch_cli/fixtures/looping_provider.py" "$TMP/$name/turns" slow > "$TMP/$name/port" &
+  provider_pid=$!
+  for _ in $(seq 50); do [[ -s "$TMP/$name/port" ]] && break; sleep 0.1; done
+  printf '{"enabled_providers":["fake"],"provider":{"fake":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:%s/v1","apiKey":"unused"},"models":{"loop":{}}}},"permission":{"*":"deny","glob":"allow"}}\n' \
+    "$(cat "$TMP/$name/port")" > "$home/.config/opencode/opencode.json"
+  env HOME="$TMP/$name/caller-home" DISPATCH_OPENCODE_HOME="$home" OPENCODE_DISABLE_MODELS_FETCH=1 \
+    DISPATCH_KIND=review DISPATCH_TASK=review DISPATCH_MODEL=fake/loop DISPATCH_DIFF="$TMP/$name/change.diff" \
+    DISPATCH_WORKDIR="$TMP/$name/work" DISPATCH_OUTPUT="$TMP/$name/out" \
+    /bin/bash "$ROOT/dispatch/cli/backends/opencode.sh" 2>/dev/null &
+  backend_pid=$!
+}
+review_in_background term
+for _ in $(seq 100); do [[ "$(grep -cx tools "$TMP/term/turns" 2>/dev/null)" -ge 2 ]] && break; sleep 0.1; done
+kill -TERM "$backend_pid"
+term_status=0
+wait "$backend_pid" || term_status=$?
+expect test "$term_status" -eq 143
+turns_at_term="$(wc -l < "$TMP/term/turns")"
+sleep 3
+expect test "$(wc -l < "$TMP/term/turns")" -le $((turns_at_term + 1))
+stop_provider
+
 printf 'opencode review final turn: %s passed\n' "$pass"

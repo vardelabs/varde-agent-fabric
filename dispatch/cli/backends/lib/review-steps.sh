@@ -53,21 +53,10 @@ watch_pid() {
   local limit="$1" target="$2"
   watchdog_fired="$(mktemp "${TMPDIR:-/tmp}/review-watchdog.XXXXXX")"
   rm -f -- "$watchdog_fired"
-  ( sleep "$limit"
+  ( set +e
+    sleep "$limit"
     : > "$watchdog_fired"
-    tree() { local child; for child in $(pgrep -P "$1" 2>/dev/null); do tree "$child"; done; printf '%s\n' "$1"; }
-    # The tree is named once: a child whose parent exits is no longer found under it.
-    pids="$(tree "$target")"
-    # shellcheck disable=SC2086
-    kill -TERM $pids 2>/dev/null
-    for _ in $(seq $((review_stop_grace_s * 10))); do
-      alive=""
-      for pid in $pids; do kill -0 "$pid" 2>/dev/null && alive=1; done
-      [[ -n "$alive" ]] || exit 0
-      sleep 0.1
-    done
-    # shellcheck disable=SC2086
-    kill -KILL $pids 2>/dev/null ) &
+    stop_tree "$target" ) &
   watchdog_pid=$!
 }
 
@@ -90,6 +79,24 @@ stop_watchdog() {
   rm -f -- "$watchdog_fired"
   watchdog_pid=""
 }
+
+# stop_tree <pid>: TERM to the process tree of pid, then KILL for anything
+# still alive review_stop_grace_s later.
+stop_tree() {
+  local pids pid alive
+  pids="$(tree_of "$1")"
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null || true
+  for _ in $(seq $((review_stop_grace_s * 10))); do
+    alive=""
+    for pid in $pids; do kill -0 "$pid" 2>/dev/null && alive=1; done
+    [[ -n "$alive" ]] || return 0
+    sleep 0.1
+  done
+  # shellcheck disable=SC2086
+  kill -KILL $pids 2>/dev/null || true
+}
+tree_of() { local child; for child in $(pgrep -P "$1" 2>/dev/null); do tree_of "$child"; done; printf '%s\n' "$1"; }
 
 # Whether the last run ended because its watchdog stopped it.
 stopped_by_watchdog() { [[ -n "${review_cut:-}" ]]; }

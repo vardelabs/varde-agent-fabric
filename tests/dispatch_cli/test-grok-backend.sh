@@ -69,6 +69,10 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
     else text "$summary"; fi ;;
   summary-twice) session_start; text "$summary" ;;
+  early-findings-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Full","path":"app.py","line":"4"}]'
+    else text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   stubborn-hang)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
@@ -348,6 +352,17 @@ check test "$status" -eq 0
 check test "$(($(date +%s) - started))" -lt 36
 check test "$(wc -l < "$state/calls")" -eq 2
 check_not alive "$(cat "$state/hang-child.pid")"
+printf '%s' hang > "$state/scenario"
+
+# A run cut while still exploring gets its final turn even when an earlier
+# text event already parsed as findings, since that was only a snapshot.
+: > "$state/calls"
+printf '%s' early-findings-hang > "$state/scenario"
+started="$(date +%s)"
+direct out-early-findings DISPATCH_DEADLINE_EPOCH="$((started + 36))"
+check test "$status" -eq 0
+check test "$(wc -l < "$state/calls")" -eq 2
+check grep -qF 'Full' "$TMP/out-early-findings"
 printf '%s' hang > "$state/scenario"
 
 # The dispatcher passes the deadline on to the backend.
