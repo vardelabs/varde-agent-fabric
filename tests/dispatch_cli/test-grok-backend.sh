@@ -60,7 +60,19 @@ cat >> "$TMP/bin/opencode" <<'EOF'
   printf 'stdin=%s\n' "$(cat)"
 } > "$state/record"
 text() { printf '{"type":"text","part":{"text":%s}}\n' "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")"; }
+printf '%s|%s\n' "$*" "${OPENCODE_CONFIG_CONTENT:-}" >> "$state/calls"
+session_start() { printf '{"type":"step_start","sessionID":"ses_test1","part":{}}\n'; }
+summary='Maximum steps reached. Summary of work so far: read the files.'
 case "$(cat "$state/scenario")" in
+  summary)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
+    else text "$summary"; fi ;;
+  summary-twice) session_start; text "$summary" ;;
+  hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   ok)
     python3 - "$OPENCODE_DB" <<'PY'
 import sqlite3, sys
@@ -144,7 +156,7 @@ check grep -qF '"enabled_providers":["xai"]' "$record"
 check grep -qF '"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","external_directory":"deny"}' "$record"
 check test "$(grep '^config=' "$record" | grep -o '"allow"' | wc -l)" -eq 3
 # A review that never stops exploring is cut to a text answer at the step limit.
-check grep -qF '"agent":{"plan":{"steps":10}}' "$record"
+check grep -qF '"agent":{"plan":{"steps":30}}' "$record"
 check grep -qxF 'leaked=' "$record"
 # The review is parsed by OpenCode's rules and normalised to the contract.
 check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-review")" \
@@ -289,5 +301,54 @@ check test -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)"
 check_not alive "$(cat "$state/slow.pid")"
 check_not alive "$(cat "$state/slow-child.pid")"
 check test "$(credential xai-1)" = '{"refresh":"before-term"}'
+
+# A run that ends on a work summary, as OpenCode's step limit forces, is resumed
+# once with every tool denied, and the findings that turn writes are the output.
+: > "$state/calls"
+printf '%s' summary > "$state/scenario"
+direct out-summary DISPATCH_KIND=review
+check test "$status" -eq 0
+check test "$(wc -l < "$state/calls")" -eq 2
+check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls")
+check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny"}}' <(sed -n 2p "$state/calls")
+check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-summary")" \
+  = "({'severity': 'red', 'message': 'Late', 'file': 'app.py', 'line': 2},)"
+
+# A final turn that still writes no findings fails once, with no second resume.
+: > "$state/calls"
+printf '%s' summary-twice > "$state/scenario"
+direct out-summary-twice
+check test "$status" -eq 1
+check grep -qF 'final turn wrote no findings' "$TMP/out-summary-twice.stderr"
+check test "$(wc -l < "$state/calls")" -eq 2
+check_not test -e "$TMP/out-summary-twice"
+
+# With a deadline, a run that would explore past its cut is stopped there and
+# resumed for its findings, inside the deadline.
+: > "$state/calls"
+printf '%s' hang > "$state/scenario"
+started="$(date +%s)"
+direct out-hang DISPATCH_DEADLINE_EPOCH="$((started + 93))"
+check test "$status" -eq 0
+check test "$(($(date +%s) - started))" -lt 20
+check test "$(wc -l < "$state/calls")" -eq 2
+check_not alive "$(cat "$state/hang-child.pid")"
+
+# The dispatcher passes the deadline on to the backend.
+: > "$state/calls"
+started="$(date +%s)"
+DISPATCH_DEADLINE_EPOCH="$((started + 93))" run hang out-hang-dispatched --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 0
+check test "$(($(date +%s) - started))" -lt 20
+check grep -qF -- '--session ses_test1' <(sed -n 2p "$state/calls")
+
+# Too little time left for a final turn fails as out of time, at once.
+: > "$state/calls"
+direct out-no-time DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 30))"
+check test "$status" -eq 124
+check grep -qF 'ran out of time before its findings turn' "$TMP/out-no-time.stderr"
+check test ! -s "$state/calls"
+direct out-bad-deadline DISPATCH_DEADLINE_EPOCH=soon
+check test "$status" -eq 2
 
 printf 'grok backend tests: %s passed\n' "$pass"
