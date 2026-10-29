@@ -1,12 +1,13 @@
 """An OpenAI-compatible endpoint that answers every turn offered tools with
 another tool call, so a review never stops exploring by itself. A turn with no
 tools gets a work summary, as a model answers OpenCode's forced step-limit
-turn, unless it asks for the review findings; in "stubborn" mode it never
-writes findings. It logs each request's turn kind, one per line, to the file
+turn, unless it asks for the review findings. In "stubborn" mode it never
+writes findings; in "slow" mode each tool turn takes a second. It logs each request's turn kind, one per line, to the file
 named on the command line."""
 import http.server
 import json
 import sys
+import time
 
 FINDINGS_ASK = "review findings now"
 FINDINGS = '[{"severity":"minor","title":"Example","path":"a.txt","line":"1"}]'
@@ -27,6 +28,8 @@ class LoopingProvider(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         kind = turn_kind(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        if kind == "tools" and sys.argv[2:] == ["slow"]:
+            time.sleep(1)
         with open(sys.argv[1], "a") as log:
             log.write(kind + "\n")
         if kind == "tools":

@@ -69,6 +69,10 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
     else text "$summary"; fi ;;
   summary-twice) session_start; text "$summary" ;;
+  stubborn-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else trap '' TERM; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   hang)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
@@ -328,23 +332,35 @@ check_not test -e "$TMP/out-summary-twice"
 : > "$state/calls"
 printf '%s' hang > "$state/scenario"
 started="$(date +%s)"
-direct out-hang DISPATCH_DEADLINE_EPOCH="$((started + 93))"
+direct out-hang DISPATCH_DEADLINE_EPOCH="$((started + 36))"
 check test "$status" -eq 0
-check test "$(($(date +%s) - started))" -lt 20
+check test "$(($(date +%s) - started))" -lt 36
 check test "$(wc -l < "$state/calls")" -eq 2
 check_not alive "$(cat "$state/hang-child.pid")"
+
+# A run that ignores TERM at its cut is killed, with its child, before the
+# final turn starts.
+: > "$state/calls"
+printf '%s' stubborn-hang > "$state/scenario"
+started="$(date +%s)"
+direct out-stubborn-hang DISPATCH_DEADLINE_EPOCH="$((started + 36))"
+check test "$status" -eq 0
+check test "$(($(date +%s) - started))" -lt 36
+check test "$(wc -l < "$state/calls")" -eq 2
+check_not alive "$(cat "$state/hang-child.pid")"
+printf '%s' hang > "$state/scenario"
 
 # The dispatcher passes the deadline on to the backend.
 : > "$state/calls"
 started="$(date +%s)"
-DISPATCH_DEADLINE_EPOCH="$((started + 93))" run hang out-hang-dispatched --kind review --diff "$TMP/change.diff" --task t
+DISPATCH_DEADLINE_EPOCH="$((started + 36))" run hang out-hang-dispatched --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 0
-check test "$(($(date +%s) - started))" -lt 20
+check test "$(($(date +%s) - started))" -lt 36
 check grep -qF -- '--session ses_test1' <(sed -n 2p "$state/calls")
 
 # Too little time left for a final turn fails as out of time, at once.
 : > "$state/calls"
-direct out-no-time DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 30))"
+direct out-no-time DISPATCH_DEADLINE_EPOCH="$(($(date +%s) - 1))"
 check test "$status" -eq 124
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-no-time.stderr"
 check test ! -s "$state/calls"

@@ -47,6 +47,7 @@ expect test "$status" -eq 0
 expect test "$(grep -cx tools "$TMP/limit/turns")" -eq $((review_step_limit - 1))
 expect test "$(tail -n 2 "$TMP/limit/turns" | tr '\n' ' ')" = 'summary findings '
 expect test "$(findings "$TMP/limit/out")" -eq 1
+expect test -z "$(find "$TMP/limit" -maxdepth 1 -name 'out.opencode*')"
 
 # A final turn that writes a summary again fails once, with no second resume.
 review stubborn stubborn
@@ -55,12 +56,13 @@ expect grep -qF 'final turn wrote no findings' "$TMP/stubborn/stderr"
 expect test "$(grep -cvx tools "$TMP/stubborn/turns")" -eq 3
 expect test ! -e "$TMP/stubborn/out"
 
-# A deadline stops the exploring run at its cut, long before the step limit,
-# and the final turn still writes the findings inside the deadline.
+# A deadline stops a slow exploring run at its cut, before the step limit and
+# its forced summary, and the final turn still writes the findings in time.
 started="$(date +%s)"
-review deadline default DISPATCH_DEADLINE_EPOCH="$((started + review_final_reserve_s + 4))"
+review deadline slow DISPATCH_DEADLINE_EPOCH="$((started + 36))"
 expect test "$status" -eq 0
-expect test "$(($(date +%s) - started))" -lt 30
+expect test "$(($(date +%s) - started))" -lt 36
+expect test "$(grep -cx tools "$TMP/deadline/turns")" -lt $((review_step_limit - 1))
 expect test "$(tail -n 1 "$TMP/deadline/turns")" = findings
 expect test "$(findings "$TMP/deadline/out")" -eq 1
 

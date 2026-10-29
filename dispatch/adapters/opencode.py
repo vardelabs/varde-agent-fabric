@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from typing import TYPE_CHECKING
 
 from contracts.review_contracts import ReviewArtifact
@@ -115,6 +116,8 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
     }
     if os.environ.get("DISPATCH_OPENCODE_MODELS_PATH"):
         environment["DISPATCH_OPENCODE_MODELS_PATH"] = os.environ["DISPATCH_OPENCODE_MODELS_PATH"]
+    # The backend stops exploring early enough to leave its findings turn time inside this timeout.
+    environment["DISPATCH_DEADLINE_EPOCH"] = str(int(time.time()) + request.timeout_seconds)
     try:
         result = subprocess.run(
             [metadata.local_backend],

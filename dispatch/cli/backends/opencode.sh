@@ -161,7 +161,6 @@ report_failed_run() {
     || printf 'opencode reported no error event\n' >&2
   exit "$status"
 }
-stopped_by_watchdog() { [[ -n "$review_deadline" ]] && ((status == 130 || status == 143)); }
 out_of_time() { printf '%s\n' "$review_out_of_time" >&2; exit 124; }
 
 explore_limit="$(review_explore_limit)"
@@ -188,4 +187,5 @@ if [[ -n "$final_turn" ]] && ! python3 "$backends/review_final.py" has-findings 
   }
 fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
+rm -f -- ${final_output:+"$final_output"}
 trap - EXIT

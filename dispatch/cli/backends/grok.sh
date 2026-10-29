@@ -98,7 +98,6 @@ report_failed_run() {
   # 75 means limit reached to the dispatcher, which reads that from the events.
   exit $((status == 75 ? 1 : status))
 }
-stopped_by_watchdog() { [[ -n "$review_deadline" ]] && ((status == 130 || status == 143)); }
 
 read_review_deadline
 cli_time_limit="$(review_explore_limit)"
