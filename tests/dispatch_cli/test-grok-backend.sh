@@ -85,6 +85,27 @@ case "$(cat "$state/scenario")" in
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  fenced-final-findings)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[{"severity":"major","title":"Fenced","path":"app.py","line":"8"}]\n```'
+    else text "$summary"; fi ;;
+  split-snapshot-dropped|split-snapshot-kept)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then
+      if [[ "$(cat "$state/scenario")" == split-snapshot-kept ]]; then text '[{"severity":"major","title":"Split","path":"app.py","line":"7"}]'
+      else text '[]'; fi
+    else text '[{"severity":"major","title":"Split",'; text '"path":"app.py","line":"7"}]'
+      sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  prose-no-session) text "$summary" ;;
+  mixed)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; text "$summary"; fi ;;
+  mixed-dropped)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; text "$summary"; fi ;;
   early-findings-no-session)
     text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait ;;
   early-findings-silent-final)
@@ -332,128 +353,81 @@ check_not alive "$(cat "$state/slow.pid")"
 check_not alive "$(cat "$state/slow-child.pid")"
 check test "$(credential xai-1)" = '{"refresh":"before-term"}'
 
-# A run that ends on a work summary, as OpenCode's step limit forces, is resumed
-# once with every tool denied, and the findings that turn writes are the output.
-: > "$state/calls"
-printf '%s' summary > "$state/scenario"
-direct out-summary DISPATCH_KIND=review
-check test "$status" -eq 0
-check test "$(wc -l < "$state/calls")" -eq 2
-check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls")
-check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny"}}' <(sed -n 2p "$state/calls")
-check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-summary")" \
+# Every end state of a review run and its final turn, as the outcome table in
+# the backend's pull request lists it: scenario | deadline | exit status | CLI
+# calls | published output, where a number is the findings every OpenCode parser
+# reads, a number with * is read only by the registered review parser, x is
+# output the review parser refuses, and - is no output.
+outcome_table='
+ok|none|0|1|1
+fenced-uncut|none|0|1|0*
+prose-no-session|none|0|1|x
+summary|none|0|2|1
+mixed|none|0|2|1
+mixed-dropped|none|1|2|-
+summary-twice|none|1|2|-
+fenced-final|none|1|2|-
+fenced-final-findings|none|0|2|1
+hang|36|0|2|0
+early-findings-hang|36|0|2|1
+partial-line-hang|36|0|2|1
+split-snapshot-dropped|36|1|2|-
+split-snapshot-kept|36|0|2|1
+dropped-finding|36|1|2|-
+early-findings-silent-final|36|1|2|-
+early-findings-no-session|36|124|1|-
+stubborn-hang|36|0|2|0
+final-cut-clean-exit|36|124|2|-
+summary|past|124|0|-
+exit-75|none|1|1|-'
+published_findings() {
+  [[ -e "$1" ]] || { printf -- '-'; return; }
+  PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch.adapters import opencode
+raw = open(sys.argv[1], "rb").read()
+try: count = len(opencode.parse_review(raw))
+except Exception: print("x", end=""); raise SystemExit
+try: opencode.opencode_findings(raw); print(count, end="")
+except Exception: print(f"{count}*", end="")' "$1"
+}
+while IFS='|' read -r scenario deadline want_status want_calls want_published; do
+  [[ -n "$scenario" ]] || continue
+  : > "$state/calls"
+  rm -f "$state/hang-child.pid"
+  printf '%s' "$scenario" > "$state/scenario"
+  started="$(date +%s)"
+  case "$deadline" in
+    none) direct "out-table-$scenario-$deadline" ;;
+    past) direct "out-table-$scenario-$deadline" DISPATCH_DEADLINE_EPOCH="$((started - 1))" ;;
+    *) direct "out-table-$scenario-$deadline" DISPATCH_DEADLINE_EPOCH="$((started + deadline))" ;;
+  esac
+  got="$status|$(wc -l < "$state/calls" | tr -d ' ')|$(published_findings "$TMP/out-table-$scenario-$deadline")"
+  [[ "$got" == "$want_status|$want_calls|$want_published" ]] \
+    || { printf 'outcome %s (deadline %s): got %s, want %s\n' "$scenario" "$deadline" "$got" "$want_status|$want_calls|$want_published" >&2; exit 1; }
+  pass=$((pass + 1))
+  [[ "$deadline" != 36 ]] || check test "$(($(date +%s) - started))" -lt 36
+  [[ ! -s "$state/hang-child.pid" ]] || check_not alive "$(cat "$state/hang-child.pid")"
+  cp "$state/calls" "$state/calls.$scenario-$deadline"
+done <<<"$outcome_table"
+
+# The final turn resumes the run's session with every tool denied.
+check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls.summary-none")
+check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny"}}' <(sed -n 2p "$state/calls.summary-none")
+check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-table-summary-none")" \
   = "({'severity': 'red', 'message': 'Late', 'file': 'app.py', 'line': 2},)"
-
-# A final turn that still writes no findings fails once, with no second resume.
-: > "$state/calls"
-printf '%s' summary-twice > "$state/scenario"
-direct out-summary-twice
-check test "$status" -eq 1
-check grep -qF 'final turn wrote no valid findings' "$TMP/out-summary-twice.stderr"
-check test "$(wc -l < "$state/calls")" -eq 2
-check_not test -e "$TMP/out-summary-twice"
-
-# With a deadline, a run that would explore past its cut is stopped there and
-# resumed for its findings, inside the deadline.
-: > "$state/calls"
-printf '%s' hang > "$state/scenario"
-started="$(date +%s)"
-direct out-hang DISPATCH_DEADLINE_EPOCH="$((started + 36))"
-check test "$status" -eq 0
-check test "$(($(date +%s) - started))" -lt 36
-check test "$(wc -l < "$state/calls")" -eq 2
-check_not alive "$(cat "$state/hang-child.pid")"
-
-# A run that ignores TERM at its cut is killed, with its child, before the
-# final turn starts.
-: > "$state/calls"
-printf '%s' stubborn-hang > "$state/scenario"
-started="$(date +%s)"
-direct out-stubborn-hang DISPATCH_DEADLINE_EPOCH="$((started + 36))"
-check test "$status" -eq 0
-check test "$(($(date +%s) - started))" -lt 36
-check test "$(wc -l < "$state/calls")" -eq 2
-check_not alive "$(cat "$state/hang-child.pid")"
-printf '%s' hang > "$state/scenario"
-
-# A run cut while still exploring gets its final turn even when an earlier
-# text event already parsed as findings, since that was only a snapshot.
-: > "$state/calls"
-printf '%s' early-findings-hang > "$state/scenario"
-started="$(date +%s)"
-direct out-early-findings DISPATCH_DEADLINE_EPOCH="$((started + 36))"
-check test "$status" -eq 0
-check test "$(wc -l < "$state/calls")" -eq 2
-check grep -qF 'Full' "$TMP/out-early-findings"
-printf '%s' hang > "$state/scenario"
-
-# A cut run with no session to resume is out of time, never a clean early [].
-: > "$state/calls"
-printf '%s' early-findings-no-session > "$state/scenario"
-direct out-no-session DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
-check test "$status" -eq 124
-check test "$(wc -l < "$state/calls")" -eq 1
-check_not test -e "$TMP/out-no-session"
-
-# The final turn's own text must be findings; an earlier snapshot does not count.
-: > "$state/calls"
-printf '%s' early-findings-silent-final > "$state/scenario"
-direct out-silent-final DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
-check test "$status" -eq 1
-check grep -qF 'final turn wrote no valid findings' "$TMP/out-silent-final.stderr"
-check_not test -e "$TMP/out-silent-final"
-printf '%s' hang > "$state/scenario"
-
-# A run cut mid-event keeps its step and tool events but not the cut line or its
-# own text, so the output parses under every OpenCode parser.
-: > "$state/calls"
-printf '%s' partial-line-hang > "$state/scenario"
-direct out-partial DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
-check test "$status" -eq 0
-check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch.adapters import opencode;r=open(sys.argv[1],"rb").read();opencode.opencode_findings(r);print(opencode.parse_review(r))' "$TMP/out-partial")" \
-  = "({'severity': 'red', 'message': 'Whole', 'file': 'app.py', 'line': 5},)"
-check grep -qF '"type":"step_start"' "$TMP/out-partial"
-check_not grep -qF 'Exploring.' "$TMP/out-partial"
-
-# A fenced final array is findings, as the review parser reads it.
-: > "$state/calls"
-printf '%s' fenced-final > "$state/scenario"
-direct out-fenced
-check test "$status" -eq 0
-check test "$(wc -l < "$state/calls")" -eq 2
-
-# A final turn that drops a finding an earlier snapshot held is refused, never
-# published as a clean review.
-: > "$state/calls"
-printf '%s' dropped-finding > "$state/scenario"
-direct out-dropped DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
-check test "$status" -eq 1
-check grep -qF 'final turn wrote no valid findings' "$TMP/out-dropped.stderr"
-check_not test -e "$TMP/out-dropped"
-
-# A final turn its watchdog cut is out of time, even when the CLI then exits 0
-# with a snapshot.
-: > "$state/calls"
-printf '%s' final-cut-clean-exit > "$state/scenario"
-direct out-final-cut DISPATCH_DEADLINE_EPOCH="$(($(date +%s) + 36))"
-check test "$status" -eq 124
-check_not test -e "$TMP/out-final-cut"
-printf '%s' hang > "$state/scenario"
+# A run cut mid-event keeps its step events, but not the cut line or its prose.
+check grep -qF '"type":"step_start"' "$TMP/out-table-partial-line-hang-36"
+check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
+check grep -qF 'final turn wrote no valid findings' "$TMP/out-table-dropped-finding-36.stderr"
+check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
 
 # The dispatcher passes the deadline on to the backend.
 : > "$state/calls"
+printf '%s' hang > "$state/scenario"
 started="$(date +%s)"
 DISPATCH_DEADLINE_EPOCH="$((started + 36))" run hang out-hang-dispatched --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 0
 check test "$(($(date +%s) - started))" -lt 36
 check grep -qF -- '--session ses_test1' <(sed -n 2p "$state/calls")
-
-# Too little time left for a final turn fails as out of time, at once.
-: > "$state/calls"
-direct out-no-time DISPATCH_DEADLINE_EPOCH="$(($(date +%s) - 1))"
-check test "$status" -eq 124
-check grep -qF 'ran out of time before its findings turn' "$TMP/out-no-time.stderr"
-check test ! -s "$state/calls"
 direct out-bad-deadline DISPATCH_DEADLINE_EPOCH=soon
 check test "$status" -eq 2
 

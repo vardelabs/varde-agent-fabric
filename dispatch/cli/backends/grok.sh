@@ -110,7 +110,7 @@ run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
 
 # A run stopped at its step limit has written no findings, and one stopped at
 # its time cut may hold only an early snapshot, so its session is resumed once,
-# with every tool denied, and its text replaces any prose. A cut run with no
+# with every tool denied, to write them (review_final.py finalize). A cut run with no
 # session to resume is out of time; an uncut stream that names none goes to the
 # caller's parser as it is.
 if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; then
@@ -128,13 +128,9 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
       --session "$session" --standalone --format json --agent plan --model "$model"
     ! stopped_by_watchdog || fail "$review_out_of_time" 124
     ((status == 0)) || report_failed_run "$scratch/final-stdout"
-    python3 "$backends/review_final.py" combine "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined"
-    mv -f -- "$scratch/combined" "$scratch/stdout"
-    # The final turn must write findings itself, and the whole stream must still
-    # parse, so a final turn that drops an earlier finding is refused.
-    { python3 "$backends/review_final.py" has-findings "$scratch/final-stdout" \
-      && python3 "$backends/review_final.py" has-findings "$scratch/stdout"; } \
+    python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined" \
       || fail 'Grok review final turn wrote no valid findings' 1
+    mv -f -- "$scratch/combined" "$scratch/stdout"
   fi
 fi
 output_dir="$(dirname -- "$DISPATCH_OUTPUT")"

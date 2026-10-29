@@ -180,7 +180,7 @@ run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
 
 # A review stopped at its step limit has written no findings, and one stopped
 # at its time cut may hold only an early snapshot, so its session is resumed
-# once, with every tool denied, and its text replaces any prose. A cut run
+# once, with every tool denied, to write them (review_final.py finalize). A cut run
 # with no session to resume is out of time; an uncut stream that names none
 # goes to the caller's parser as it is.
 if [[ -n "$final_turn" ]] \
@@ -196,15 +196,11 @@ if [[ -n "$final_turn" ]] \
       --session "$session" --standalone --format json --agent plan --model "$model"
     ! stopped_by_watchdog || out_of_time
     ((status == 0)) || report_failed_run "$final_output"
-    python3 "$backends/review_final.py" combine "$temporary_output" "$final_output" "$final_output.combined"
-    mv -f -- "$final_output.combined" "$temporary_output"
-    # The final turn must write findings itself, and the whole stream must still
-    # parse, so a final turn that drops an earlier finding is refused.
-    { python3 "$backends/review_final.py" has-findings "$final_output" \
-      && python3 "$backends/review_final.py" has-findings "$temporary_output"; } || {
+    python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined" || {
       printf 'OpenCode review final turn wrote no valid findings\n' >&2
       exit 1
     }
+    mv -f -- "$final_output.combined" "$temporary_output"
   fi
 fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
