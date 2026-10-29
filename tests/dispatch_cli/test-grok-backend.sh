@@ -86,6 +86,15 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  blank-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '   '
+    else text '[{"severity":"major","title":"Early","path":"app.py","line":"3"}]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  split-beside-snapshot)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'
+    else text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'; text '[{"severity":"major","title":"B",'; text '"path":"b.py","line":"2"}]'
+      sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   split-final)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Two parts",'; text '"path":"app.py","line":"9"}]'
@@ -378,6 +387,8 @@ partial-line-hang|36|0|2|1
 split-snapshot-dropped|36|1|2|-
 split-snapshot-kept|36|0|2|1
 split-final|none|0|2|1
+blank-final|36|1|2|-
+split-beside-snapshot|36|1|2|-
 dropped-finding|36|1|2|-
 early-findings-silent-final|36|1|2|-
 early-findings-no-session|36|124|1|-
