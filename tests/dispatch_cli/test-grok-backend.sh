@@ -446,6 +446,14 @@ check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
 check grep -qF 'final turn wrote no valid findings' "$TMP/out-table-dropped-finding-36.stderr"
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
 
+# The final turn's reserve is a third of the time left, at least 90 s where half
+# the time left allows it, so a long budget gives a large tree's final turn
+# minutes and a short one still leaves time to explore.
+for case in 36:13 120:55 200:105 300:195 585:385; do
+  check test "$(bash -c '. "$1"; review_deadline=$(( $(date +%s) + $2 )); review_explore_limit' _ \
+    "$ROOT/dispatch/cli/backends/lib/review-steps.sh" "${case%%:*}")" -ge $((${case##*:} - 1))
+done
+
 # The dispatcher passes the deadline on to the backend.
 : > "$state/calls"
 printf '%s' hang > "$state/scenario"
