@@ -20,6 +20,15 @@ review_stop_grace_s=5
 # allowed by name, so each read tool is denied by name as well as by "*".
 review_final_permission='{"*":"deny","read":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","edit":"deny","webfetch":"deny","external_directory":"deny"}'
 review_out_of_time='review ran out of time before its findings turn'
+# Seconds each run took, printed with an out-of-time exit as bare numbers so a
+# caller can see which phase used the time.
+review_explored_s=""
+review_final_s=""
+review_out_of_time_exit() {
+  printf '%s\n' "$review_out_of_time" >&2
+  printf 'review phases explored_s=%s final_s=%s\n' "${review_explored_s:-none}" "${review_final_s:-none}" >&2
+  exit 124
+}
 review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. Write [] if you found nothing.'
 
 # Sets review_deadline to the validated deadline, or empty when none was given.

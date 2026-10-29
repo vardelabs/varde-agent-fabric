@@ -445,6 +445,10 @@ check grep -qF '"type":"step_start"' "$TMP/out-table-partial-line-hang-36"
 check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
 check grep -qF 'final turn wrote no valid findings' "$TMP/out-table-dropped-finding-36.stderr"
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
+# An out-of-time exit names how long each run took, as bare numbers.
+check grep -qE '^review phases explored_s=[0-9]+ final_s=none$' "$TMP/out-table-early-findings-no-session-36.stderr"
+check grep -qE '^review phases explored_s=[0-9]+ final_s=[0-9]+$' "$TMP/out-table-final-cut-clean-exit-36.stderr"
+check grep -qxF 'review phases explored_s=none final_s=none' "$TMP/out-table-summary-past.stderr"
 
 # The final turn's reserve is a third of the time left, at least 90 s where half
 # the time left allows it, so a long budget gives a large tree's final turn

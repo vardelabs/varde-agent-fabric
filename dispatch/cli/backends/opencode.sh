@@ -171,11 +171,12 @@ report_failed_run() {
     || printf 'opencode reported no error event\n' >&2
   exit "$status"
 }
-out_of_time() { printf '%s\n' "$review_out_of_time" >&2; exit 124; }
 
 explore_limit="$(review_explore_limit)"
-[[ -z "$explore_limit" ]] || ((explore_limit > 0)) || out_of_time
+[[ -z "$explore_limit" ]] || ((explore_limit > 0)) || review_out_of_time_exit
+phase_started="$(date +%s)"
 run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
+review_explored_s=$(($(date +%s) - phase_started))
 ((status == 0)) || stopped_by_watchdog || report_failed_run "$temporary_output"
 
 # A review stopped at its step limit has written no findings, and one stopped
@@ -186,15 +187,17 @@ run_opencode "$explore_limit" "$temporary_output" "${args[@]}"
 if [[ -n "$final_turn" ]] \
   && { stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$temporary_output"; }; then
   if ! session="$(python3 "$backends/review_final.py" session "$temporary_output")"; then
-    ! stopped_by_watchdog || out_of_time
+    ! stopped_by_watchdog || review_out_of_time_exit
   else
     seconds_left="$(review_seconds_left)"
-    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || out_of_time
+    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || review_out_of_time_exit
     final_output="$(mktemp "${DISPATCH_OUTPUT}.opencode-final.XXXXXX")"
     export OPENCODE_CONFIG_CONTENT='{"agent":{"plan":{"steps":'"$review_step_limit"'}},"permission":'"$review_final_permission"'}'
+    phase_started="$(date +%s)"
     run_opencode "${seconds_left:+$((seconds_left - 5))}" "$final_output" opencode run "$review_final_prompt" \
       --session "$session" --standalone --format json --agent plan --model "$model"
-    ! stopped_by_watchdog || out_of_time
+    review_final_s=$(($(date +%s) - phase_started))
+    ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$final_output"
     python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined" || {
       printf 'OpenCode review final turn wrote no valid findings\n' >&2
