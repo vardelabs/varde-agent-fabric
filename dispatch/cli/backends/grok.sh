@@ -101,11 +101,13 @@ report_failed_run() {
 
 read_review_deadline
 cli_time_limit="$(review_explore_limit)"
-[[ -z "$cli_time_limit" ]] || ((cli_time_limit > 0)) || fail "$review_out_of_time" 124
+[[ -z "$cli_time_limit" ]] || ((cli_time_limit > 0)) || review_out_of_time_exit
 # Without --standalone the run attaches to a shared background service, whose
 # configuration was fixed when it started.
+phase_started="$(date +%s)"
 run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
   'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model"
+review_explored_s=$(($(date +%s) - phase_started))
 ((status == 0)) || stopped_by_watchdog || report_failed_run "$scratch/stdout"
 
 # A run stopped at its step limit has written no findings, and one stopped at
@@ -115,18 +117,20 @@ run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
 # caller's parser as it is.
 if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$scratch/stdout"; then
   if ! session="$(python3 "$backends/review_final.py" session "$scratch/stdout")"; then
-    ! stopped_by_watchdog || fail "$review_out_of_time" 124
+    ! stopped_by_watchdog || review_out_of_time_exit
   else
     seconds_left="$(review_seconds_left)"
-    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || fail "$review_out_of_time" 124
+    [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || review_out_of_time_exit
     final_config='{"enabled_providers":["xai"],"permission":'"$review_final_permission"'}'
     for index in "${!cli_env[@]}"; do
       [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
     done
     cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
+    phase_started="$(date +%s)"
     run_cli /dev/null "$scratch/final-stdout" "$scratch/final-stderr" opencode run "$review_final_prompt" \
       --session "$session" --standalone --format json --agent plan --model "$model"
-    ! stopped_by_watchdog || fail "$review_out_of_time" 124
+    review_final_s=$(($(date +%s) - phase_started))
+    ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$scratch/final-stdout"
     python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined" \
       || fail 'Grok review final turn wrote no valid findings' 1
