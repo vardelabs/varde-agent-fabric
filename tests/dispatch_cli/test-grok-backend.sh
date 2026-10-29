@@ -60,7 +60,91 @@ cat >> "$TMP/bin/opencode" <<'EOF'
   printf 'stdin=%s\n' "$(cat)"
 } > "$state/record"
 text() { printf '{"type":"text","part":{"text":%s}}\n' "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")"; }
+printf '%s|%s\n' "$*" "${OPENCODE_CONFIG_CONTENT:-}" >> "$state/calls"
+session_start() { printf '{"type":"step_start","sessionID":"ses_test1","part":{}}\n'; }
+summary='Maximum steps reached. Summary of work so far: read the files.'
 case "$(cat "$state/scenario")" in
+  summary)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Late","path":"app.py","line":"2"}]'
+    else text "$summary"; fi ;;
+  summary-twice) session_start; text "$summary" ;;
+  partial-line-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Whole","path":"app.py","line":"5"}]'
+    else text 'Exploring.'; printf '{"type":"tool_use","part":{"tool":"re'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  fenced-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[]\n```'
+    else text "$summary"; fi ;;
+  dropped-finding)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  final-cut-clean-exit)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
+    else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  blank-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '   '
+    else text '[{"severity":"major","title":"Early","path":"app.py","line":"3"}]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  split-beside-snapshot)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'
+    else text '[{"severity":"major","title":"A","path":"a.py","line":"1"}]'; text '[{"severity":"major","title":"B",'; text '"path":"b.py","line":"2"}]'
+      sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  final-drops-its-own)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Own","path":"o.py","line":"1"}]'; text '[]'
+    else text "$summary"; fi ;;
+  too-many-parts)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else for _ in $(seq 501); do text 'Still reading.'; done; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  split-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Two parts",'; text '"path":"app.py","line":"9"}]'
+    else text "$summary"; fi ;;
+  fenced-final-findings)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text $'```json\n[{"severity":"major","title":"Fenced","path":"app.py","line":"8"}]\n```'
+    else text "$summary"; fi ;;
+  split-snapshot-dropped|split-snapshot-kept)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then
+      if [[ "$(cat "$state/scenario")" == split-snapshot-kept ]]; then text '[{"severity":"major","title":"Split","path":"app.py","line":"7"}]'
+      else text '[]'; fi
+    else text '[{"severity":"major","title":"Split",'; text '"path":"app.py","line":"7"}]'
+      sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  prose-no-session) text "$summary" ;;
+  mixed)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; text "$summary"; fi ;;
+  mixed-dropped)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else text '[{"severity":"major","title":"Kept","path":"app.py","line":"6"}]'; text "$summary"; fi ;;
+  early-findings-no-session)
+    text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait ;;
+  early-findings-silent-final)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then printf '{"type":"step_finish","part":{}}\n'
+    else text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  early-findings-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[{"severity":"major","title":"Full","path":"app.py","line":"4"}]'
+    else text '[]'; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  stubborn-hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else trap '' TERM; sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  hang)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then text '[]'
+    else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   ok)
     python3 - "$OPENCODE_DB" <<'PY'
 import sqlite3, sys
@@ -144,7 +228,7 @@ check grep -qF '"enabled_providers":["xai"]' "$record"
 check grep -qF '"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","external_directory":"deny"}' "$record"
 check test "$(grep '^config=' "$record" | grep -o '"allow"' | wc -l)" -eq 3
 # A review that never stops exploring is cut to a text answer at the step limit.
-check grep -qF '"agent":{"plan":{"steps":10}}' "$record"
+check grep -qF '"agent":{"plan":{"steps":30}}' "$record"
 check grep -qxF 'leaked=' "$record"
 # The review is parsed by OpenCode's rules and normalised to the contract.
 check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-review")" \
@@ -289,5 +373,90 @@ check test -z "$(find "$TMP/runs" -mindepth 1 -maxdepth 1)"
 check_not alive "$(cat "$state/slow.pid")"
 check_not alive "$(cat "$state/slow-child.pid")"
 check test "$(credential xai-1)" = '{"refresh":"before-term"}'
+
+# Every end state of a review run and its final turn, as the outcome table in
+# the backend's pull request lists it: scenario | deadline | exit status | CLI
+# calls | published output, where a number is the findings every OpenCode parser
+# reads, a number with * is read only by the registered review parser, x is
+# output the review parser refuses, and - is no output.
+outcome_table='
+ok|none|0|1|1
+fenced-uncut|none|0|1|0*
+prose-no-session|none|0|1|x
+summary|none|0|2|1
+mixed|none|0|2|1
+mixed-dropped|none|1|2|-
+summary-twice|none|1|2|-
+fenced-final|none|1|2|-
+fenced-final-findings|none|0|2|1
+hang|36|0|2|0
+early-findings-hang|36|0|2|1
+partial-line-hang|36|0|2|1
+split-snapshot-dropped|36|1|2|-
+split-snapshot-kept|36|0|2|1
+split-final|none|0|2|1
+blank-final|36|1|2|-
+split-beside-snapshot|36|1|2|-
+final-drops-its-own|none|1|2|-
+too-many-parts|36|1|2|-
+dropped-finding|36|1|2|-
+early-findings-silent-final|36|1|2|-
+early-findings-no-session|36|124|1|-
+stubborn-hang|36|0|2|0
+final-cut-clean-exit|36|124|2|-
+summary|past|124|0|-
+exit-75|none|1|1|-'
+published_findings() {
+  [[ -e "$1" ]] || { printf -- '-'; return; }
+  PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch.adapters import opencode
+raw = open(sys.argv[1], "rb").read()
+try: count = len(opencode.parse_review(raw))
+except Exception: print("x", end=""); raise SystemExit
+try: opencode.opencode_findings(raw); print(count, end="")
+except Exception: print(f"{count}*", end="")' "$1"
+}
+while IFS='|' read -r scenario deadline want_status want_calls want_published; do
+  [[ -n "$scenario" ]] || continue
+  : > "$state/calls"
+  rm -f "$state/hang-child.pid"
+  printf '%s' "$scenario" > "$state/scenario"
+  started="$(date +%s)"
+  case "$deadline" in
+    none) direct "out-table-$scenario-$deadline" ;;
+    past) direct "out-table-$scenario-$deadline" DISPATCH_DEADLINE_EPOCH="$((started - 1))" ;;
+    *) direct "out-table-$scenario-$deadline" DISPATCH_DEADLINE_EPOCH="$((started + deadline))" ;;
+  esac
+  got="$status|$(wc -l < "$state/calls" | tr -d ' ')|$(published_findings "$TMP/out-table-$scenario-$deadline")"
+  [[ "$got" == "$want_status|$want_calls|$want_published" ]] \
+    || { printf 'outcome %s (deadline %s): got %s, want %s\n' "$scenario" "$deadline" "$got" "$want_status|$want_calls|$want_published" >&2; exit 1; }
+  pass=$((pass + 1))
+  [[ "$deadline" != 36 ]] || check test "$(($(date +%s) - started))" -lt 36
+  [[ ! -s "$state/hang-child.pid" ]] || check_not alive "$(cat "$state/hang-child.pid")"
+  cp "$state/calls" "$state/calls.$scenario-$deadline"
+done <<<"$outcome_table"
+
+# The final turn resumes the run's session with every tool denied.
+check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls.summary-none")
+check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny","read":"deny","glob":"deny","grep":"deny",' <(sed -n 2p "$state/calls.summary-none")
+check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import adapters;print(adapters.resolve("review","grok").parse_review(open(sys.argv[1],"rb").read()))' "$TMP/out-table-summary-none")" \
+  = "({'severity': 'red', 'message': 'Late', 'file': 'app.py', 'line': 2},)"
+# A run cut mid-event keeps its step events, but not the cut line or its prose.
+check grep -qF '"type":"step_start"' "$TMP/out-table-partial-line-hang-36"
+check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
+check grep -qF 'final turn wrote no valid findings' "$TMP/out-table-dropped-finding-36.stderr"
+check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
+
+# The dispatcher passes the deadline on to the backend.
+: > "$state/calls"
+printf '%s' hang > "$state/scenario"
+started="$(date +%s)"
+DISPATCH_DEADLINE_EPOCH="$((started + 36))" run hang out-hang-dispatched --kind review --diff "$TMP/change.diff" --task t
+check test "$status" -eq 0
+check test "$(($(date +%s) - started))" -lt 36
+check grep -qF -- '--session ses_test1' <(sed -n 2p "$state/calls")
+for bad_deadline in soon 01700000008 0; do
+  direct out-bad-deadline DISPATCH_DEADLINE_EPOCH="$bad_deadline"
+  check test "$status" -eq 2
+done
 
 printf 'grok backend tests: %s passed\n' "$pass"

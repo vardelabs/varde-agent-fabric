@@ -9,7 +9,7 @@ from dispatch.adapters.base import Adapter
 ADAPTER = Adapter(
     name="grok",
     roles=frozenset({"review"}),
-    env=("DISPATCH_GROK_HOME",),
+    env=("DISPATCH_GROK_HOME", "DISPATCH_DEADLINE_EPOCH"),
     parse_review=opencode.parse_review,
     detect_limit=opencode.detect_limit,
     label="Grok",

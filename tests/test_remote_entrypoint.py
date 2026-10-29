@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import json
 import unittest
 from pathlib import Path
@@ -157,6 +158,8 @@ class RemoteEntrypointTests(unittest.TestCase):
         self.assertEqual(env["DISPATCH_OPENCODE_HOME"], str(opencode_home))
         self.assertEqual(env["HOME"], str(caller_home))
         self.assertEqual(env["DISPATCH_DIFF"], str(diff))
+        deadline = int(env["DISPATCH_DEADLINE_EPOCH"])
+        self.assertLessEqual(abs(deadline - (int(time.time()) + run.call_args.kwargs["timeout"] - 5)), 5)
         self.assertNotIn("DISPATCH_GATEWAY_TOKEN", env)
 
     def _run_real_opencode_fallback(self, prior_events: str = ""):

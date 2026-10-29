@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from typing import TYPE_CHECKING
 
 from contracts.review_contracts import ReviewArtifact
@@ -115,6 +116,8 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
     }
     if os.environ.get("DISPATCH_OPENCODE_MODELS_PATH"):
         environment["DISPATCH_OPENCODE_MODELS_PATH"] = os.environ["DISPATCH_OPENCODE_MODELS_PATH"]
+    # The backend stops exploring early enough to leave its findings turn time inside this timeout.
+    environment["DISPATCH_DEADLINE_EPOCH"] = str(int(time.time()) + request.timeout_seconds)
     try:
         result = subprocess.run(
             [metadata.local_backend],
@@ -198,7 +201,7 @@ IMPLEMENT_MODEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}/(?:[a-z0-9][a-z0-9-]{0,31
 ADAPTER = Adapter(
     name="opencode",
     roles=frozenset({"review", "implement"}),
-    env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH", "DISPATCH_OPENCODE_ALLOW_WRITE"),
+    env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH", "DISPATCH_OPENCODE_ALLOW_WRITE", "DISPATCH_DEADLINE_EPOCH"),
     local_review_fallback=LocalReviewFallback(
         run=run_local_review,
         env=("DISPATCH_OPENCODE_HOME", "DISPATCH_OPENCODE_MODELS_PATH"),
