@@ -55,11 +55,12 @@ watch_pid() {
   watchdog_fired=""
   [[ -n "$1" ]] || return 0
   local limit="$1" target="$2"
+  # mktemp's own 0600 file is the marker, written once the watchdog fires, so no
+  # other account can create or redirect it.
   watchdog_fired="$(mktemp "${TMPDIR:-/tmp}/review-watchdog.XXXXXX")"
-  rm -f -- "$watchdog_fired"
   ( set +e
     sleep "$limit"
-    : > "$watchdog_fired"
+    printf 'fired\n' >> "$watchdog_fired"
     stop_tree "$target" ) &
   watchdog_pid=$!
 }
@@ -69,7 +70,7 @@ watch_pid() {
 stop_watchdog() {
   review_cut=""
   [[ -n "${watchdog_pid:-}" ]] || return 0
-  if [[ -e "$watchdog_fired" ]]; then
+  if [[ -s "$watchdog_fired" ]]; then
     review_cut=1
   else
     # The watchdog goes first: its sleep ending would let it fire.
@@ -81,7 +82,7 @@ stop_watchdog() {
   fi
   wait "$watchdog_pid" 2>/dev/null || true
   # It may have fired after the check above, while being stopped.
-  [[ ! -e "$watchdog_fired" ]] || review_cut=1
+  [[ ! -s "$watchdog_fired" ]] || review_cut=1
   rm -f -- "$watchdog_fired"
   watchdog_pid=""
 }
