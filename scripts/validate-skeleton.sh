@@ -29,10 +29,10 @@ if [[ -e .github/README.md || -L .github/README.md ]]; then
   exit 1
 fi
 
-# CI runs as the cluster Skeleton validation job, defined outside this
+# CI runs as an external Skeleton validation job, defined outside this
 # repository. A workflow here would be a second gate nothing validates.
 if [[ -e .github/workflows || -L .github/workflows ]]; then
-  printf 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job\n' >&2
+  printf 'GitHub Actions workflows are forbidden: CI runs as an external Skeleton validation job\n' >&2
   exit 1
 fi
 
