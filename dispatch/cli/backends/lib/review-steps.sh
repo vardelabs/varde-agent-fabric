@@ -29,7 +29,9 @@ review_out_of_time_exit() {
   printf 'review phases explored_s=%s final_s=%s\n' "${review_explored_s:-none}" "${review_final_s:-none}" >&2
   exit 124
 }
-review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. Write [] if you found nothing.'
+# The task owns what a clean review returns: a caller may ask for an extra object even when
+# nothing is wrong, and a bare "write []" here would drop it.
+review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. If you found nothing, write exactly what the task asks for in that case.'
 
 # Sets review_deadline to the validated deadline, or empty when none was given.
 read_review_deadline() {
