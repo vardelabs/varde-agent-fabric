@@ -28,6 +28,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 HTTP_400_DIAGNOSTIC_BYTES = 512
+# "cluster" is the old name, accepted until every gateway writes "remote".
+REMOTE_EXECUTION_LOCATIONS = frozenset({"remote", "cluster"})
 
 
 def _bad_request_error(body: bytes) -> GatewayError:
@@ -90,7 +92,7 @@ class GatewayClient:
         if any(getattr(artifact, field) != getattr(request, field) for field in
                ("repository", "worker_kind", "correlation_id", "snapshot_sha256", "model")):
             raise GatewayError("gateway implementation artifact does not match request identity")
-        if artifact.execution_location != "cluster":
+        if artifact.execution_location not in REMOTE_EXECUTION_LOCATIONS:
             raise GatewayError("gateway implementation execution location mismatch")
         source = {item["path"]: item["content"] for item in request.files}
         for change in artifact.changes:

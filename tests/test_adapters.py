@@ -55,8 +55,8 @@ class AdapterRegistrationTests(unittest.TestCase):
             Adapter(name="Example_Backend")
 
     def test_existing_fallback_stamps_are_unchanged(self):
-        self.assertEqual(adapters.ADAPTERS["codex"].fallback_stamp, "cluster-unavailable-local-codex")
-        self.assertEqual(adapters.ADAPTERS["opencode"].fallback_stamp, "cluster-unavailable-local-opencode")
+        self.assertEqual(adapters.ADAPTERS["codex"].fallback_stamp, "remote-unavailable-local-codex")
+        self.assertEqual(adapters.ADAPTERS["opencode"].fallback_stamp, "remote-unavailable-local-opencode")
 
     def test_unknown_harness_forwards_nothing_and_has_no_local_fallback(self):
         self.assertEqual(adapters.forwarded_env("llama-broker"), ())

@@ -417,7 +417,7 @@ account type.
      only. Each must start with `DISPATCH_` and must not be a contract variable.
    - `local_review_fallback` is set only when the backend can serve a remote
      review route locally while the gateway is unavailable. It needs the
-     `review` role, and its stamp is `cluster-unavailable-local-<name>`.
+     `review` role, and its stamp is `remote-unavailable-local-<name>`.
    - `implement_model` bounds the model an implement request may name for this
      backend. It needs the `implement` role.
    - `parse_review(raw)` turns the backend's review output into findings that

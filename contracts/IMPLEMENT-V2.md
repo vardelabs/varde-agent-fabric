@@ -35,7 +35,7 @@ Codex route keys are no longer accepted by that worker.
 
 Deploy a receiver whose fabric pin supports v2 before updating callers to emit
 v2. An older gateway pin rejects v2 requests as malformed. Receivers must compare
-artifact model, provider, cluster execution location, repository, worker,
+artifact model, provider, remote execution location, repository, worker,
 correlation ID, snapshot digest and changed-file preimages.
 
 Route permission alone is not write authorization or process confinement.

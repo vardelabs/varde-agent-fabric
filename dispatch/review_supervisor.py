@@ -6,7 +6,7 @@ import multiprocessing
 import threading
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
-from dispatch.cluster_worker import WorkerResult
+from dispatch.remote_worker import WorkerResult
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import GatewayClient, GatewayError, GatewayUnavailable
 

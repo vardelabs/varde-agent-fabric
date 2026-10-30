@@ -18,7 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contracts.review_contracts import ContractError, MAX_PACKET_BYTES, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
-from dispatch.cluster_worker import ClusterReviewWorker, WorkerResult
+from dispatch.remote_worker import RemoteReviewWorker, WorkerResult
 from dispatch.gateway_client import GatewayClient, GatewayError, GatewayUnavailable
 from dispatch.review_supervisor import ReviewSupervisor
 
@@ -32,7 +32,7 @@ def request(worker: str = "local-gemma", model: str | None = None) -> ReviewRequ
 
 
 def artifact(req: ReviewRequest, **changes: object) -> dict:
-    value = ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"severity": "green", "message": "no findings"},), "completed")
+    value = ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "remote", "gemma", req.correlation_id, ({"severity": "green", "message": "no findings"},), "completed")
     payload = value.to_dict()
     payload.update(changes)
     return payload
@@ -85,7 +85,7 @@ class RemoteReviewTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "\ud800")
         with self.assertRaises(ContractError):
-            ReviewArtifact(request().repository, 7, BASE, HEAD, "codex", "cluster", "codex", "corr-7", ({"severity": "red", "message": "\ud800"},), "completed")
+            ReviewArtifact(request().repository, 7, BASE, HEAD, "codex", "remote", "codex", "corr-7", ({"severity": "red", "message": "\ud800"},), "completed")
 
     def test_contract_bounds_path_lengths(self):
         with self.assertRaises(ContractError):
@@ -100,17 +100,17 @@ class RemoteReviewTests(unittest.TestCase):
     def test_findings_require_messages(self):
         req = request()
         with self.assertRaises(ContractError):
-            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"severity": "green"},), "completed")
+            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "remote", "gemma", req.correlation_id, ({"severity": "green"},), "completed")
 
     def test_findings_require_allowed_severity(self):
         req = request()
         with self.assertRaises(ContractError):
-            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"message": "missing severity"},), "completed")
+            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "remote", "gemma", req.correlation_id, ({"message": "missing severity"},), "completed")
 
     def test_finding_text_limit_is_strict(self):
         req = request()
         with self.assertRaises(ContractError):
-            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"severity": "yellow", "message": "x" * 1025},), "completed")
+            ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "remote", "gemma", req.correlation_id, ({"severity": "yellow", "message": "x" * 1025},), "completed")
 
     def test_multibyte_packet_byte_limit_is_strict(self):
         req = request()
@@ -120,7 +120,7 @@ class RemoteReviewTests(unittest.TestCase):
     def test_fake_gateway_returns_validated_artifact(self):
         req = request()
         client = GatewayClient("https://gateway.example", "secret", opener=self.opener(artifact(req)))
-        self.assertEqual(client.submit(req).execution_location, "cluster")
+        self.assertEqual(client.submit(req).execution_location, "remote")
 
     def test_stale_head_is_rejected(self):
         req = request()
@@ -268,7 +268,7 @@ class RemoteReviewTests(unittest.TestCase):
         local = mock.Mock(return_value=WorkerResult(ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, "codex", "requester", "codex-local", req.correlation_id, (), "completed")))
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
         result = ReviewSupervisor(client, local_codex=local).run(req)
-        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+        self.assertEqual(result.fallback, "remote-unavailable-local-codex")
 
     def test_transport_configuration_is_validated(self):
         with self.assertRaises(ValueError): GatewayClient("http://gateway.example", "secret")
@@ -276,9 +276,9 @@ class RemoteReviewTests(unittest.TestCase):
 
     def test_finding_shape_and_worker_error_are_strict(self):
         req = request()
-        with self.assertRaises(ContractError): ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "cluster", "gemma", req.correlation_id, ({"x": 1},), "completed")
+        with self.assertRaises(ContractError): ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, req.worker_kind, "remote", "gemma", req.correlation_id, ({"x": 1},), "completed")
         bad_model = cast(Callable[[str], list[dict]], lambda packet: ["bad"])
-        with self.assertRaises(ContractError): ClusterReviewWorker(bad_model, provider="gemma").execute(req)
+        with self.assertRaises(ContractError): RemoteReviewWorker(bad_model, provider="gemma").execute(req)
 
     def test_transport_limit_is_checked_before_network(self):
         req = request()
@@ -323,7 +323,7 @@ class RemoteReviewTests(unittest.TestCase):
         )
         value = ReviewArtifact(
             req.repository, req.pull_request, req.base_sha, req.head_sha,
-            req.worker_kind, "cluster", "gemma", req.correlation_id,
+            req.worker_kind, "remote", "gemma", req.correlation_id,
             findings, "completed",
         )
         body = json.dumps(value.to_dict()).encode()
@@ -350,9 +350,9 @@ class RemoteReviewTests(unittest.TestCase):
     def test_codex_falls_back_with_provenance(self):
         req = request("codex")
         client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=OSError("offline")))
-        local = ClusterReviewWorker(lambda packet: [{"severity": "yellow", "message": "finding"}], provider="codex-local", location="requester")
+        local = RemoteReviewWorker(lambda packet: [{"severity": "yellow", "message": "finding"}], provider="codex-local", location="requester")
         result = ReviewSupervisor(client, local_codex=local.execute).run(req)
-        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+        self.assertEqual(result.fallback, "remote-unavailable-local-codex")
         self.assertEqual(result.execution_location, "requester")
 
     def test_codex_fallback_rejects_stale_artifact(self):
@@ -385,7 +385,7 @@ class RemoteReviewTests(unittest.TestCase):
         findings = tuple({"severity": "yellow", "file": f"src/app-{i}.py", "message": f"{i:04d}-" + "m" * 1019, "confidence": f"{i:04d}-" + "c" * 1019, "category": f"{i:04d}-" + "k" * 1019, "reproduction": f"{i:04d}-" + "r" * 1019, "line": 1} for i in range(50))
         large = WorkerResult(ReviewArtifact(req.repository, req.pull_request, req.base_sha, req.head_sha, "codex", "requester", "codex-local", req.correlation_id, findings, "completed"))
         result = ReviewSupervisor(client, local_codex=mock.Mock(return_value=large)).run(req)
-        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+        self.assertEqual(result.fallback, "remote-unavailable-local-codex")
 
     def test_codex_fallback_honors_timeout(self):
         req = ReviewRequest("example-org/example", 7, BASE, HEAD, ("src/app.py",), "reviewer", "codex", "corr-7", "bounded packet", timeout_seconds=1)
@@ -398,8 +398,8 @@ class RemoteReviewTests(unittest.TestCase):
         self.assertEqual(multiprocessing.active_children(), [])
 
     def test_worker_emits_cluster_provenance(self):
-        result = ClusterReviewWorker(lambda packet: [{"severity": "green", "message": "no findings"}], provider="gemma-private").execute(request()).artifact
-        self.assertEqual((result.execution_location, result.provider), ("cluster", "gemma-private"))
+        result = RemoteReviewWorker(lambda packet: [{"severity": "green", "message": "no findings"}], provider="gemma-private").execute(request()).artifact
+        self.assertEqual((result.execution_location, result.provider), ("remote", "gemma-private"))
 
 
 if __name__ == "__main__": unittest.main()

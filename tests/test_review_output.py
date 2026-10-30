@@ -30,7 +30,7 @@ def _opencode(*texts: str) -> tuple:
 
 
 def _artifact(findings: tuple) -> ReviewArtifact:
-    return ReviewArtifact("example-org/example", 1, "a" * 40, "b" * 40, "codex", "cluster", "example/model",
+    return ReviewArtifact("example-org/example", 1, "a" * 40, "b" * 40, "codex", "remote", "example/model",
                           "c1", findings, "completed")
 
 
