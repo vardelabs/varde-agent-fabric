@@ -393,11 +393,11 @@ expect_rejection 'scripts directory must remain flat'
 
 make_probe
 mkdir -p "$probe/.github/workflows"
-expect_rejection 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job'
+expect_rejection 'GitHub Actions workflows are forbidden: CI runs as an external Skeleton validation job'
 
 make_probe
 mkdir -p "$probe/.github"
 ln -s missing-target "$probe/.github/workflows"
-expect_rejection 'GitHub Actions workflows are forbidden: CI runs as the cluster Skeleton validation job'
+expect_rejection 'GitHub Actions workflows are forbidden: CI runs as an external Skeleton validation job'
 
 printf 'skeleton layout rejection: ok\n'
