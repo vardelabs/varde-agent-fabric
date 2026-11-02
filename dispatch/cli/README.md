@@ -63,7 +63,7 @@ dispatch/cli/varde-agent-dispatch \
   --output /path/to/review-artifact.json
 ```
 
-The current public backends are `codex`, `opencode`, and `gemini`. The OpenCode adapter
+The current public backends are `codex`, `opencode`, `gemini`, `grok`, and `vibe`. The OpenCode adapter
 supports CLI v2. Each backend is registered in `dispatch/adapters/`; see
 [Adding a Backend](#adding-a-backend). The dispatcher passes only an explicit
 runtime contract to a backend:
@@ -346,6 +346,44 @@ plan is not entitled.
 ```text
 env -i HOME=/path/to/grok-home PATH=/path/to/grok-home/bin:"$PATH" TERM="$TERM" OPENCODE_DISABLE_CHANNEL_DB=1 OPENCODE_DISABLE_AUTOUPDATE=1 opencode auth login xai --method device --standalone
 ```
+
+### Mistral Vibe
+
+The `vibe` backend reviews with the Mistral Vibe CLI in headless mode. It reads
+an API key from `DISPATCH_VIBE_HOME/.env` (`MISTRAL_API_KEY=...`), a regular
+file, never a link. It serves `review` only and needs a `mistral/<model>` id,
+where the part after the slash is the Mistral API model name. It shares the
+Gemini backend's isolation (`backends/lib/review-isolation.sh`). The CLI runs
+under `env -i` with only `PATH`, `HOME`, `TMPDIR`, and `VIBE_HOME`, all in a
+private scratch, so a key, proxy, or endpoint override in the caller's
+environment never reaches it.
+
+- **Configuration:** the per-run `VIBE_HOME` holds a link to the key file and a
+  `config.toml` the backend writes, so no agent, skill, MCP server, connector,
+  or plugin of the operator's loads. `strict_config` refuses a setting the CLI
+  would ignore. The workdir is never trusted (`--trust` is not passed), so the
+  reviewed tree's `.vibe/` config is ignored; a trusted one can change the
+  default agent.
+- **Tools:** the run uses the `ask` agent with auto-approve disabled. In
+  headless mode, `ask` denies every tool whose permission is `ask`, which covers
+  `bash`, `edit`, `write_file`, and the web tools, also when called from
+  `run_typescript`. Each of those is also set to `never`. `read_file` stays,
+  and `outside_workdir = "deny"` refuses any path, a link included, that
+  resolves outside the workdir. The `enabled_tools` setting does not limit the
+  tools offered to the model, so the backend does not rely on it.
+- **Result:** the CLI writes `export.json` to a private output directory on
+  every exit. That record decides the outcome: `finished` with exit 0 returns
+  the last assistant message's text, an error code of `rate_limit` exits 75,
+  and an `outcome` of `deadline` is reported as out of time. Any other outcome
+  fails, and its reason names only the outcome and error-code tokens, never the
+  error message, which can quote a provider response. A CLI exit of 75 for any
+  other reason becomes 1.
+- **Deadline:** with `DISPATCH_DEADLINE_EPOCH`, the CLI gets `--time-limit` a
+  few seconds before the deadline, and a watchdog stops it at the deadline.
+
+Install the CLI with a CPython that matches its wheel, for example
+`uv tool install --python 3.12 mistral-vibe`. Without a matching wheel, the
+package builds from source and needs a Rust toolchain.
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
