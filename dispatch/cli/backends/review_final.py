@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from contracts.review_contracts import MAX_FINDINGS
 from dispatch.adapters import opencode
 from dispatch.adapters.review_output import (
     extract_findings,
@@ -128,7 +129,8 @@ def merged_findings(final: list[object], earlier: list[object]) -> list[object]:
     A model restating an earlier finding rewords it, and the checked-files object
     grows as it reads, so neither an equal object nor a refusal fits: a finding at
     a file and line the final list already reports counts as covered, and only the
-    latest checked-files object is kept.
+    latest checked-files object is kept. Nothing is added past the review
+    contract's limit, which would refuse the whole review.
     """
     merged = list(final)
     covered = {location for location in map(_location, final) if location}
@@ -139,6 +141,8 @@ def merged_findings(final: list[object], earlier: list[object]) -> list[object]:
         location = _location(finding)
         if _is_checked(finding) or finding in merged or location in covered:
             continue
+        if len(merged) >= MAX_FINDINGS:
+            break
         merged.append(finding)
         if location:
             covered.add(location)

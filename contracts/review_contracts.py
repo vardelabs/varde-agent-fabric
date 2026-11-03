@@ -15,7 +15,7 @@ _MAX_TEXT = 256
 _MAX_PATH_TEXT = 512
 MAX_PACKET_BYTES = 256 * 1024
 MAX_TRANSPORT_BYTES = MAX_PACKET_BYTES + 64 * 1024
-_MAX_FINDINGS = 50
+MAX_FINDINGS = 50
 _MAX_FINDING_TEXT = 1024
 _ALLOWED_KINDS = {"reviewer"}
 # Shape only: the executing side decides which registered adapters may serve a
@@ -193,7 +193,7 @@ class ReviewArtifact:
         _text(self.execution_location, "execution_location")
         _text(self.provider, "provider")
         _text(self.correlation_id, "correlation_id", max_length=128)
-        if not isinstance(self.findings, tuple) or len(self.findings) > _MAX_FINDINGS:
+        if not isinstance(self.findings, tuple) or len(self.findings) > MAX_FINDINGS:
             raise ContractError("findings must contain at most 50 objects")
         for index, finding in enumerate(self.findings):
             _finding(finding, index)

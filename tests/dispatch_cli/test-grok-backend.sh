@@ -466,6 +466,9 @@ check grep -qF 'Said again' "$TMP/out-table-reworded-finding-36"
 check_not grep -qF 'Said once' "$TMP/out-table-reworded-finding-36"
 check grep -qF 'app.py, lib.py' "$TMP/out-table-reworded-finding-36"
 check_not grep -qF '\"title\": \"app.py\"' "$TMP/out-table-reworded-finding-36"
+# Added-back findings stop at the review contract's limit.
+check test "$(python3 -c 'import sys;sys.path.insert(0,sys.argv[1]);from review_final import merged_findings
+print(len(merged_findings([{"message":f"f{i}"} for i in range(49)], [{"message":f"e{i}"} for i in range(5)])))' "$ROOT/dispatch/cli/backends")" -eq 50
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
 # An out-of-time exit names how long each run took, as bare numbers.
 check grep -qE '^review phases explored_s=[0-9]+ final_s=none$' "$TMP/out-table-early-findings-no-session-36.stderr"
