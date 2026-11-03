@@ -118,6 +118,12 @@ case "$(cat "$state/scenario")" in
       else text '[]'; fi
     else text '[{"severity":"major","title":"Split",'; text '"path":"app.py","line":"7"}]'
       sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
+  reworded-finding)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then
+      text '[{"severity":"major","title":"Said again","path":"app.py","line":"6"},{"severity":"info","category":"checked","title":"app.py, lib.py"}]'
+    else text '[{"severity":"major","title":"Said once","path":"app.py","line":"6"},{"severity":"info","category":"checked","title":"app.py"}]'
+      sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   prose-no-session) text "$summary" ;;
   mixed)
     session_start
@@ -385,21 +391,22 @@ fenced-uncut|none|0|1|0*
 prose-no-session|none|0|1|x
 summary|none|0|2|1
 mixed|none|0|2|1
-mixed-dropped|none|1|2|-
+mixed-dropped|none|0|2|1
 summary-twice|none|1|2|-
 fenced-final|none|1|2|-
 fenced-final-findings|none|0|2|1
 hang|36|0|2|0
 early-findings-hang|36|0|2|1
 partial-line-hang|36|0|2|1
-split-snapshot-dropped|36|1|2|-
+split-snapshot-dropped|36|0|2|1
 split-snapshot-kept|36|0|2|1
 split-final|none|0|2|1
 blank-final|36|1|2|-
-split-beside-snapshot|36|1|2|-
-final-drops-its-own|none|1|2|-
+split-beside-snapshot|36|0|2|2
+final-drops-its-own|none|0|2|1
 too-many-parts|36|1|2|-
-dropped-finding|36|1|2|-
+dropped-finding|36|0|2|1
+reworded-finding|36|0|2|2
 early-findings-silent-final|36|1|2|-
 early-findings-no-session|36|124|1|-
 stubborn-hang|36|0|2|0
@@ -437,7 +444,8 @@ done <<<"$outcome_table"
 
 # The final turn resumes the run's session with every tool denied.
 check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 2p "$state/calls.summary-none")
-check grep -qF '|{"enabled_providers":["xai"],"permission":{"*":"deny","read":"deny","glob":"deny","grep":"deny",' <(sed -n 2p "$state/calls.summary-none")
+check grep -qF '|{"enabled_providers":["xai"],"provider":{"xai":{"models":{"'"${MODEL#xai/}"'":{"options":{"reasoningEffort":"medium"}}}}},"permission":{"*":"deny","read":"deny","glob":"deny","grep":"deny",' <(sed -n 2p "$state/calls.summary-none")
+check grep -qF '|{"enabled_providers":["xai"],"provider":{"xai":{"models":{"'"${MODEL#xai/}"'":{"options":{"reasoningEffort":"medium"}}}}},"permission":{"*":"deny","read":"allow",' <(sed -n 1p "$state/calls.summary-none")
 # A clean review's answer follows the task, so an object the task requires even then survives.
 check grep -qF 'If you found nothing, write exactly what the task asks for in that case.' <(sed -n 2p "$state/calls.summary-none")
 check_not grep -qF 'Write []' <(sed -n 2p "$state/calls.summary-none")
@@ -446,7 +454,18 @@ check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import ada
 # A run cut mid-event keeps its step events, but not the cut line or its prose.
 check grep -qF '"type":"step_start"' "$TMP/out-table-partial-line-hang-36"
 check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
-check grep -qF 'final turn wrote no valid findings' "$TMP/out-table-dropped-finding-36.stderr"
+# A refused final turn names its case, and only the case.
+check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-blank-final-36.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-early-findings-silent-final-36.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed)' "$TMP/out-table-fenced-final-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (too-many-parts)' "$TMP/out-table-too-many-parts-36.stderr"
+# An earlier finding the final list dropped is kept; one it restated at the same
+# place is not doubled, and only the final checked-files object is kept.
+check grep -qF '"title\": \"Kept\"' "$TMP/out-table-dropped-finding-36"
+check grep -qF 'Said again' "$TMP/out-table-reworded-finding-36"
+check_not grep -qF 'Said once' "$TMP/out-table-reworded-finding-36"
+check grep -qF 'app.py, lib.py' "$TMP/out-table-reworded-finding-36"
+check_not grep -qF '\"title\": \"app.py\"' "$TMP/out-table-reworded-finding-36"
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
 # An out-of-time exit names how long each run took, as bare numbers.
 check grep -qE '^review phases explored_s=[0-9]+ final_s=none$' "$TMP/out-table-early-findings-no-session-36.stderr"

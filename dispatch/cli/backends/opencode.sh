@@ -199,8 +199,8 @@ if [[ -n "$final_turn" ]] \
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$final_output"
-    python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined" || {
-      printf 'OpenCode review final turn wrote no valid findings\n' >&2
+    refusal="$(python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined")" || {
+      printf 'OpenCode review final turn wrote no valid findings (%s)\n' "${refusal:-unknown}" >&2
       exit 1
     }
     mv -f -- "$final_output.combined" "$temporary_output"
