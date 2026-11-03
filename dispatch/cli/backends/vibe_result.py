@@ -17,7 +17,9 @@ import tempfile
 LIMIT_REACHED = 75
 OUT_OF_TIME = 124
 FAILED = 1
-MAX_READ_BYTES = 8 * 1024 * 1024
+# The transcript holds every tool result the review read, so it is far larger than the final answer.
+MAX_TRANSCRIPT_BYTES = 256 * 1024 * 1024
+MAX_EXPORT_BYTES = 1024 * 1024
 LIMIT_ERROR_CODES = frozenset({"rate_limit"})
 # Only these tokens from the export reach a failure reason: its error message
 # can quote a provider response.
@@ -36,15 +38,18 @@ def _token(value: object) -> str:
     return "unlisted"
 
 
-def _load_json(path: str) -> object:
+def _load_json(path: str, limit: int, name: str) -> object:
     with open(path, "rb") as stream:
-        return json.loads(stream.read(MAX_READ_BYTES).decode("utf-8", errors="replace"))
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise RunFailed(FAILED, f"vibe {name} is over {limit // (1024 * 1024)} MiB")
+    return json.loads(raw.decode("utf-8", errors="replace"))
 
 
 def _export(path: str) -> dict:
     """The CLI's own run record, which it writes on every exit; model text cannot shape it."""
     try:
-        export = _load_json(path)
+        export = _load_json(path, MAX_EXPORT_BYTES, "run export")
     except (OSError, ValueError) as exc:
         raise RunFailed(FAILED, "vibe wrote no readable run export") from exc
     if not isinstance(export, dict):
@@ -68,7 +73,7 @@ def check_finished(export: dict, cli_status: int) -> None:
 def final_text(stdout_path: str) -> str:
     """The text of the transcript's last entry, which must be an assistant message."""
     try:
-        transcript = _load_json(stdout_path)
+        transcript = _load_json(stdout_path, MAX_TRANSCRIPT_BYTES, "transcript")
     except (OSError, ValueError) as exc:
         raise RunFailed(FAILED, "vibe output is not a JSON transcript") from exc
     last = transcript[-1] if isinstance(transcript, list) and transcript else None

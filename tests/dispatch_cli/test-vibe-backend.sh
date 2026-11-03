@@ -52,6 +52,9 @@ case "$(cat "$state/scenario")" in
   ends-with-user) printf '[{"role":"user","type":"message","content":[{"type":"text","text":"x"}]}]'; export_record finished null 0 ;;
   empty-text) assistant '' ' '; export_record finished null 0 ;;
   no-export) assistant 'review' 'text' ;;
+  large)
+    printf '[{"role":"tool","type":"message","content":[{"type":"text","text":"%s"}]},' "$(head -c 9437184 /dev/zero | tr '\0' x)"
+    assistant 'review ' 'text' | cut -c2-; export_record finished null 0 ;;
   limit-status) assistant 'review' 'text'; export_record finished null 0; exit 75 ;;
 esac
 EOF
@@ -114,6 +117,10 @@ check grep -qF 'no response text' "$TMP/out-empty.stderr"
 review no-export out-noexport
 check test "$status" -eq 1
 check grep -qF 'no readable run export' "$TMP/out-noexport.stderr"
+
+review large out-large
+check test "$status" -eq 0
+check grep -qxF 'review text' "$TMP/out-large"
 
 review limit-status out-75
 check test "$status" -eq 1
