@@ -85,7 +85,10 @@ python3 "$backends/opencode_signin.py" snapshot "$signin_db" "$scratch/opencode.
 # fetch from the network and move the session's directory, or one a later
 # release adds. The plan agent's step limit is a backstop for a review that
 # never stops exploring; the final turn below writes the findings.
-config='{"enabled_providers":["xai"],"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow",'
+# Without an effort the provider's own default applies, which on a large tree can
+# spend the final turn's time reasoning instead of writing findings.
+providers='"enabled_providers":["xai"],"provider":{"xai":{"models":{"'"${model#xai/}"'":{"options":{"reasoningEffort":"medium"}}}}}'
+config='{'"$providers"',"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow",'
 config+='"external_directory":"deny"},"agent":{"plan":{"steps":'"$review_step_limit"'}}}'
 # The CLI gets only this environment, so a proxy, NODE_OPTIONS, or an endpoint
 # override never reaches it, even when this backend runs outside the dispatcher.
@@ -121,7 +124,7 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
   else
     seconds_left="$(review_seconds_left)"
     [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)) || review_out_of_time_exit
-    final_config='{"enabled_providers":["xai"],"permission":'"$review_final_permission"'}'
+    final_config='{'"$providers"',"permission":'"$review_final_permission"'}'
     for index in "${!cli_env[@]}"; do
       [[ "${cli_env[index]}" != OPENCODE_CONFIG_CONTENT=* ]] || cli_env[index]="OPENCODE_CONFIG_CONTENT=$final_config"
     done
@@ -132,8 +135,8 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$scratch/final-stdout"
-    python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined" \
-      || fail 'Grok review final turn wrote no valid findings' 1
+    refusal="$(python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined")" \
+      || fail "Grok review final turn wrote no valid findings (${refusal:-unknown})" 1
     mv -f -- "$scratch/combined" "$scratch/stdout"
   fi
 fi
