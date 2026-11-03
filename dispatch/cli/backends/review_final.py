@@ -12,8 +12,9 @@ finding any snapshot in either run held, even one split across text parts, that
 the final list does not cover. It then writes the exploring run's non-text
 events and one text event holding the findings as plain JSON, which every
 OpenCode parser reads alike. When it refuses, it prints only a case name:
-no-text, unparsed, or too-many-parts. None prints any event text, which can
-quote files the agent read.
+no-text, too-many-parts, or an unparsed-* name for the final text's form
+(length when the output limit cut it, then unterminated, invalid, json, fenced
+or prose). None prints any event text, which can quote files the agent read.
 """
 from __future__ import annotations
 
@@ -150,15 +151,40 @@ def merged_findings(final: list[object], earlier: list[object]) -> list[object]:
     return merged
 
 
+def finish_reason(final_events: list[dict]) -> str | None:
+    """The reason the final turn's last step ended, when the CLI reported one."""
+    for event in reversed(final_events):
+        part = event.get("part")
+        if event.get("type") == "step_finish" and isinstance(part, dict):
+            reason = part.get("reason")
+            return reason if isinstance(reason, str) else None
+    return None
+
+
+def unparsed_case(final_events: list[dict], final_texts: list[str]) -> str:
+    """Why the final text is not a findings list, as a fixed name that holds none of the text."""
+    if finish_reason(final_events) == "length":
+        return "unparsed-length"
+    last = [text for text in final_texts if text.strip()][-1].strip()
+    try:
+        json.loads(last)
+    except ValueError:
+        if last.startswith(("[", "{")):
+            return "unparsed-invalid" if last.endswith(("]", "}")) else "unparsed-unterminated"
+        return "unparsed-fenced" if last.startswith("```") else "unparsed-prose"
+    return "unparsed-json"
+
+
 def finalized(exploring: bytes, final: bytes) -> tuple[bytes | None, str]:
     exploring_events = events(exploring)
     exploring_texts = [text for _, event in exploring_events if (text := text_of(event)) is not None]
-    final_texts = [text for _, event in events(final) if (text := text_of(event)) is not None]
+    final_events = [event for _, event in events(final)]
+    final_texts = [text for event in final_events if (text := text_of(event)) is not None]
     if not any(text.strip() for text in final_texts):
         return None, "no-text"
     findings = final_findings(exploring_texts, final_texts)
     if findings is None:
-        return None, "unparsed"
+        return None, unparsed_case(final_events, final_texts)
     snapshots = snapshot_findings(exploring_texts + final_texts)
     if snapshots is None:
         return None, "too-many-parts"
