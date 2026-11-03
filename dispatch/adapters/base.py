@@ -90,7 +90,7 @@ class Adapter:
 
     @property
     def fallback_stamp(self) -> str:
-        return f"cluster-unavailable-local-{self.name}"
+        return f"remote-unavailable-local-{self.name}"
 
 
 def caller_base_env(workdir: str) -> dict[str, str]:

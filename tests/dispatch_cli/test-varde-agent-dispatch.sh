@@ -545,7 +545,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.dumps({"schema":"implement-artifact.v2", "repository":request["repository"],
                 "worker_kind":request["worker_kind"], "correlation_id":request["correlation_id"],
                 "snapshot_sha256":digest, "provider":provider, "model":request["model"],
-                "execution_location":"cluster",
+                "execution_location":"remote",
                 "changes":changes, "model_output":"done", "finish_reason":finish,
                 "fallback":None, "latency_ms":1}).encode()
         else:
@@ -564,7 +564,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "schema": "review-artifact.v1", "repository": request["repository"],
             "pull_request": request["pull_request"], "base_sha": request["base_sha"],
             "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
-            "execution_location": "cluster", "provider": request["model"],
+            "execution_location": "remote", "provider": request["model"],
             "correlation_id": request["correlation_id"], "findings": [],
             "finish_reason": "completed", "fallback": None, "latency_ms": 1,
             }).encode()
@@ -594,7 +594,7 @@ if ! DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKE
   printf 'remote CLI dispatch unexpectedly failed\n' >&2; cat "$TMP/err-remote" >&2; exit 1
 fi
 check test -s "$TMP/out-remote"
-check grep -qF '"execution_location":"cluster"' "$TMP/out-remote"
+check grep -qF '"execution_location":"remote"' "$TMP/out-remote"
 check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
 
 if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" \
@@ -614,7 +614,7 @@ check test -s "$TMP/out-opencode-fallback"
 check grep -qF '"provider":"opencode-go/qwen3.8-flash"' "$TMP/out-opencode-fallback"
 check grep -qF '"worker_kind":"opencode"' "$TMP/out-opencode-fallback"
 check grep -qF '"execution_location":"requester"' "$TMP/out-opencode-fallback"
-check grep -qF '"fallback":"cluster-unavailable-local-opencode"' "$TMP/out-opencode-fallback"
+check grep -qF '"fallback":"remote-unavailable-local-opencode"' "$TMP/out-opencode-fallback"
 
 printf 'before' > "$TMP/work/selected.txt"
 cat > "$TMP/implement-routes.json" <<'EOF'

@@ -11,7 +11,7 @@ class ModelBindingTests(unittest.TestCase):
         for model in MODELS:
             req = ImplementRequest('o/r', 'opencode', 'id', 'edit', ({'path':'a','content':'old'},), 3, model=model)
             good = ImplementArtifact('o/r', 'opencode', 'id', req.snapshot_sha256, model,
-                'cluster', (), 'done', 'completed', None, 0, model=model).to_dict()
+                'remote', (), 'done', 'completed', None, 0, model=model).to_dict()
             def submit(payload):
                 class Response(io.BytesIO):
                     status = 200
@@ -34,11 +34,11 @@ class ModelBindingTests(unittest.TestCase):
                 self.assertEqual(req.to_dict()['schema'], 'implement-request.v2')
                 self.assertEqual(ImplementRequest.from_dict(req.to_dict()), req)
                 artifact = ImplementArtifact('o/r', 'opencode', 'id', req.snapshot_sha256, model,
-                    'cluster', (), 'done', 'completed', None, 0, model=model)
+                    'remote', (), 'done', 'completed', None, 0, model=model)
                 self.assertEqual(ImplementArtifact.from_dict(artifact.to_dict()), artifact)
                 with self.assertRaises(ContractError):
                     ImplementArtifact('o/r', 'opencode', 'id', req.snapshot_sha256, MODELS[1-MODELS.index(model)],
-                        'cluster', (), 'done', 'completed', None, 0, model=model)
+                        'remote', (), 'done', 'completed', None, 0, model=model)
                 wrong = req.to_dict(); wrong['schema'] = 'implement-request.v1'
                 with self.assertRaises(ContractError): ImplementRequest.from_dict(wrong)
         for bad in ('model', 'opencode-go/', 'opencode-go/Kimi', 'opencode-go/kimi k3',
@@ -67,7 +67,7 @@ class RecordedFallbackTests(unittest.TestCase):
     def artifact(self, provider, fallback):
         req = ImplementRequest('o/r', 'opencode', 'id', 'edit', ({'path':'a','content':'old'},), 3, model=self.MODEL)
         return req, ImplementArtifact('o/r', 'opencode', 'id', req.snapshot_sha256, provider,
-            'cluster', (), 'done', 'completed', fallback, 0, model=self.MODEL)
+            'remote', (), 'done', 'completed', fallback, 0, model=self.MODEL)
 
     def test_a_sibling_served_job_round_trips_and_names_both_models(self):
         _, artifact = self.artifact('sibling-model', {'from': self.MODEL, 'reason': 'rate-limit'})
@@ -92,7 +92,7 @@ class RecordedFallbackTests(unittest.TestCase):
     def test_a_fallback_needs_a_model_bound_request(self):
         legacy = ImplementRequest('o/r', 'codex', 'id', 'edit', ({'path':'a','content':'old'},), 3)
         with self.assertRaises(ContractError):
-            ImplementArtifact('o/r', 'codex', 'id', legacy.snapshot_sha256, 'sibling-model', 'cluster', (), 'done',
+            ImplementArtifact('o/r', 'codex', 'id', legacy.snapshot_sha256, 'sibling-model', 'remote', (), 'done',
                               'completed', {'from': 'codex', 'reason': 'rate-limit'}, 0)
 
     def test_the_gateway_client_accepts_a_recorded_fallback(self):

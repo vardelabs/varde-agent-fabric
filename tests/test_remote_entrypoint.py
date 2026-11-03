@@ -153,7 +153,7 @@ class RemoteEntrypointTests(unittest.TestCase):
         self.assertEqual(result.worker_kind, "opencode")
         self.assertEqual(result.execution_location, "requester")
         self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
-        self.assertEqual(result.fallback, "cluster-unavailable-local-opencode")
+        self.assertEqual(result.fallback, "remote-unavailable-local-opencode")
         self.assertEqual(env["DISPATCH_MODEL"], model)
         self.assertEqual(env["DISPATCH_OPENCODE_HOME"], str(opencode_home))
         self.assertEqual(env["HOME"], str(caller_home))
@@ -221,7 +221,7 @@ cat "$HOME/events.jsonl"
         self.assertEqual(result.worker_kind, "opencode")
         self.assertEqual(result.execution_location, "requester")
         self.assertEqual(result.findings, ({"severity": "red", "message": "verified finding"},))
-        self.assertEqual(result.fallback, "cluster-unavailable-local-opencode")
+        self.assertEqual(result.fallback, "remote-unavailable-local-opencode")
 
     def test_opencode_fallback_reads_a_stream_longer_than_the_transport_limit(self):
         # A review that reads files streams their text as tool events before its small final findings.
@@ -283,7 +283,7 @@ cat "$HOME/events.jsonl"
 
     def test_remote_route_calls_gateway_without_local_fallback(self):
         req = build_review_request(self.metadata())
-        expected = ReviewArtifact("example-org/example", 19, BASE, HEAD, "codex", "cluster", "codex", "corr-19", (), "completed")
+        expected = ReviewArtifact("example-org/example", 19, BASE, HEAD, "codex", "remote", "codex", "corr-19", (), "completed")
         with mock.patch.dict(os.environ, {"DISPATCH_GATEWAY_URL": "https://private.example", "DISPATCH_GATEWAY_TOKEN": "token"}, clear=False):
             with mock.patch("dispatch.remote_runner.GatewayClient") as client_type:
                 client_type.return_value.submit.return_value = expected
@@ -300,7 +300,7 @@ cat "$HOME/events.jsonl"
                 client_type.return_value.submit.side_effect = GatewayUnavailable("offline")
                 with patch_local_review("codex", return_value=expected) as local:
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
-        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+        self.assertEqual(result.fallback, "remote-unavailable-local-codex")
         self.assertEqual((result.repository, result.pull_request, result.base_sha, result.head_sha, result.correlation_id), ("example-org/example", 19, BASE, HEAD, "corr-19"))
         local.assert_called_once()
 
@@ -316,7 +316,7 @@ cat "$HOME/events.jsonl"
             with mock.patch("dispatch.remote_runner.GatewayClient", return_value=__import__("dispatch.gateway_client", fromlist=["GatewayClient"]).GatewayClient("https://private.example", "token", opener=lambda *args, **kwargs: UnavailableResponse())):
                 with patch_local_review("codex", return_value=expected):
                     result = run_remote_review(metadata, fallback_policy="remote-unavailable")
-        self.assertEqual(result.fallback, "cluster-unavailable-local-codex")
+        self.assertEqual(result.fallback, "remote-unavailable-local-codex")
 
     def test_fallback_artifact_provider_must_match_selected_model(self):
         model = "opencode-go/kimi-k3"
@@ -384,7 +384,7 @@ cat "$HOME/events.jsonl"
         )
         self.assertEqual(status, 0, stderr)
         artifact = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(artifact["fallback"], "cluster-unavailable-local-codex")
+        self.assertEqual(artifact["fallback"], "remote-unavailable-local-codex")
         self.assertEqual(artifact["findings"], [])
 
     def test_local_codex_prose_output_names_the_local_fallback(self):

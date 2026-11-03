@@ -31,7 +31,7 @@ class ImplementTests(unittest.TestCase):
 
     def artifact(self, req):
         before = hashlib.sha256(b'before').hexdigest()
-        return ImplementArtifact(req.repository, req.worker_kind, req.correlation_id, req.snapshot_sha256, 'codex', 'cluster', ({'path':'a.txt','before_sha256':before,'after_text':'after'}, {'path':'new.txt','before_sha256':None,'after_text':'new'}), 'done', 'completed', None, 12).to_dict()
+        return ImplementArtifact(req.repository, req.worker_kind, req.correlation_id, req.snapshot_sha256, 'codex', 'remote', ({'path':'a.txt','before_sha256':before,'after_text':'after'}, {'path':'new.txt','before_sha256':None,'after_text':'new'}), 'done', 'completed', None, 12).to_dict()
 
     def test_contract_and_digest(self):
         req = self.request()
@@ -107,6 +107,23 @@ class ImplementTests(unittest.TestCase):
         error = urllib.error.HTTPError('https://gateway.example', 401, 'unauthorized', Message(), None)
         client = GatewayClient('https://gateway.example', 'secret', opener=mock.Mock(side_effect=error))
         with self.assertRaisesRegex(GatewayError, '401'): client.submit_implementation(req)
+
+    def test_execution_location_accepts_old_name_and_refuses_others(self):
+        req = self.request()
+        for location, accepted in (('remote', True), ('cluster', True), ('requester', False), ('laptop', False)):
+            data = dict(self.artifact(req), execution_location=location)
+            client = GatewayClient('https://gateway.example', 'secret', opener=lambda *a, **k:Response(json.dumps(data).encode()))
+            with self.subTest(location=location):
+                if accepted:
+                    self.assertEqual(client.submit_implementation(req).execution_location, location)
+                else:
+                    with self.assertRaisesRegex(GatewayError, 'execution location mismatch'):
+                        client.submit_implementation(req)
+
+    def test_old_worker_import_path_still_resolves(self):
+        from dispatch.cluster_worker import ClusterReviewWorker
+        from dispatch.remote_worker import RemoteReviewWorker
+        self.assertIs(ClusterReviewWorker, RemoteReviewWorker)
 
     def test_implementation_redirects_refused(self):
         import io

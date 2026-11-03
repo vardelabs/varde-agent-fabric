@@ -22,8 +22,8 @@ BACKEND_OUTPUT = {
 }
 # Captured from main at the adapter seam (22710f9), before roles were added.
 GOLDEN = {
-    "codex": '{"schema":"review-artifact.v1","repository":"example-org/example","pull_request":7,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","worker_kind":"codex","execution_location":"requester","provider":"example/model","correlation_id":"golden-1","findings":[{"severity":"red","message":"golden finding","file":"src/app.py","line":3}],"finish_reason":"completed","fallback":"cluster-unavailable-local-codex","latency_ms":0}',
-    "opencode": '{"schema":"review-artifact.v1","repository":"example-org/example","pull_request":7,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","worker_kind":"opencode","execution_location":"requester","provider":"example/model","correlation_id":"golden-1","findings":[{"severity":"red","message":"golden finding","file":"src/app.py","line":3}],"finish_reason":"completed","fallback":"cluster-unavailable-local-opencode","latency_ms":0}',
+    "codex": '{"schema":"review-artifact.v1","repository":"example-org/example","pull_request":7,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","worker_kind":"codex","execution_location":"requester","provider":"example/model","correlation_id":"golden-1","findings":[{"severity":"red","message":"golden finding","file":"src/app.py","line":3}],"finish_reason":"completed","fallback":"remote-unavailable-local-codex","latency_ms":0}',
+    "opencode": '{"schema":"review-artifact.v1","repository":"example-org/example","pull_request":7,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","worker_kind":"opencode","execution_location":"requester","provider":"example/model","correlation_id":"golden-1","findings":[{"severity":"red","message":"golden finding","file":"src/app.py","line":3}],"finish_reason":"completed","fallback":"remote-unavailable-local-opencode","latency_ms":0}',
 }
 
 
