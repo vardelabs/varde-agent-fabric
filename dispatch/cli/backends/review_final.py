@@ -128,22 +128,23 @@ def merged_findings(final: list[object], earlier: list[object]) -> list[object]:
 
     A model restating an earlier finding rewords it, and the checked-files object
     grows as it reads, so neither an equal object nor a refusal fits: a finding at
-    a file and line the final list already reports counts as covered, and only the
-    latest checked-files object is kept. Nothing is added past the review
+    a file and line the final list already reports counts as covered. Earlier
+    findings are read newest first, so the latest version of one wins, and only
+    one checked-files object is kept. Nothing is added past the review
     contract's limit, which would refuse the whole review.
     """
     merged = list(final)
     covered = {location for location in map(_location, final) if location}
-    earlier_checked = [finding for finding in earlier if _is_checked(finding)]
-    if earlier_checked and not any(map(_is_checked, final)):
-        merged.append(earlier_checked[-1])
-    for finding in earlier:
-        location = _location(finding)
-        if _is_checked(finding) or finding in merged or location in covered:
-            continue
+    has_checked = any(map(_is_checked, final))
+    for finding in reversed(earlier):
         if len(merged) >= MAX_FINDINGS:
             break
+        location = _location(finding)
+        checked = _is_checked(finding)
+        if finding in merged or location in covered or (checked and has_checked):
+            continue
         merged.append(finding)
+        has_checked = has_checked or checked
         if location:
             covered.add(location)
     return merged

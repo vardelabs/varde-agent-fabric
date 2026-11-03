@@ -466,9 +466,14 @@ check grep -qF 'Said again' "$TMP/out-table-reworded-finding-36"
 check_not grep -qF 'Said once' "$TMP/out-table-reworded-finding-36"
 check grep -qF 'app.py, lib.py' "$TMP/out-table-reworded-finding-36"
 check_not grep -qF '\"title\": \"app.py\"' "$TMP/out-table-reworded-finding-36"
-# Added-back findings stop at the review contract's limit.
-check test "$(python3 -c 'import sys;sys.path.insert(0,sys.argv[1]);from review_final import merged_findings
-print(len(merged_findings([{"message":f"f{i}"} for i in range(49)], [{"message":f"e{i}"} for i in range(5)])))' "$ROOT/dispatch/cli/backends")" -eq 50
+# Added-back findings stop at the review contract's limit, a checked-files object
+# included, and the latest version of an earlier finding wins.
+merged() { python3 -c 'import json,sys;sys.path.insert(0,sys.argv[1]);from review_final import merged_findings
+print(json.dumps(merged_findings(*json.loads(sys.argv[2]))))' "$ROOT/dispatch/cli/backends" "$1"; }
+many() { python3 -c 'import json,sys;print(json.dumps([{"message":f"{sys.argv[1]}{i}"} for i in range(int(sys.argv[2]))]))' "$1" "$2"; }
+check test "$(merged "[$(many f 49),$(many e 5)]" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" -eq 50
+check test "$(merged "[$(many f 50),[{\"category\":\"checked\",\"message\":\"a.py\"}]]" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" -eq 50
+check test "$(merged '[[],[{"message":"old","file":"a.py","line":3},{"message":"new","file":"a.py","line":3}]]')" = '[{"message": "new", "file": "a.py", "line": 3}]'
 check grep -qF 'ran out of time before its findings turn' "$TMP/out-table-early-findings-no-session-36.stderr"
 # An out-of-time exit names how long each run took, as bare numbers.
 check grep -qE '^review phases explored_s=[0-9]+ final_s=none$' "$TMP/out-table-early-findings-no-session-36.stderr"
