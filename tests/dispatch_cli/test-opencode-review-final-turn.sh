@@ -49,11 +49,11 @@ expect test "$(tail -n 2 "$TMP/limit/turns" | tr '\n' ' ')" = 'summary findings 
 expect test "$(findings "$TMP/limit/out")" -eq 1
 expect test -z "$(find "$TMP/limit" -maxdepth 1 -name 'out.opencode*')"
 
-# A final turn that writes a summary again fails once, with no second resume.
+# A final turn that writes a summary again is asked once more, then fails, with no third resume.
 review stubborn stubborn
 expect test "$status" -eq 1
-expect grep -qF 'final turn wrote no valid findings' "$TMP/stubborn/stderr"
-expect test "$(grep -cvx tools "$TMP/stubborn/turns")" -eq 3
+expect grep -qF 'final turn wrote no valid findings (reask-unparsed-prose)' "$TMP/stubborn/stderr"
+expect test "$(grep -cvx tools "$TMP/stubborn/turns")" -eq 4
 expect test ! -e "$TMP/stubborn/out"
 
 # A deadline stops a slow exploring run at its cut, before the step limit and

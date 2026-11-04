@@ -2,14 +2,15 @@
 
 Usage: review_final.py session STREAM_FILE
        review_final.py has-findings STREAM_FILE
-       review_final.py finalize EXPLORING_STREAM FINAL_STREAM OUTPUT_FILE
+       review_final.py finalize EXPLORING_STREAM FINAL_STREAM OUTPUT_FILE [REFUSED_FINAL_STREAM]
 
 `session` prints the run's session id. `has-findings` exits 0 when the stream
 parses as findings under the OpenCode review parser. `finalize` takes the
 findings from the final turn's own text, its last part or its parts joined,
 allowing a fenced clean list only as the review's only text, and adds back each
 finding any snapshot in either run held, even one split across text parts, that
-the final list does not cover. It then writes the exploring run's non-text
+the final list does not cover. A refused final turn's stream, when the final
+turn was asked again, counts only as earlier text. It then writes the exploring run's non-text
 events and one text event holding the findings as plain JSON, which every
 OpenCode parser reads alike. When it refuses, it prints only a case name:
 no-text, too-many-parts, or an unparsed-* name for the final text's form
@@ -176,17 +177,18 @@ def unparsed_case(final_events: list[dict], final_texts: list[str]) -> str:
     return "unparsed-json"
 
 
-def finalized(exploring: bytes, final: bytes) -> tuple[bytes | None, str]:
+def finalized(exploring: bytes, final: bytes, refused: bytes = b"") -> tuple[bytes | None, str]:
     exploring_events = events(exploring)
-    exploring_texts = [text for _, event in exploring_events if (text := text_of(event)) is not None]
+    earlier = [*exploring_events, *events(refused)]
+    earlier_texts = [text for _, event in earlier if (text := text_of(event)) is not None]
     final_events = [event for _, event in events(final)]
     final_texts = [text for event in final_events if (text := text_of(event)) is not None]
     if not any(text.strip() for text in final_texts):
         return None, "no-text"
-    findings = final_findings(exploring_texts, final_texts)
+    findings = final_findings(earlier_texts, final_texts)
     if findings is None:
         return None, unparsed_case(final_events, final_texts)
-    snapshots = snapshot_findings(exploring_texts + final_texts)
+    snapshots = snapshot_findings(earlier_texts + final_texts)
     if snapshots is None:
         return None, "too-many-parts"
     kept = [line for line, event in exploring_events if text_of(event) is None]
@@ -196,15 +198,15 @@ def finalized(exploring: bytes, final: bytes) -> tuple[bytes | None, str]:
 
 
 def main(argv: list[str]) -> int:
-    if argv[1:2] == ["finalize"] and len(argv) == 5:
-        output, case = finalized(Path(argv[2]).read_bytes(), Path(argv[3]).read_bytes())
+    if argv[1:2] == ["finalize"] and len(argv) in (5, 6):
+        output, case = finalized(*(Path(name).read_bytes() for name in (argv[2], argv[3], *argv[5:])))
         if output is None:
             print(case)
             return 1
         Path(argv[4]).write_bytes(output)
         return 0
     if len(argv) != 3 or argv[1] not in ("session", "has-findings"):
-        print("usage: review_final.py session|has-findings STREAM_FILE | finalize EXPLORING FINAL OUTPUT",
+        print("usage: review_final.py session|has-findings STREAM_FILE | finalize EXPLORING FINAL OUTPUT [REFUSED]",
               file=sys.stderr)
         return 2
     raw = Path(argv[2]).read_bytes()

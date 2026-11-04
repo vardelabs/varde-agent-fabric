@@ -86,6 +86,15 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  reask-prose|reask-fenced|reask-split)
+    session_start
+    if [[ "$*" == *"not plain JSON"* && "$(cat "$state/scenario")" == reask-split ]]; then
+      text '[{"severity":"major","title":"Asked twice",'; text '"path":"app.py","line":"11"}]'
+    elif [[ "$*" == *"not plain JSON"* ]]; then text '[{"severity":"major","title":"Asked twice","path":"app.py","line":"11"}]'
+    elif [[ " $* " == *" --session ses_test1 "* ]]; then
+      if [[ "$(cat "$state/scenario")" == reask-prose ]]; then text 'Here are the findings: one major issue in app.py.'
+      else text $'```json\n[{"severity":"major","title":"Asked twice","path":"app.py","line":"11"}]\n```x'; fi
+    else text "$summary"; fi ;;
   final-length|final-unterminated|final-invalid|final-json|final-prose)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then
@@ -404,13 +413,16 @@ prose-no-session|none|0|1|x
 summary|none|0|2|1
 mixed|none|0|2|1
 mixed-dropped|none|0|2|1
-summary-twice|none|1|2|-
-fenced-final|none|1|2|-
+summary-twice|none|1|3|-
+fenced-final|none|1|3|-
 final-length|none|1|2|-
 final-unterminated|none|1|2|-
 final-invalid|none|1|2|-
 final-json|none|1|2|-
-final-prose|none|1|2|-
+final-prose|none|1|3|-
+reask-prose|none|0|3|1
+reask-fenced|none|0|3|1
+reask-split|none|0|3|1
 fenced-final-findings|none|0|2|1
 hang|36|0|2|0
 early-findings-hang|36|0|2|1
@@ -471,15 +483,21 @@ check test "$(PYTHONPATH="$ROOT" python3 -c 'import sys;from dispatch import ada
 # A run cut mid-event keeps its step events, but not the cut line or its prose.
 check grep -qF '"type":"step_start"' "$TMP/out-table-partial-line-hang-36"
 check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
+# A final turn wrapped in prose or a fence is asked once more, in the same session
+# with every tool denied, and the reply to that is what gets published.
+check grep -qF -- '--session ses_test1 --standalone --format json --agent plan' <(sed -n 3p "$state/calls.reask-prose-none")
+check grep -qF '"permission":{"*":"deny","read":"deny",' <(sed -n 3p "$state/calls.reask-prose-none")
+check grep -qF 'Asked twice' "$TMP/out-table-reask-prose-none"
+check_not grep -qF 'one major issue' "$TMP/out-table-reask-prose-none"
 # A refused final turn names its case, and only the case.
 check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-blank-final-36.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-early-findings-silent-final-36.stderr"
-check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-fenced)' "$TMP/out-table-fenced-final-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (reask-unparsed-fenced)' "$TMP/out-table-fenced-final-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-length)' "$TMP/out-table-final-length-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-unterminated)' "$TMP/out-table-final-unterminated-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-invalid)' "$TMP/out-table-final-invalid-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-json)' "$TMP/out-table-final-json-none.stderr"
-check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-prose)' "$TMP/out-table-final-prose-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (reask-unparsed-prose)' "$TMP/out-table-final-prose-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (too-many-parts)' "$TMP/out-table-too-many-parts-36.stderr"
 # An earlier finding the final list dropped is kept; one it restated at the same
 # place is not doubled, and only the final checked-files object is kept.

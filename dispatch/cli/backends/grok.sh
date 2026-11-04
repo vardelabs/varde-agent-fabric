@@ -135,8 +135,23 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$scratch/final-stdout"
-    refusal="$(python3 "$backends/review_final.py" finalize "$scratch/stdout" "$scratch/final-stdout" "$scratch/combined")" \
-      || fail "Grok review final turn wrote no valid findings (${refusal:-unknown})" 1
+    finalize() { python3 "$backends/review_final.py" finalize "$scratch/stdout" "$@" "$scratch/combined" ${refused:+"$refused"}; }
+    refused=""
+    refusal="$(finalize "$scratch/final-stdout")" && finalized=1 || finalized=""
+    seconds_left="$(review_seconds_left)"
+    if [[ -z "$finalized" ]] && review_final_reaskable "$refusal" \
+      && { [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)); }; then
+      cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
+      run_cli /dev/null "$scratch/reask-stdout" "$scratch/final-stderr" opencode run "$review_final_reask_prompt" \
+        --session "$session" --standalone --format json --agent plan --model "$model"
+      review_final_s=$(($(date +%s) - phase_started))
+      ! stopped_by_watchdog || review_out_of_time_exit
+      ((status == 0)) || report_failed_run "$scratch/reask-stdout"
+      # The refused reply counts only as earlier text, so a reask split across text parts still parses.
+      refused="$scratch/final-stdout"
+      refusal="$(finalize "$scratch/reask-stdout")" && finalized=1 || refusal="reask-${refusal:-unknown}"
+    fi
+    [[ -n "$finalized" ]] || fail "Grok review final turn wrote no valid findings (${refusal:-unknown})" 1
     mv -f -- "$scratch/combined" "$scratch/stdout"
   fi
 fi
