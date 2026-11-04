@@ -200,8 +200,9 @@ if [[ -n "$final_turn" ]] \
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$final_output"
-    finalize() { python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined"; }
-    refusal="$(finalize)" && finalized=1 || finalized=""
+    finalize() { python3 "$backends/review_final.py" finalize "$temporary_output" "$@" "$final_output.combined" ${refused:+"$refused"}; }
+    refused=""
+    refusal="$(finalize "$final_output")" && finalized=1 || finalized=""
     seconds_left="$(review_seconds_left)"
     if [[ -z "$finalized" ]] && review_final_reaskable "$refusal" \
       && { [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)); }; then
@@ -211,9 +212,9 @@ if [[ -n "$final_turn" ]] \
       review_final_s=$(($(date +%s) - phase_started))
       ! stopped_by_watchdog || review_out_of_time_exit
       ((status == 0)) || report_failed_run "$reask_output"
-      # finalize reads the final turn's last text first, so the reask's reply is read before the first one.
-      cat -- "$reask_output" >> "$final_output"
-      refusal="$(finalize)" && finalized=1 || refusal="reask-${refusal:-unknown}"
+      # The refused reply counts only as earlier text, so a reask split across text parts still parses.
+      refused="$final_output"
+      refusal="$(finalize "$reask_output")" && finalized=1 || refusal="reask-${refusal:-unknown}"
     fi
     [[ -n "$finalized" ]] || {
       printf 'OpenCode review final turn wrote no valid findings (%s)\n' "${refusal:-unknown}" >&2

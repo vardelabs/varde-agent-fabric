@@ -86,9 +86,11 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   fenced-uncut) session_start; text $'```json\n[]\n```' ;;
-  reask-prose|reask-fenced)
+  reask-prose|reask-fenced|reask-split)
     session_start
-    if [[ "$*" == *"not plain JSON"* ]]; then text '[{"severity":"major","title":"Asked twice","path":"app.py","line":"11"}]'
+    if [[ "$*" == *"not plain JSON"* && "$(cat "$state/scenario")" == reask-split ]]; then
+      text '[{"severity":"major","title":"Asked twice",'; text '"path":"app.py","line":"11"}]'
+    elif [[ "$*" == *"not plain JSON"* ]]; then text '[{"severity":"major","title":"Asked twice","path":"app.py","line":"11"}]'
     elif [[ " $* " == *" --session ses_test1 "* ]]; then
       if [[ "$(cat "$state/scenario")" == reask-prose ]]; then text 'Here are the findings: one major issue in app.py.'
       else text $'```json\n[{"severity":"major","title":"Asked twice","path":"app.py","line":"11"}]\n```x'; fi
@@ -420,6 +422,7 @@ final-json|none|1|2|-
 final-prose|none|1|3|-
 reask-prose|none|0|3|1
 reask-fenced|none|0|3|1
+reask-split|none|0|3|1
 fenced-final-findings|none|0|2|1
 hang|36|0|2|0
 early-findings-hang|36|0|2|1
