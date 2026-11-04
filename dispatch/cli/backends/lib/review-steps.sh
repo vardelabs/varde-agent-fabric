@@ -32,6 +32,11 @@ review_out_of_time_exit() {
 # The task owns what a clean review returns: a caller may ask for an extra object even when
 # nothing is wrong, and a bare "write []" here would drop it.
 review_final_prompt='Tools are no longer available. Write your review findings now, as the JSON array the task asked for, including every finding you reported earlier, and nothing else. If you found nothing, write exactly what the task asks for in that case.'
+# A final turn that wraps its findings in prose or a fence is asked once more,
+# since the parser does not dig JSON out of prose: a quoted "[]" would read as a
+# clean review. A refusal after that names its case with a reask- prefix.
+review_final_reask_prompt='Your last reply was not plain JSON, so it could not be read. Write the same review findings again as plain JSON, exactly as the task asked, with no other text and no code fence.'
+review_final_reaskable() { [[ "$1" == unparsed-prose || "$1" == unparsed-fenced ]]; }
 
 # Sets review_deadline to the validated deadline, or empty when none was given.
 read_review_deadline() {

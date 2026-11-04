@@ -137,13 +137,14 @@ fi
 # dispatcher gives it only the dedicated OpenCode home and no provider secret.
 temporary_output="$(mktemp "${DISPATCH_OUTPUT}.opencode.XXXXXX")"
 final_output=""
+reask_output=""
 opencode_pid=""
 # A TERM or INT to this backend ends the CLI's whole tree too, which runs in the
 # background so the watchdog can reach it.
 cleanup() {
   stop_watchdog
   [[ -z "$opencode_pid" ]] || stop_tree "$opencode_pid"
-  rm -f -- "$temporary_output" ${final_output:+"$final_output" "$final_output.combined"}
+  rm -f -- "$temporary_output" ${final_output:+"$final_output" "$final_output.combined"} ${reask_output:+"$reask_output"}
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -199,7 +200,22 @@ if [[ -n "$final_turn" ]] \
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$final_output"
-    refusal="$(python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined")" || {
+    finalize() { python3 "$backends/review_final.py" finalize "$temporary_output" "$final_output" "$final_output.combined"; }
+    refusal="$(finalize)" && finalized=1 || finalized=""
+    seconds_left="$(review_seconds_left)"
+    if [[ -z "$finalized" ]] && review_final_reaskable "$refusal" \
+      && { [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)); }; then
+      reask_output="$(mktemp "${DISPATCH_OUTPUT}.opencode-reask.XXXXXX")"
+      run_opencode "${seconds_left:+$((seconds_left - 5))}" "$reask_output" opencode run "$review_final_reask_prompt" \
+        --session "$session" --standalone --format json --agent plan --model "$model"
+      review_final_s=$(($(date +%s) - phase_started))
+      ! stopped_by_watchdog || review_out_of_time_exit
+      ((status == 0)) || report_failed_run "$reask_output"
+      # finalize reads the final turn's last text first, so the reask's reply is read before the first one.
+      cat -- "$reask_output" >> "$final_output"
+      refusal="$(finalize)" && finalized=1 || refusal="reask-${refusal:-unknown}"
+    fi
+    [[ -n "$finalized" ]] || {
       printf 'OpenCode review final turn wrote no valid findings (%s)\n' "${refusal:-unknown}" >&2
       exit 1
     }
@@ -207,5 +223,5 @@ if [[ -n "$final_turn" ]] \
   fi
 fi
 mv -f -- "$temporary_output" "$DISPATCH_OUTPUT"
-rm -f -- ${final_output:+"$final_output" "$final_output.combined"}
+rm -f -- ${final_output:+"$final_output" "$final_output.combined"} ${reask_output:+"$reask_output"}
 trap - EXIT
