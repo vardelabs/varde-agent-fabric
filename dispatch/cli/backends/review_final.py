@@ -30,6 +30,7 @@ from dispatch.adapters.review_output import (
     extract_findings,
     loads_model_json,
     normalize_finding,
+    text_shape,
 )
 
 SESSION_ID = re.compile(r"ses_[A-Za-z0-9]{1,64}")
@@ -171,7 +172,7 @@ def unparsed_case(final_events: list[dict], final_texts: list[str]) -> str:
     except ValueError:
         if last.startswith(("[", "{")):
             return "unparsed-invalid" if last.endswith(("]", "}")) else "unparsed-unterminated"
-        return "unparsed-fenced" if last.startswith("```") else "unparsed-prose"
+        return f"unparsed-{text_shape(last)}"
     return "unparsed-json"
 
 
