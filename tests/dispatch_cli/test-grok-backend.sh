@@ -86,6 +86,18 @@ case "$(cat "$state/scenario")" in
     if [[ " $* " == *" --session ses_test1 "* ]]; then trap 'text "[]"; exit 0' TERM; sleep 60 & wait
     else sleep 30 & printf '%s' "$!" > "$state/hang-child.pid"; wait; fi ;;
   fenced-uncut) session_start; text $'```json\n[]\n```' ;;
+  final-length|final-unterminated|final-invalid|final-json|final-prose)
+    session_start
+    if [[ " $* " == *" --session ses_test1 "* ]]; then
+      case "$(cat "$state/scenario")" in
+        final-length) text '[{"severity":"major","title":"Cut","path":"app.py","line":"4"}]x'
+          printf '{"type":"step_finish","part":{"reason":"length"}}\n' ;;
+        final-unterminated) text '[{"severity":"major","title":"Cut","path":"app.py",' ;;
+        final-invalid) text '[{"severity":"major" "title":"Bad"}]' ;;
+        final-json) text '{"summary":"no list"}' ;;
+        final-prose) text 'Here are the findings I reported.' ;;
+      esac
+    else text "$summary"; fi ;;
   blank-final)
     session_start
     if [[ " $* " == *" --session ses_test1 "* ]]; then text '   '
@@ -394,6 +406,11 @@ mixed|none|0|2|1
 mixed-dropped|none|0|2|1
 summary-twice|none|1|2|-
 fenced-final|none|1|2|-
+final-length|none|1|2|-
+final-unterminated|none|1|2|-
+final-invalid|none|1|2|-
+final-json|none|1|2|-
+final-prose|none|1|2|-
 fenced-final-findings|none|0|2|1
 hang|36|0|2|0
 early-findings-hang|36|0|2|1
@@ -457,7 +474,12 @@ check_not grep -qF 'Exploring.' "$TMP/out-table-partial-line-hang-36"
 # A refused final turn names its case, and only the case.
 check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-blank-final-36.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (no-text)' "$TMP/out-table-early-findings-silent-final-36.stderr"
-check grep -qxF 'Grok review final turn wrote no valid findings (unparsed)' "$TMP/out-table-fenced-final-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-fenced)' "$TMP/out-table-fenced-final-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-length)' "$TMP/out-table-final-length-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-unterminated)' "$TMP/out-table-final-unterminated-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-invalid)' "$TMP/out-table-final-invalid-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-json)' "$TMP/out-table-final-json-none.stderr"
+check grep -qxF 'Grok review final turn wrote no valid findings (unparsed-prose)' "$TMP/out-table-final-prose-none.stderr"
 check grep -qxF 'Grok review final turn wrote no valid findings (too-many-parts)' "$TMP/out-table-too-many-parts-36.stderr"
 # An earlier finding the final list dropped is kept; one it restated at the same
 # place is not doubled, and only the final checked-files object is kept.
