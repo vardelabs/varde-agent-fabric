@@ -397,7 +397,10 @@ oversized input before the backend reads it. The default Codex sandbox is
 compatibility, callers using `--harness` with only the legacy `DISPATCH_MODEL`
 forward that model without registry resolution. `--routes` without a model is
 rejected. The caller can set `DISPATCH_CODEX_SANDBOX` to one of the public
-modes. These values are forwarded explicitly to the backend. `HOME` is retained
+modes. The caller can set `DISPATCH_REVIEW_EFFORT` to a review's reasoning effort,
+one lowercase word. Codex reviews default to `high`, and the Grok backend passes
+the value as the CLI's `--variant`, keeping the provider's default when it is
+unset. These values are forwarded explicitly to the backend. `HOME` is retained
 for normal CLI runtime behavior, so this boundary does not claim to remove
 credentials stored by a provider CLI. Provider authentication remains a
 deployment concern.
