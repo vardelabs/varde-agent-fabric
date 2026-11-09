@@ -52,12 +52,12 @@ for link in filter(None, sys.stdin.buffer.read().split(b"\0")):
 signin_db="$dedicated_home_real/.local/share/opencode/opencode.db"
 [[ -f "$signin_db" && ! -L "$signin_db" ]] || fail "Grok has no sign-in database in DISPATCH_GROK_HOME; run the sign-in first"
 
-# DISPATCH_REVIEW_EFFORT is a model variant, the provider's reasoning effort; unset keeps the provider's default.
-# The guarded expansion below keeps an empty list safe under set -u on bash before 4.4.
-variant_args=()
+# DISPATCH_REVIEW_EFFORT is a model variant, the provider's reasoning effort, which the CLI reads from the model
+# name as provider/model#variant. Unset keeps the provider's default.
+review_model="$model"
 if [[ -n "${DISPATCH_REVIEW_EFFORT:-}" ]]; then
   [[ "$DISPATCH_REVIEW_EFFORT" =~ ^[a-z]{1,16}$ ]] || fail 'DISPATCH_REVIEW_EFFORT is invalid'
-  variant_args=(--variant "$DISPATCH_REVIEW_EFFORT")
+  review_model="$model#$DISPATCH_REVIEW_EFFORT"
 fi
 
 prompt=$'Task for this run:\n\n'"$DISPATCH_TASK"
@@ -117,7 +117,7 @@ cli_time_limit="$(review_explore_limit)"
 # configuration was fixed when it started.
 phase_started="$(date +%s)"
 run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" opencode run \
-  'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$model" ${variant_args[@]+"${variant_args[@]}"}
+  'Follow the instructions in the input below.' --standalone --format json --agent plan --model "$review_model"
 review_explored_s=$(($(date +%s) - phase_started))
 ((status == 0)) || stopped_by_watchdog || report_failed_run "$scratch/stdout"
 
@@ -139,7 +139,7 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
     cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
     phase_started="$(date +%s)"
     run_cli /dev/null "$scratch/final-stdout" "$scratch/final-stderr" opencode run "$review_final_prompt" \
-      --session "$session" --standalone --format json --agent plan --model "$model" ${variant_args[@]+"${variant_args[@]}"}
+      --session "$session" --standalone --format json --agent plan --model "$review_model"
     review_final_s=$(($(date +%s) - phase_started))
     ! stopped_by_watchdog || review_out_of_time_exit
     ((status == 0)) || report_failed_run "$scratch/final-stdout"
@@ -151,7 +151,7 @@ if stopped_by_watchdog || ! python3 "$backends/review_final.py" has-findings "$s
       && { [[ -z "$seconds_left" ]] || ((seconds_left >= review_final_min_s)); }; then
       cli_time_limit="${seconds_left:+$((seconds_left - 5))}"
       run_cli /dev/null "$scratch/reask-stdout" "$scratch/final-stderr" opencode run "$review_final_reask_prompt" \
-        --session "$session" --standalone --format json --agent plan --model "$model" ${variant_args[@]+"${variant_args[@]}"}
+        --session "$session" --standalone --format json --agent plan --model "$review_model"
       review_final_s=$(($(date +%s) - phase_started))
       ! stopped_by_watchdog || review_out_of_time_exit
       ((status == 0)) || report_failed_run "$scratch/reask-stdout"

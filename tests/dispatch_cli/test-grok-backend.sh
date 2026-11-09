@@ -240,7 +240,7 @@ check test "$status" -eq 0
 check test "$(mode "$TMP/out-review")" = 600
 record="$state/record"
 check grep -qF -- "--standalone --format json --agent plan --model $MODEL" "$record"
-check_not grep -qF -- "--variant" "$record"
+check_not grep -qF -- "--model $MODEL#" "$record"
 
 check_not grep -qF 'private-task-sentinel' <(grep '^argv=' "$record")
 check grep -qxF 'stdin=Task for this run:' "$record"
@@ -303,10 +303,10 @@ done
 direct out-hg-top DISPATCH_WORKDIR="$TMP/hgtree"
 check test "$status" -eq 0
 
-# A review effort reaches the CLI as its model variant; one that is not a plain word is refused.
+# A review effort reaches the CLI as the model name's variant; one that is not a plain word is refused.
 DISPATCH_REVIEW_EFFORT=medium run ok out-medium --kind review --diff "$TMP/change.diff" --task t
 check test "$status" -eq 0
-check grep -qF -- "--agent plan --model $MODEL --variant medium" "$record"
+check grep -qF -- "--agent plan --model $MODEL#medium" "$record"
 direct out-bad-effort DISPATCH_REVIEW_EFFORT='medium --pure'
 check test "$status" -eq 2
 check grep -qF 'DISPATCH_REVIEW_EFFORT is invalid' "$TMP/out-bad-effort.stderr"
