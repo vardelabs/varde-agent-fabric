@@ -80,7 +80,7 @@ def run_local_review(metadata: RemoteReviewMetadata, request: ReviewRequest) -> 
 ADAPTER = Adapter(
     name="codex",
     roles=frozenset({"review", "implement"}),
-    env=("DISPATCH_CODEX_SANDBOX",),
+    env=("DISPATCH_CODEX_SANDBOX", "DISPATCH_REVIEW_EFFORT"),
     local_review_fallback=LocalReviewFallback(run=run_local_review),
     parse_review=parse_review,
     detect_limit=detect_limit,

@@ -45,10 +45,16 @@ fi
 
 unset DISPATCH_TASK DISPATCH_DIFF
 args=(codex exec --ignore-user-config --skip-git-repo-check --model "$model" --sandbox "$sandbox_mode" -C "$DISPATCH_WORKDIR" -o "$DISPATCH_OUTPUT")
-# --ignore-user-config drops any configured effort. Below high, a light model often
-# skips reasoning on a large diff and answers [] at once, which reads as a clean review.
+# --ignore-user-config drops any configured effort, so a review sets its own. The default
+# is high: below it, a light model often skips reasoning on a large diff and answers []
+# at once, which reads as a clean review.
 if [[ "$DISPATCH_KIND" == review ]]; then
-  args+=(-c model_reasoning_effort=high)
+  effort="${DISPATCH_REVIEW_EFFORT:-high}"
+  [[ "$effort" =~ ^[a-z]{1,16}$ ]] || {
+    printf 'DISPATCH_REVIEW_EFFORT is invalid\n' >&2
+    exit 2
+  }
+  args+=(-c "model_reasoning_effort=$effort")
 fi
 args+=(-- -)
 printf '%s' "$prompt" | "${args[@]}" >&2

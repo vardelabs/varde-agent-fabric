@@ -158,6 +158,18 @@ check grep -qF 'diff body' "$TMP/out"
 check grep -qF 'private-task-sentinel' "$TMP/out"
 check grep -qxF 'config=model_reasoning_effort=high;' "$TMP/out"
 
+# A review effort from the caller replaces the default; one that is not a plain word is refused.
+DISPATCH_REVIEW_EFFORT=medium PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task t --workdir "$TMP/work" \
+  --output "$TMP/out-medium" >/dev/null 2>"$TMP/err-medium"
+check grep -qxF 'config=model_reasoning_effort=medium;' "$TMP/out-medium"
+effort_status=0
+DISPATCH_REVIEW_EFFORT='high -c x' PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --kind review \
+  --diff "$TMP/change.diff" --model test/model --routes "$TMP/routes.json" --task t --workdir "$TMP/work" \
+  --output "$TMP/out-bad-effort" >/dev/null 2>"$TMP/err-bad-effort" || effort_status=$?
+check test "$effort_status" -ne 0
+check grep -qF 'DISPATCH_REVIEW_EFFORT is invalid' "$TMP/err-bad-effort"
+
 if PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --harness codex --kind implement \
   --model test/model --routes "$TMP/routes.json" --task codex-implement --workdir "$TMP/work" \
   --output "$TMP/out-codex-implement-denied" >"$TMP/stdout-codex-implement-denied" 2>"$TMP/err-codex-implement-denied"; then
