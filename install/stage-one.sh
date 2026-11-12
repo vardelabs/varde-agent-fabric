@@ -67,6 +67,8 @@ add_vendor_repos() {
     >"$APT_SOURCES/1password.list"
   [ -s "$APT_KEYRINGS/tailscale-archive-keyring.gpg" ] ||
     curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/$codename.noarmor.gpg" -o "$APT_KEYRINGS/tailscale-archive-keyring.gpg"
+  # apt reads a keyring as _apt, and a strict umask under sudo would leave these unreadable to it.
+  chmod 0644 "$APT_KEYRINGS/1password-archive-keyring.gpg" "$APT_KEYRINGS/tailscale-archive-keyring.gpg"
   echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu $codename main" \
     >"$APT_SOURCES/tailscale.list"
 }
@@ -166,11 +168,14 @@ write_box_file() {
 
 # The anchor is what this root line vouches for. The deployer walks main's
 # first-parent history from it, so a commit merged in from a side branch fails.
+# The clone uses a private copy of the credential, so the deployer's files
+# change only after the anchor checks out.
 fetch_anchor() {
   local repo
   repo=$(read_field deployment-repo)
   BOOT=$(mktemp -d)
-  git -c credential.helper="store --file=$DEPLOY_ETC/git-credentials" clone -q --no-checkout "$repo" "$BOOT/deployment"
+  (umask 077 && read_field git-credentials >"$BOOT/git-credentials")
+  git -c credential.helper="store --file=$BOOT/git-credentials" clone -q --no-checkout "$repo" "$BOOT/deployment"
   git -C "$BOOT/deployment" cat-file -e "$ANCHOR^{commit}" 2>/dev/null || die "the anchor commit is not in the deployment repo"
   git -C "$BOOT/deployment" rev-list --first-parent origin/main | grep -x "$ANCHOR" >/dev/null ||
     die "the anchor commit is not on the deployment repo's main (first-parent history)"
@@ -215,7 +220,8 @@ install_deployer() {
   say "installed the box deployer release $digest"
 }
 
-# The deployer's own lock, so a timer run never sees a half-written install.
+# The deployer's own lock, so a timer run never sees a half-written install,
+# and two runs of this script never write the same file at once.
 take_deploy_lock() {
   install -d -m 0755 "$STATE"
   exec 9>>"$STATE/deploy.lock"
@@ -234,17 +240,16 @@ main() {
   parse_args "$@"
   require_box
   install_packages
+  take_deploy_lock
   seal_token
   join_tailnet
+  fetch_anchor
   write_secret_file git-credentials "$DEPLOY_ETC/git-credentials"
   write_secret_file merge-approvers "$DEPLOY_ETC/merge-approvers.json"
-  fetch_anchor
-  take_deploy_lock
   write_box_file
   install_deployer
   exec 9>&-
   start_deployer
 }
 
-# The tests source this file for its functions.
-[ "${BASH_SOURCE[0]}" != "$0" ] || main "$@"
+main "$@"

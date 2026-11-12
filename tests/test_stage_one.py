@@ -18,8 +18,10 @@ UNITS = ("varde-box-deploy.service", "varde-box-deploy.timer", "varde-box-deploy
 STUBS = {
     "id": 'echo 0',
     "apt-get": 'echo "apt-get $*" >>"$STUB_DIR/calls.log"',
-    "curl": 'echo "curl $*" >>"$STUB_DIR/calls.log"; echo key',
-    "gpg": 'echo "gpg $*" >>"$STUB_DIR/calls.log"; while [ $# -gt 0 ]; do [ "$1" = -o ] && echo key >"$2"; shift; done',
+    "curl": 'echo "curl $*" >>"$STUB_DIR/calls.log"; out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; '
+            'if [ -n "$out" ]; then echo key >"$out"; else echo key; fi',
+    # Reads its input as gpg --dearmor does, so curl never writes into a closed pipe.
+    "gpg": 'cat >/dev/null; echo "gpg $*" >>"$STUB_DIR/calls.log"; while [ $# -gt 0 ]; do [ "$1" = -o ] && echo key >"$2"; shift; done',
     "dpkg": 'echo amd64',
     "systemctl": 'echo "systemctl $*" >>"$STUB_DIR/calls.log"',
     "tailscale": textwrap.dedent('''\
@@ -99,12 +101,12 @@ class StageOne(unittest.TestCase):
     def set_vaults(self, ids):
         (self.tmp / "vaults.json").write_text(json.dumps([{"id": vault} for vault in ids]))
 
-    def run_stage_one(self, *args, token=TOKEN, timeout=None, **extra_env):
+    def run_stage_one(self, *args, token=TOKEN, timeout=None, umask=0o022, **extra_env):
         env = {"PATH": f"{self.stubs}:{os.environ['PATH']}", "STAGE_ONE_ROOT": str(self.root), "STUB_DIR": str(self.tmp),
                "STUB_TOKEN": TOKEN, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": "/dev/null", "TMPDIR": str(self.tmp), **extra_env}
         # Root's usual umask, so a file written before its chmod shows as readable.
         return subprocess.run(["bash", str(SCRIPT), *args], input=token + "\n", env=env, capture_output=True, text=True,
-                              umask=0o022, timeout=timeout)
+                              umask=umask, timeout=timeout)
 
     def calls(self):
         log = self.tmp / "calls.log"
@@ -140,18 +142,6 @@ class StageOne(unittest.TestCase):
         self.assertFalse((self.root / "etc/credstore.encrypted/varde-box.op-token").exists())
         self.assertFalse((self.root / "etc/varde-box/box.json").exists())
 
-    def test_an_anchor_off_main_installs_no_deployer(self):
-        git("checkout", "-q", "-b", "side", cwd=self.repo)
-        (self.repo / "deploy/box_deployer.py").write_text("# side\n")
-        git("commit", "-qam", "side", cwd=self.repo)
-        side = output("rev-parse", "HEAD", cwd=self.repo)
-        git("checkout", "-q", "main", cwd=self.repo)
-        done = self.run_stage_one("--anchor", side)
-        self.assertNotEqual(done.returncode, 0)
-        self.assertIn("not on the deployment repo's main", done.stderr)
-        self.assertFalse((self.root / "usr/local/libexec/varde-box-deployer/current").exists())
-        self.assertFalse((self.root / "etc/varde-box/box.json").exists())
-
     def test_an_anchor_merged_in_from_a_side_branch_is_refused(self):
         git("checkout", "-q", "-b", "side", cwd=self.repo)
         (self.repo / "deploy/box_deployer.py").write_text("# side\n")
@@ -163,6 +153,7 @@ class StageOne(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("first-parent history", done.stderr)
         self.assertFalse((self.root / "etc/varde-box/box.json").exists())
+        self.assertFalse((self.root / "etc/varde-agent-deploy").exists())
 
     def test_a_run_waits_while_the_deployer_holds_its_lock(self):
         state = self.root / "var/lib/varde-box-deploy"
@@ -173,7 +164,14 @@ class StageOne(unittest.TestCase):
                 self.run_stage_one("--anchor", self.anchor, timeout=3)
             self.assertFalse((self.root / "etc/varde-box/box.json").exists())
             self.assertFalse((self.root / "usr/local/libexec/varde-box-deployer/current").exists())
+            self.assertFalse((self.root / "etc/varde-agent-deploy").exists())
+            self.assertFalse((self.root / "etc/credstore.encrypted/varde-box.op-token").exists())
         self.assertEqual(self.run_stage_one("--anchor", self.anchor).returncode, 0)
+
+    def test_the_apt_keyrings_stay_readable_to_apt_under_a_strict_umask(self):
+        self.assertEqual(self.run_stage_one("--anchor", self.anchor, umask=0o077).returncode, 0)
+        for name in ("1password-archive-keyring.gpg", "tailscale-archive-keyring.gpg"):
+            self.assertEqual(stat.S_IMODE((self.root / "usr/share/keyrings" / name).stat().st_mode), 0o644, name)
 
     def test_a_failed_join_key_read_leaves_no_key_on_disk(self):
         done = self.run_stage_one("--anchor", self.anchor, STUB_FAIL_FIELD="tailscale-authkey")
