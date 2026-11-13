@@ -419,8 +419,10 @@ varde-agent-dispatch --model example/model --routes /path/to/remote-routes.json 
   --output /path/to/artifact.json
 ```
 
-The route requires `DISPATCH_GATEWAY_URL` (HTTPS) and `DISPATCH_GATEWAY_TOKEN` in
-the caller environment. It rejects review PR, SHA, and diff arguments, unsafe
+The route requires `DISPATCH_GATEWAY_URL` (HTTPS) and either `DISPATCH_GATEWAY_TOKEN`
+or the pair `DISPATCH_GATEWAY_BROKER` and `DISPATCH_GATEWAY_BROKER_SECRET` in
+the caller environment. With the broker pair, the request runs as a gateway job
+that the client polls through the broker. It rejects review PR, SHA, and diff arguments, unsafe
 or duplicate paths, symlinks anywhere in a file path, and excessive input.
 The response is a validated `implement-artifact.v1` diff proposal, not an
 applied change. Exit 0 means the artifact proposes at least one change. A
