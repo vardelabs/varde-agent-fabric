@@ -146,6 +146,16 @@ class BrokeredGatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(GatewayError, "does not match request identity"):
             client(broker).submit(req)
 
+    def test_the_size_limit_reads_the_response_as_compact_utf8(self):
+        req = review_request()
+        response = review_artifact(req, findings=[{"severity": "green", "message": "漢" * 200}])
+        compact = len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        broker = Broker(reply(202, {"job_id": JOB}), reply(200, {"status": "done", "http_status": 200, "response": response}))
+        clock = Clock()
+        brokered = BrokeredGatewayClient(URL, "/opt/example-broker/broker", "gateway-secret", run=broker,
+                                         sleep=clock.sleep, clock=clock, max_response_bytes=compact)
+        self.assertEqual(brokered.submit(req).correlation_id, "corr-7")
+
     def test_settings_are_checked_up_front(self):
         for url, broker, secret in (("http://gateway.example", "/b", "s"), (URL, "broker", "s"), (URL, "/b", ""),
                                     (URL, "/b", "two words")):

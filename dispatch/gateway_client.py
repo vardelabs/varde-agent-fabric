@@ -146,7 +146,10 @@ class GatewayClient(_GatewayRequests):
                 status = getattr(response, "status", 200)
                 raw = response.read((limit if status == 200 else HTTP_400_DIAGNOSTIC_BYTES) + 1)
         except urllib.error.HTTPError as exc:
-            return exc.code, exc.read(HTTP_400_DIAGNOSTIC_BYTES + 1)
+            try:
+                return exc.code, exc.read(HTTP_400_DIAGNOSTIC_BYTES + 1)
+            except (http.client.IncompleteRead, TimeoutError, OSError):
+                return exc.code, b""
         except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             raise GatewayUnavailable("gateway unavailable") from exc
         return status, raw
@@ -228,7 +231,8 @@ class BrokeredGatewayClient(_GatewayRequests):
                 job = json.loads(raw)
                 finished = job["status"] == "done"
                 if finished:
-                    return int(job["http_status"]), json.dumps(job["response"]).encode("utf-8")
+                    return int(job["http_status"]), json.dumps(
+                        job["response"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             except (ValueError, KeyError, TypeError) as exc:
                 raise GatewayError("gateway job reply has an unexpected shape") from exc
             if self.clock() > deadline:

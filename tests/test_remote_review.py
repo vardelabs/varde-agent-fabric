@@ -54,6 +54,14 @@ class RemoteReviewTests(unittest.TestCase):
             return Response(json.dumps(response).encode())
         return open_request
 
+    def test_an_unavailable_status_with_an_unreadable_body_is_still_unavailable(self):
+        class StalledBody(io.BytesIO):
+            def read(self, *_): raise TimeoutError("stalled")
+        error = urllib.error.HTTPError("https://gateway.example", 503, "busy", Message(), StalledBody())
+        client = GatewayClient("https://gateway.example", "secret", opener=mock.Mock(side_effect=error))
+        with self.assertRaises(GatewayUnavailable):
+            client.submit(request())
+
     def test_contract_rejects_unknown_fields(self):
         payload = request().to_dict()
         payload["unexpected"] = True
