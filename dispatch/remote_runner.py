@@ -12,7 +12,7 @@ from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
 from dispatch import adapters
 from dispatch.fallback_policy import run_with_remote_fallback
-from dispatch.gateway_client import GatewayClient, GatewayError
+from dispatch.gateway_client import BrokeredGatewayClient, GatewayClient, GatewayError
 
 
 class LocalFallbackError(RuntimeError):
@@ -59,7 +59,11 @@ def build_review_request(metadata: RemoteReviewMetadata) -> ReviewRequest:
     )
 
 
-def _gateway_client() -> GatewayClient:
+def _gateway_client() -> GatewayClient | BrokeredGatewayClient:
+    broker = os.environ.get("DISPATCH_GATEWAY_BROKER")
+    if broker:
+        return BrokeredGatewayClient(os.environ["DISPATCH_GATEWAY_URL"], broker,
+                                     os.environ["DISPATCH_GATEWAY_BROKER_SECRET"])
     context = None
     ca_file = os.environ.get("DISPATCH_GATEWAY_CA_FILE")
     if ca_file:

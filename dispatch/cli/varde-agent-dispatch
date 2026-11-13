@@ -238,19 +238,25 @@ if [[ "$route_target" == "remote" ]]; then
   fi
   [[ -n "$diff" ]] && remote_args+=(--diff "$diff")
   for path in "${paths[@]}"; do remote_args+=(--path "$path"); done
-  if [[ -z "${DISPATCH_GATEWAY_URL:-}" || -z "${DISPATCH_GATEWAY_TOKEN:-}" ]]; then
-    fail 'remote route requires DISPATCH_GATEWAY_URL and DISPATCH_GATEWAY_TOKEN' 4
-  fi
+  [[ -n "${DISPATCH_GATEWAY_URL:-}" ]] || fail 'remote route requires DISPATCH_GATEWAY_URL' 4
   remote_status=0
   remote_environment=(
     "PATH=${PATH:-/usr/bin:/bin}"
     "HOME=${HOME:-}"
     "TMPDIR=${TMPDIR:-/tmp}"
     "DISPATCH_GATEWAY_URL=$DISPATCH_GATEWAY_URL"
-    "DISPATCH_GATEWAY_TOKEN=$DISPATCH_GATEWAY_TOKEN"
     "DISPATCH_GATEWAY_CA_FILE=${DISPATCH_GATEWAY_CA_FILE:-}"
     "PYTHONPATH=$SELF_DIR/../.."
   )
+  if [[ -n "${DISPATCH_GATEWAY_BROKER:-}" ]]; then
+    [[ -n "${DISPATCH_GATEWAY_BROKER_SECRET:-}" ]] || fail 'DISPATCH_GATEWAY_BROKER requires DISPATCH_GATEWAY_BROKER_SECRET' 4
+    remote_environment+=("DISPATCH_GATEWAY_BROKER=$DISPATCH_GATEWAY_BROKER"
+                         "DISPATCH_GATEWAY_BROKER_SECRET=$DISPATCH_GATEWAY_BROKER_SECRET")
+  elif [[ -n "${DISPATCH_GATEWAY_TOKEN:-}" ]]; then
+    remote_environment+=("DISPATCH_GATEWAY_TOKEN=$DISPATCH_GATEWAY_TOKEN")
+  else
+    fail 'remote route requires DISPATCH_GATEWAY_TOKEN or DISPATCH_GATEWAY_BROKER' 4
+  fi
   if [[ "${route_fallback_policy:-none}" == "remote-unavailable" && "${route_fallback_target:-}" == "local" ]]; then
     forward_adapter_env remote_environment fallback-env "$route_fallback_harness"
   fi

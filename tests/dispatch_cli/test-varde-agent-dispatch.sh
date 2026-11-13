@@ -597,6 +597,48 @@ check test -s "$TMP/out-remote"
 check grep -qF '"execution_location":"remote"' "$TMP/out-remote"
 check grep -qF '"worker_kind":"codex"' "$TMP/out-remote"
 
+cat > "$TMP/fake-broker" <<'PY'
+#!/usr/bin/env python3
+import json, os, sys
+_, action, secret, method, url, *_ = sys.argv
+saved = os.path.join(os.path.dirname(os.path.abspath(__file__)), "broker-state", "request.json")
+assert action == "http" and secret == "example-gateway-secret", sys.argv
+if method == "POST":
+    assert url.endswith("/v1/jobs/reviews"), url
+    with open(saved, "w") as stream: stream.write(sys.stdin.read())
+    print(json.dumps({"status": 202, "body": json.dumps({"job_id": "0" * 32, "status": "queued"})}))
+else:
+    assert method == "GET" and url.endswith("/v1/jobs/" + "0" * 32), url
+    request = json.load(open(saved))
+    artifact = {"schema": "review-artifact.v1", "repository": request["repository"],
+        "pull_request": request["pull_request"], "base_sha": request["base_sha"],
+        "head_sha": request["head_sha"], "worker_kind": request["worker_kind"],
+        "execution_location": "remote", "provider": request["model"],
+        "correlation_id": request["correlation_id"], "findings": [],
+        "finish_reason": "completed", "fallback": None, "latency_ms": 1}
+    print(json.dumps({"status": 200, "body": json.dumps({"status": "done", "http_status": 200, "response": artifact})}))
+PY
+chmod 0755 "$TMP/fake-broker"
+mkdir -p "$TMP/broker-state"
+if ! DISPATCH_GATEWAY_URL="https://gateway.example" \
+  DISPATCH_GATEWAY_BROKER="$TMP/fake-broker" DISPATCH_GATEWAY_BROKER_SECRET=example-gateway-secret \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind review \
+  --diff "$TMP/change.diff" --repository example-org/example --pull-request 20 --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" --correlation-id cli-broker --path src/app.py \
+  --task remote-task --workdir "$TMP/work" --output "$TMP/out-broker" >"$TMP/stdout-broker" 2>"$TMP/err-broker"; then
+  printf 'brokered CLI dispatch unexpectedly failed\n' >&2; cat "$TMP/err-broker" >&2; exit 1
+fi
+check grep -qF '"correlation_id":"cli-broker"' "$TMP/out-broker"
+check grep -qF 'remote-task' "$TMP/broker-state/request.json"
+if DISPATCH_GATEWAY_URL="https://gateway.example" DISPATCH_GATEWAY_BROKER="$TMP/fake-broker" \
+  PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --model remote/model --routes "$TMP/remote-routes.json" --kind review \
+  --diff "$TMP/change.diff" --repository example-org/example --pull-request 20 --base-sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  --head-sha "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" --correlation-id cli-broker --path src/app.py \
+  --task remote-task --workdir "$TMP/work" --output "$TMP/out-broker-nosecret" >/dev/null 2>"$TMP/err-broker-nosecret"; then
+  printf 'a broker without a secret name unexpectedly ran\n' >&2; exit 1
+fi
+check grep -qF 'requires DISPATCH_GATEWAY_BROKER_SECRET' "$TMP/err-broker-nosecret"
+
 if ! HOME="$TMP/caller-home" DISPATCH_OPENCODE_HOME="$TMP/opencode-home" \
   DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token \
   DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" PATH="$TMP/bin:/usr/bin:/bin" \
