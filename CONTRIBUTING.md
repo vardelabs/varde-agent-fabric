@@ -18,7 +18,7 @@ The fabric is the portable runtime layer, not a deployment repository. Keep host
 
 ## Before Opening a Pull Request
 
-1. Run `./tests/test-skeleton.sh`, `./tests/test-public-safety.sh`, and the relevant component tests.
+1. Run `./tests/test-skeleton.sh`, `./tests/test-public-safety.sh`, and the relevant component tests. CI runs the full suite on every pull request as the `Skeleton validation` check.
 2. Confirm the diff follows Public Safety above.
 3. Keep deployment-specific configuration in a private overlay or local environment.
 4. Add a regression test for any security, contract, routing, or lifecycle defect.
@@ -38,7 +38,7 @@ A named orchestrator remains responsible for policy validation, exact-head check
 
 ## Configuration and Provenance
 
-New routes must keep `model`, `harness`, `target`, and `kind` separate, validate compatible combinations, and record the effective route and fallback decision in provenance. A remote-unavailable fallback must be explicit and must not apply to authorization, malformed-result, stale-head, or contract failures.
+A result is usable only when it matches the expected schema, request identity, and execution contract, not because it parses as JSON. New routes must keep `model`, `harness`, `target`, and `kind` separate, validate compatible combinations, and record the effective route and fallback decision in provenance. A remote-unavailable fallback must be explicit and must not apply to authorization, malformed-result, stale-head, or contract failures.
 
 ## Issue and Change Scope
 
