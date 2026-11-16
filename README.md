@@ -161,8 +161,7 @@ Changes that affect contracts, routing, adapters, security boundaries, or
 migration dependencies should update the relevant issue and include focused
 regression coverage.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
-[code of conduct](CODE_OF_CONDUCT.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Security
 
