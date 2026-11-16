@@ -20,7 +20,7 @@ purpose agent platform.
 
 ## Quickstart
 
-Needs Python 3 and Bash 4.4 or newer (standard library only), Git, and for a live dispatch a backend CLI on `PATH` (`codex` or `opencode`). The tests need neither backend, credentials, nor network.
+Needs Python 3 and Bash 4.4 or newer (standard library only), Git, and for a live dispatch a supported backend CLI on `PATH` (see the [CLI guide](dispatch/cli/README.md) for the list). The tests need neither backend, credentials, nor network.
 
 ```bash
 git clone https://github.com/vardelabs/varde-agent-fabric
