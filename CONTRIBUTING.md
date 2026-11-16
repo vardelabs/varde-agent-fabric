@@ -10,9 +10,9 @@ The fabric is the portable runtime layer, not a deployment repository. Keep host
 
 - **Nothing private.** No secrets, private hostnames, tenant paths, deployment values, model weights, real source diffs (a synthetic diff in a fixture is fine), or operational logs.
 - **No customer names or data,** anywhere: code, comments, docs, tests, fixtures, branch names, commit messages, or issue and PR text. Write "a firm" or "the example firm", never an invented firm name.
-- **No internal names in content.** Use a generic role ("the orchestrator", "a worker", "the reviewer"). A test that needs an agent or tenant name uses an `example-` name, such as `/data/example-agent`. A tenant here is an agent's account on a host, never a customer.
+- **No internal names in content.** Do not name internal people, agents, hosts, or private repos in code, comments, docs, tests, or fixtures. Use a generic role ("the orchestrator", "a worker", "the reviewer"). Agent names are public, since agents sign commits, but code stays deployment-neutral. A test that needs an agent or tenant name uses an `example-` name, such as `/data/example-agent`. A tenant here is an agent's account on a host, never a customer.
 - **Comments state the constraint or the reason,** never a reviewer, a review round, or a date.
-- **If private material lands, stop and tell the operator.** Rotate any exposed secret. A follow-up commit does not fix it, because history keeps it. Rewriting history is the operator's decision.
+- **If private material lands, stop and tell the operator.** This covers a secret or a customer identifier in a commit, a branch, or a PR, and an internal name in content. The standard attribution in commits and PR footers does not count. Rotate any exposed secret. A follow-up commit does not fix it, because history keeps it. Rewriting history is the operator's decision.
 
 `scripts/check-public-safety.sh` catches private keys, AWS access key IDs, tenant paths, runtime paths, and Discord webhook URLs. It catches names only when `PUBLIC_SAFETY_DENYLIST` points at a deployment-owned list outside the repo; without it, the name rules depend on review.
 
