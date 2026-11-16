@@ -14,7 +14,7 @@ The fabric is the portable runtime layer, not a deployment repository. Keep host
 - **Comments state the constraint or the reason,** never a reviewer, a review round, or a date.
 - **If private material lands, stop and tell the operator.** This covers a secret or a customer identifier in a commit, a branch, or a PR, and an internal name in content. The standard attribution in commits and PR footers does not count. Rotate any exposed secret. A follow-up commit does not fix it, because history keeps it. Rewriting history is the operator's decision.
 
-`scripts/check-public-safety.sh` catches private keys, AWS access key IDs, tenant paths, runtime paths, and Discord webhook URLs. It catches names only when `PUBLIC_SAFETY_DENYLIST` points at a deployment-owned list outside the repo; without it, the name rules depend on review.
+`scripts/check-public-safety.sh` catches private keys, AWS access key IDs, tenant paths, runtime paths, and Discord webhook URLs. It catches names only when `PUBLIC_SAFETY_DENYLIST` points at a deployment-owned list, one name a line, outside the repo; without it, the name rules depend on review.
 
 ## Before Opening a Pull Request
 
