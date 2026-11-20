@@ -182,4 +182,14 @@ check test "$status" -ne 0
 check grep -qF 'model identifier is invalid' "$TMP/out-bad-model.stderr"
 check test ! -e "$state/record"
 
+# A direct backend call under a loose umask still writes an owner-only proposal.
+direct="$TMP/direct"
+mkdir -p "$direct/job/docs"
+printf 'new\n' > "$direct/job/docs/intro.md"
+printf '{"docs/intro.md": null}' > "$direct/manifest.json"
+printf '{"status": "SUCCESS", "response": "ok"}' > "$direct/report.json"
+(umask 022 && DISPATCH_WRITE_PATHS=docs/intro.md python3 "$ROOT/dispatch/cli/backends/agy_write.py" result \
+  "$direct/report.json" 0 0 "$direct/manifest.json" "$direct/job" "$MODEL" "$direct/out")
+check test "$(stat -c %a "$direct/out")" = 600
+
 printf 'agy backend: %d checks passed\n' "$pass"

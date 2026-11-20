@@ -58,6 +58,11 @@ class WriteProposalTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             WriteProposal.from_dict({**_proposal([]), "applied": True})
 
+    def test_paths_and_changes_must_be_arrays(self):
+        for field, value in (("paths", "docs/intro.md"), ("paths", None), ("changes", {}), ("changes", None)):
+            with self.subTest(field=field, value=value), self.assertRaises(ContractError):
+                WriteProposal.from_dict({**_proposal([]), field: value})
+
     def test_the_whole_proposal_is_bounded(self):
         paths = ("a.md", "b.md")
         changes = [{"path": path, "before_sha256": None, "after_text": "x" * (MAX_BYTES // 2 + 1)} for path in paths]

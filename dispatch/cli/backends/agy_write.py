@@ -196,6 +196,14 @@ def result(stdout_path: str, cli_status: int, timed_out: bool, manifest: str, jo
     return proposal.to_dict()
 
 
+def write_private(output: str, text: str) -> None:
+    """The proposal holds private file text, so it is owner-only whatever the caller's umask."""
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        os.fchmod(fd, 0o600)
+        stream.write(text)
+
+
 def main(argv: list[str]) -> int:
     try:
         if argv[:1] == ["stage"] and len(argv) == 4:
@@ -204,7 +212,7 @@ def main(argv: list[str]) -> int:
         if argv[:1] == ["result"] and len(argv) == 8:
             stdout_path, status, timed_out, manifest, job, model, output = argv[1:]
             proposal = result(stdout_path, int(status), timed_out == "1", manifest, job, model)
-            Path(output).write_text(json.dumps(proposal, ensure_ascii=False), encoding="utf-8")
+            write_private(output, json.dumps(proposal, ensure_ascii=False))
             return 0
     except RunFailed as exc:
         print(f"agy: {exc}", file=sys.stderr)

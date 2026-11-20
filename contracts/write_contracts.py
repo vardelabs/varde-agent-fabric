@@ -69,4 +69,7 @@ class WriteProposal:
         _keys(data, _KEYS)
         if data["schema"] != SCHEMA:
             raise ContractError("unsupported write proposal schema")
+        # tuple() would turn a string into its characters and a dict into its keys.
+        if not isinstance(data["paths"], list) or not isinstance(data["changes"], list):
+            raise ContractError("paths and changes must be arrays")
         return cls(data["worker_kind"], data["model"], tuple(data["paths"]), tuple(data["changes"]), data["response"])
