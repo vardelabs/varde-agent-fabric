@@ -66,3 +66,14 @@ normalization aliases within one file set.
 `resolve_job` merges a definition and a tenant entry into the flat job a runner executes. It refuses a missing or unknown value and an override the definition does not offer. `command` is either shell text with no placeholders, or a list of arguments. In a list, a placeholder must be a whole argument, an argument that holds a placeholder with other text is refused, and the arguments total at most 4096 characters. The contract does not parse shell grammar, so shell text can never hold a placeholder. `resolve_job` and `inline_job` join a list with `shlex.join`, so each filled value reaches the program as exactly one argument. What that program then does with the argument (for example `sh -c {{script}}`) is the definition's responsibility. The jobs that `resolve_job` and `inline_job` return are checked again against every field bound, with the joined `command` capped at 64 KiB, and `resolve_job` takes the plugin name, so an entry binds only to the plugin it names. `timezone` must be a named IANA zone (`localtime`, `posixrules`, and `Factory` are refused, because they depend on the host). Tenant values and `env` values cannot hold control characters, and each `cron` field may hold only digits, letters, `*`, `,`, `/`, and `-`.
 
 The contracts carry no host paths or credentials. A tenant's values, which may name its own paths and credential files, live only in that tenant's enablement file. The runner, not the contract, owns posting, repository writes, and run state.
+
+## Write contracts
+
+`write_contracts.py` defines `write-proposal.v1`, what a content writer returns:
+exactly `schema`, `worker_kind`, `model`, `paths` (the 1 to 50 relative files
+the caller named), `changes` (objects with `path`, `before_sha256` as null or
+lowercase SHA-256, and `after_text` as null or UTF-8 text, one per changed
+path), and `response`, the writer's final reply. A change outside `paths`, a
+duplicate path, or a change that neither creates, modifies, nor deletes is
+refused, and the whole proposal is bounded at 320 KiB. Nothing applies a
+proposal; the caller decides what to do with it.

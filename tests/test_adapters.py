@@ -32,7 +32,8 @@ def _implement_request(worker_kind: str, model: str | None) -> ImplementRequest:
 
 class AdapterRegistrationTests(unittest.TestCase):
     def test_adapter_may_forward_only_its_own_dispatch_variables(self):
-        for name in ("PATH", "HOME", "GEMINI_API_KEY", "dispatch_lowercase", "DISPATCH_TASK", "DISPATCH_MODEL"):
+        for name in ("PATH", "HOME", "GEMINI_API_KEY", "dispatch_lowercase", "DISPATCH_TASK", "DISPATCH_MODEL",
+                     "DISPATCH_WRITE_PATHS"):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
                     Adapter(name="example", env=(name,))

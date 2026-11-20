@@ -74,7 +74,7 @@ check bash -n "$ROOT/dispatch/cli/backends/codex.sh"
 check test -x "$CLI"
 check test -x "$ROOT/dispatch/cli/backends/codex.sh"
 help_text="$($CLI --help 2>&1 || true)"
-check grep -qF 'review or implement' <<<"$help_text"
+check grep -qF 'review, implement, or write' <<<"$help_text"
 check grep -qF 'use a Git worktree for isolated review' <<<"$help_text"
 
 if "$CLI" --harness missing --kind passthrough --task x --workdir "$TMP/work" 2>"$TMP/err"; then

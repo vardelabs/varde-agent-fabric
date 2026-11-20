@@ -63,7 +63,7 @@ dispatch/cli/varde-agent-dispatch \
   --output /path/to/review-artifact.json
 ```
 
-The current public backends are `codex`, `opencode`, `gemini`, `grok`, and `vibe`. The OpenCode adapter
+The current public backends are `codex`, `opencode`, `grok`, `vibe`, and `agy`. The OpenCode adapter
 supports CLI v2. Each backend is registered in `dispatch/adapters/`; see
 [Adding a Backend](#adding-a-backend). The dispatcher passes only an explicit
 runtime contract to a backend:
@@ -73,6 +73,7 @@ runtime contract to a backend:
 - `DISPATCH_OUTPUT`
 - `DISPATCH_KIND`
 - optional `DISPATCH_DIFF`
+- `DISPATCH_WRITE_PATHS`, for `--kind write` only: the `--path` values, one a line
 - optional `DISPATCH_MODEL`
 - optional `DISPATCH_TARGET`
 - routed `DISPATCH_HARNESS_OVERRIDDEN`
@@ -103,7 +104,10 @@ does not inherit the caller's environment,
 credentials, provider configuration, or shell aliases.
 
 `--kind implement` is the canonical write-capable implementation task.
-`passthrough` remains a legacy compatibility spelling. `--kind review` additionally
+`passthrough` remains a legacy compatibility spelling. `--kind write` asks a
+content writer for new text for the files named by `--path`, each a relative
+file path under the workdir, and refuses `--diff` and the review arguments. It
+runs only on a local route and returns a proposal that nothing applies. `--kind review` additionally
 requires `--diff` and exposes its canonical path through `DISPATCH_DIFF`.
 Implementation jobs reject a supplied diff rather than silently changing task
 semantics. Codex preserves the
@@ -168,135 +172,13 @@ env -i HOME=/path/to/opencode-home PATH="$PATH" opencode auth list --standalone
 The prompt refuses a non-interactive stdin. Do not use `--answer` for a key:
 it puts the key in the process arguments, where other local users can read it.
 
-### Gemini CLI
-
-The `gemini` backend runs the Gemini CLI in headless mode
-(`--prompt`, `--output-format json`) and writes the final response text to the
-output. It serves `review` only; the dispatcher refuses `implement` and
-`passthrough` for it. Settings cannot confine an edit, so implement waits for an
-OS sandbox. It needs an explicit model id, which must be the full id the CLI
-reports, not an alias. The prompt and the review diff go to the CLI on stdin, never in its
-arguments. The input starts with a fixed line, because the CLI runs input that
-starts with `/` as a command, and an untrusted workdir's commands still load.
-
-The CLI gets only the environment the adapter builds, under `env -i`: the
-absolute `PATH` entries that resolve outside the workdir, each as its resolved
-directory, the per-run home, a temp directory inside the run's
-private scratch, and the settings paths below. A proxy, `NODE_OPTIONS`, or an
-endpoint override never reaches it, and no `PATH` entry can find a `gemini` or
-`node` planted in the reviewed workdir. The backend's own interpreter is found
-on the caller's `PATH` before the backend runs, so a caller must never put
-reviewed files on it. The CLI writes
-the whole chat to its temp directory on an API error and never removes it, so
-that copy goes with the scratch. The CLI can read its workdir, so a run refuses
-a `TMPDIR` or a `DISPATCH_GEMINI_HOME` inside it. On INT or TERM the backend
-stops the CLI's whole process tree at once, waits up to 5 s for every process in
-it, kills any that remain, and then removes the scratch. The CLI stays in the backend's process group, so a SIGKILL to that
-group stops it too; only that SIGKILL, which no trap sees, can leave the
-scratch behind.
-
-It uses only the CLI's own Google sign-in, which needs a Gemini Code Assist
-Standard or Enterprise licence. Since 2026-06-18 Google no longer serves Gemini
-CLI to personal Google AI Pro, Ultra, or free individual accounts; their sign-in
-fails with "This client is no longer supported for Gemini Code Assist for
-individuals". Google stopped selling new Code Assist Standard and Enterprise
-subscriptions on 2026-10-09 and points new buyers to Antigravity, so this
-backend serves only an existing subscription. It also passes the CLI no Google
-Cloud project (`GOOGLE_CLOUD_PROJECT`), so it cannot serve a licence whose
-sign-in needs one; the CLI then fails with `ProjectIdRequiredError`. Check the
-sign-in with the real licensed account first, as "Adding a Backend" describes.
-Set `DISPATCH_GEMINI_HOME` to a
-dedicated home that holds that sign-in, outside the caller home, under the same
-rules as `DISPATCH_OPENCODE_HOME`.
-
-Each run gets its own home, 0700, which `HOME` and `GEMINI_CLI_HOME` point to and
-which is removed when the run ends, by signal too. Its `.gemini/settings.json` is
-the adapter's. Only the sign-in files of the dedicated home's `.gemini` are linked
-in (`oauth_creds.json`, `google_accounts.json`, `installation_id`, and any
-`*credential*` file), so the CLI's session state stays in the per-run home and goes
-with it. A refreshed access token is not written back, because the CLI replaces
-the link with a new file, so each run refreshes from the stored sign-in. The
-dedicated home's own `settings.json` is never read. The CLI loads a system
-settings file above user settings, and system defaults below them, when root
-owns the file and every parent directory. So the adapter points both system
-paths (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`)
-at files in the private scratch that never exist, and neither loads. A run never
-adds workspace settings above the user settings (see below), so the adapter's
-settings are final, except against a root-owned system policy directory
-(`/etc/gemini-cli/policies`, or `/Library/Application Support/GeminiCli/policies`
-on macOS). The CLI reads it from a fixed path, and its rules rank above any the
-adapter can set, so a run refuses while it holds a policy. The settings set
-these values:
-
-- `security.auth.enforcedType` to `oauth-personal`, so the CLI refuses an API key
-  or any other auth type. The dispatcher also forwards no key variable.
-- `advanced.ignoreLocalEnv`, so the CLI loads no plain `.env` file in or above
-  the folder it runs in. Without it, an untrusted workdir could set the CLI's
-  auth variables, such as `GOOGLE_CLOUD_PROJECT`, from its `.env`.
-- `tools.exclude` for `google_web_search` and `web_fetch`. The CLI's read-only
-  policy allows both, and text in a reviewed diff could steer workdir content
-  into a search or a fetch.
-- `tools.exclude` for `run_shell_command`, `enter_plan_mode`, and
-  `exit_plan_mode`, and `general.plan.enabled` off, so no run can reach a mode
-  or tool that executes.
-- `context.fileFiltering` ignoring the workdir's `.gitignore` and
-  `.geminiignore`, which would otherwise hide a reviewed file from the read
-  tools.
-- Folder trust prompts, auto-update, and usage statistics turned off.
-
-The administrator of the licensed account can require MCP servers through
-remote admin controls, which no local setting overrides. Use the backend only
-with an account whose admin controls require none, or that you administer.
-
-A review runs in the workdir with it untrusted
-(`GEMINI_CLI_TRUST_WORKSPACE=false`), so the workdir's `.gemini` settings and
-extensions do not load. The CLI then runs in `default` approval mode, where
-headless mode refuses every tool that needs approval, so the review writes
-nothing.
-
-The adapter reports "limit reached" (exit 75) only when the CLI reports a quota
-error: its JSON error has type `TerminalQuotaError` or `RetryableQuotaError`, or
-code 429. Either one is enough. The CLI raises these for a 429 from the model
-API, and exits with status 173, which is 429 modulo 256. A run that exits 0 is
-never a limit, even when stderr logs a 429 that a retry cleared or stdout holds
-a quota-shaped object. On a failed
-run, a quota error counts only from the object that ends stderr, and only when
-its integer code, modulo 256, is the exit status, as the CLI's own report always is. A retry
-the CLI logged, or an object a tool error echoed before more output, is a plain
-failure. One case stays open: a model can make a tool error echo a quota-shaped
-object with an integer code, and if the CLI then dies without printing anything
-more, with that code as its status, the run reads as a limit. That case changes
-only the caller's retry or backoff choice; it reaches no data and no write scope.
-
-The adapter never accepts an answer from a model other than the one requested.
-In headless mode the CLI has no fallback handler, so with an explicit model and
-outside `plan` approval mode it reports a quota error rather than switching
-models. The adapter still reads `stats.models`: if any model other than the
-requested one answered a main or subagent turn, or the requested model answered
-no main turn, the
-run fails loudly with status 1 and its text is discarded. It is never reported
-as a limit. Calls on other models in utility roles, such as routing or loop
-detection, are normal. Subagents are also turned off in the adapter's settings,
-and so is the edit correction that rewrites an edit on another model.
-Any other CLI failure returns the CLI's status with its error type and message,
-except that a status of 75, which means limit reached to the dispatcher, becomes 1.
-
-To sign in, run the CLI once, interactively, as the worker user, with the
-dedicated home, with an account that holds that licence. Choose "Sign in with
-Google" and finish the browser flow. The
-CLI stores the credential in the dedicated home.
-
-```text
-env -i HOME=/path/to/gemini-home GEMINI_CLI_HOME=/path/to/gemini-home PATH="$PATH" TERM="$TERM" gemini
-```
-
 ### Grok
 
 The `grok` backend reviews with Grok through OpenCode's built-in xAI provider,
 under the **SuperGrok Subscription** sign-in, never an API key. It serves
 `review` only and needs an `xai/<model>` id. Its output is OpenCode's event
 stream, so the adapter uses OpenCode's review parser and limit detector. It
-shares the Gemini backend's isolation (`backends/lib/review-isolation.sh`): the
+uses the shared isolation in `backends/lib/review-isolation.sh`: the
 dedicated home rules, `PATH` entries resolved and kept outside the workdir, the
 CLI under `env -i`, a private scratch with its own temp directory that is
 removed on every exit once the CLI's whole process tree has stopped, and a
@@ -352,8 +234,8 @@ env -i HOME=/path/to/grok-home PATH=/path/to/grok-home/bin:"$PATH" TERM="$TERM" 
 The `vibe` backend reviews with the Mistral Vibe CLI in headless mode. It reads
 an API key from `DISPATCH_VIBE_HOME/.env` (`MISTRAL_API_KEY=...`), a regular
 file, never a link. It serves `review` only and needs a `mistral/<model>` id,
-where the part after the slash is the Mistral API model name. It shares the
-Gemini backend's isolation (`backends/lib/review-isolation.sh`). The CLI runs
+where the part after the slash is the Mistral API model name. It uses the
+shared isolation in `backends/lib/review-isolation.sh`. The CLI runs
 under `env -i` with only `PATH`, `HOME`, `TMPDIR`, and `VIBE_HOME`, all in a
 private scratch, so a key, proxy, or endpoint override in the caller's
 environment never reaches it.
@@ -384,6 +266,52 @@ environment never reaches it.
 Install the CLI with a CPython that matches its wheel, for example
 `uv tool install --python 3.12 mistral-vibe`. Without a matching wheel, the
 package builds from source and needs a Rust toolchain.
+
+### Antigravity CLI (agy)
+
+The `agy` backend is a content writer. It serves `write` only: the dispatcher
+refuses `review` and `implement` for it. It runs the Antigravity CLI in print
+mode under the CLI's own Google sign-in, kept in `DISPATCH_AGY_HOME`, which must
+be an existing folder outside the caller home. It needs an explicit model id,
+such as one `agy models` lists. It uses the shared isolation in
+`backends/lib/review-isolation.sh`.
+
+- **Job folder:** the backend copies each `--path` file that exists in the
+  workdir into a private job folder, and agy runs there. A named file that does
+  not exist yet may be created. A named path that is a link, a special file, a
+  file with more than one link, over 320 KiB, or not UTF-8 is refused. Nothing
+  else from the workdir is copied, and the workdir is never written.
+- **Tools:** session-only settings (`--settings`, never saved to the home) set
+  `accept-edits`, so the run may edit files in its workspace, and
+  `request-review`, so every other tool asks, which a headless run refuses. Deny
+  rules name commands, MCP tools, and URL reads outright, and
+  `allowNonWorkspaceAccess` is off. The backend never passes
+  `--dangerously-skip-permissions`, and slash commands are off.
+- **Result:** the run must report `status` `SUCCESS` with exit 0 and no
+  `denied_actions`. The job folder must then hold only the named files and the
+  folders on the way to them. Any other entry, a link included, discards the
+  run. The output is a `write-proposal.v1` (`contracts/write_contracts.py`) that
+  lists each changed path with its `before_sha256` and `after_text`, null for a
+  created or deleted file, and agy's final reply. A failure names only the
+  report's `status` and `finished_reason` tokens, never its error text.
+- **Limits and time:** a quota or rate-limit error in the report's `error`
+  field exits 75; the response text is never matched. `--print-timeout` is
+  `DISPATCH_AGY_TIMEOUT_SECONDS` (default 600, at most 3600), and a watchdog
+  stops the CLI a few seconds later and reports out of time (124).
+- **Sign-in:** agy runs with `HOME` set to the sign-in home itself, so a token
+  it refreshes saves in place. The backend holds a lock on that folder for the
+  run, so two runs never refresh at once. The CLI gets only `PATH`, `HOME`,
+  `TMPDIR` (in the private scratch), and `AGY_CLI_DISABLE_AUTO_UPDATE=1`, so a
+  provider key such as `GEMINI_API_KEY` never reaches it. agy keeps each run's
+  conversation in the home, so give that user a disk quota.
+
+To sign in, run agy once, interactively, as the worker user, with the
+dedicated home, and finish the Google sign-in. A one-prompt headless answer
+with no tools then confirms it.
+
+```text
+env -i HOME=/path/to/agy-home PATH="$PATH" TERM="$TERM" AGY_CLI_DISABLE_AUTO_UPDATE=1 agy
+```
 
 The task and review diff are each bounded, and their combined prompt must fit
 `DISPATCH_MAX_TASK_BYTES` (default 120000 bytes). The dispatcher rejects an
