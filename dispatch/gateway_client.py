@@ -15,6 +15,7 @@ from typing import Callable
 from contracts.review_contracts import ContractError, MAX_TRANSPORT_BYTES, ReviewArtifact, ReviewRequest
 from contracts.implement_contracts import (ContractError as ImplementContractError, ImplementRequest,
                                            ImplementArtifact, MAX_BYTES as MAX_IMPLEMENT_BYTES)
+from contracts.write_contracts import WriteArtifact, WriteRequest, verify_write_artifact
 
 
 class GatewayError(RuntimeError):
@@ -36,6 +37,7 @@ UNAVAILABLE_STATUSES = frozenset({502, 503, 504})
 REMOTE_EXECUTION_LOCATIONS = frozenset({"remote", "cluster"})
 REVIEWS_PATH = "/v1/reviews"
 IMPLEMENTATIONS_PATH = "/v1/implementations"
+WRITES_PATH = "/v1/writes"
 
 
 def _bad_request_error(body: bytes) -> GatewayError:
@@ -88,6 +90,27 @@ class _GatewayRequests:
             expected = hashlib.sha256(before.encode("utf-8")).hexdigest() if before is not None else None
             if change["before_sha256"] != expected or (before is None and change["after_text"] is None):
                 raise GatewayError("gateway implementation change does not match snapshot")
+        return artifact
+
+    def submit_write(self, request: WriteRequest) -> WriteArtifact:
+        body = json.dumps(request.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(body) > MAX_IMPLEMENT_BYTES:
+            raise GatewayError("request exceeds transport limit")
+        status, raw = self._exchange(WRITES_PATH, body, request.timeout_seconds + 45, MAX_IMPLEMENT_BYTES)
+        if status != 200:
+            raise _status_error(status, raw, diagnose_bad_request=False)
+        if len(raw) > MAX_IMPLEMENT_BYTES:
+            raise GatewayError("gateway response exceeds transport limit")
+        try:
+            artifact = WriteArtifact.from_dict(json.loads(raw.decode("utf-8")))
+        except (UnicodeError, json.JSONDecodeError, ImplementContractError) as exc:
+            raise GatewayError("gateway returned malformed write artifact") from exc
+        if artifact.execution_location not in REMOTE_EXECUTION_LOCATIONS:
+            raise GatewayError("gateway write execution location mismatch")
+        try:
+            verify_write_artifact(artifact, request)
+        except ImplementContractError as exc:
+            raise GatewayError(f"gateway {exc}") from exc
         return artifact
 
     def submit(self, request: ReviewRequest) -> ReviewArtifact:
@@ -155,7 +178,8 @@ class GatewayClient(_GatewayRequests):
         return status, raw
 
 
-JOB_PATHS = {REVIEWS_PATH: "/v1/jobs/reviews", IMPLEMENTATIONS_PATH: "/v1/jobs/implementations"}
+JOB_PATHS = {REVIEWS_PATH: "/v1/jobs/reviews", IMPLEMENTATIONS_PATH: "/v1/jobs/implementations",
+             WRITES_PATH: "/v1/jobs/writes"}
 JOB_ID = re.compile(r"[0-9a-f]{32}")
 # One broker call must outlast the broker's own upstream timeout, so its refusal reaches us as a reply.
 BROKER_CALL_SECONDS = 60

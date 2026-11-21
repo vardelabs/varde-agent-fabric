@@ -363,6 +363,33 @@ mistake successful worker completion for a file modification. Authentication
 failures and unavailability never trigger a local implementation fallback.
 Remote reviews retain their existing route.
 
+## Remote write
+
+A route with `target: remote`, `kinds: ["write"]`, and fallback policy `none`
+runs a content writer on the remote side, for a writer that runs only under
+another account's sign-in. The harness must hold the `write` role, the same as
+a local write. A model is required, and the task is at most 16 KiB, both
+checked before any gateway connection. The CLI sends a `write-request.v1`
+(`contracts/write_contracts.py`) to `/v1/writes`: every `--path`, and the text
+of each named file that exists. A missing path is one the writer may create.
+The files are read the way the local backend stages them, so a link, a special
+file, a file with more than one link, over 320 KiB, or not UTF-8 is refused.
+
+```text
+varde-agent-dispatch --model example/writer --routes /path/to/remote-routes.json \
+  --kind write --task "bounded task" --workdir /path/to/worktree \
+  --repository org/repo --correlation-id request-id --path docs/page.md \
+  --output /path/to/proposal.json
+```
+
+The gateway answers with a `write-artifact.v1`. The CLI checks its identity
+against the request, its named paths, and each change's `before_sha256`
+against the text it sent. Then it reads the named files again, and if one
+changed during the run, it discards the proposal. The output is the inner
+`write-proposal.v1`, the same shape a local write returns, and it exits 0 also
+when nothing changed. The workdir is never written. Credentials, the timeout
+bound, and the no-fallback rule are those of a remote implementation.
+
 ## Adding a Backend
 
 `dispatch/adapters/` is the one registry for every role that calls a model,
@@ -413,15 +440,17 @@ account type.
 declares. A deployment registers a private backend with
 `adapters.register(Adapter(...))` from its own module, so the backend joins the
 same registry without appearing in this repository. A local run through this
-CLI resolves the harness for its role (`review` for `--kind review`,
-`implement` for `implement` and `passthrough`), so a backend serves only the
-roles it declares, and runs the backend's script in `backends/`. The remote
+CLI resolves the harness for its role (`review` for `--kind review`, `write`
+for `--kind write`, `implement` for `implement` and `passthrough`), so a backend
+serves only the roles it declares, and runs the backend's script in `backends/`. The remote
 runner's local fallback resolves the `review` role the same way. An adapter's
 `parse_review` and `detect_limit` let any other caller read the backend's
 output and limits without its own copy of that logic.
 
 The wire contracts in `contracts/` check a worker name's shape only, and a
-remote route accepts any worker name. The side that runs the job decides which
+remote review or implement route accepts any worker name. A remote write route
+sends only a harness with the `write` role, because the remote side runs the
+same local backend. The side that runs the job decides which
 of its workers may serve it, so a new backend can fill any role, a reviewer slot
 included, with no contract change.
 

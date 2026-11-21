@@ -168,15 +168,23 @@ if [[ "$route_target" != "remote" ]]; then
   role=implement
   [[ "$kind" == review || "$kind" == write ]] && role="$kind"
   adapter_registry role "$role" "$harness" || fail "harness $harness cannot serve kind $kind" 3
+elif [[ "$kind" == write ]]; then
+  # The remote worker runs the same local backend, so only a harness with the write role is sent.
+  adapter_registry role write "$harness" || fail "harness $harness cannot serve kind write" 3
 fi
 
 if [[ "$route_target" == "remote" ]]; then
-  [[ "$kind" == "review" || "$kind" == "implement" ]] || fail 'remote routes require review or implement kind' 3
+  [[ "$kind" == "review" || "$kind" == "implement" || "$kind" == "write" ]] || fail 'remote routes require review, implement, or write kind' 3
   [[ -n "$repository" && -n "$correlation_id" ]] || fail 'remote route requires repository and correlation ID' 2
   ((${#paths[@]} > 0)) || fail 'remote route requires at least one explicit --path' 2
   if [[ "$kind" == "review" ]]; then
     [[ -n "$pull_request" && -n "$base_sha" && -n "$head_sha" ]] || fail 'remote reviews require explicit pull request, base SHA, and head SHA' 2
     [[ "$pull_request" =~ ^[1-9][0-9]*$ ]] || fail '--pull-request must be a positive integer' 2
+  elif [[ "$kind" == "write" ]]; then
+    [[ "${route_fallback_policy:-none}" == "none" ]] || fail 'remote write requires fallback policy none' 3
+    [[ -n "$model" ]] || fail 'remote write requires a model' 2
+    write_task_bytes="$(LC_ALL=C printf '%s' "$task" | wc -c)"
+    (( write_task_bytes <= MAX_IMPLEMENT_TASK_BYTES )) || fail "write task exceeds ${MAX_IMPLEMENT_TASK_BYTES} bytes"
   else
     [[ "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires fallback policy none' 3
     [[ "$review_args_supplied" -eq 0 ]] || fail 'remote implement rejects PR, SHA and diff arguments' 2
