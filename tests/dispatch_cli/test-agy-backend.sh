@@ -58,6 +58,7 @@ case "$(cat "$state/scenario")" in
   failed) report ERROR '' '"Provider said secret-sentinel-3c1e"' error ''; exit 1 ;;
   not-json) printf 'Error: something broke\n' ;;
   hang) sleep 30 ;;
+  deep) printf 'new intro\n' > docs/intro.md; (cd "$data/brain/$conv" && mkdir -p "$(printf 'd/%.0s' {1..1100})"); done_ok ;;
 esac
 EOF
 chmod +x "$TMP/bin/agy"
@@ -198,6 +199,13 @@ chmod 0700 "$agy_data/brain"
 check test "$status" -eq 0
 check test "$(field "$TMP/out-prune-fails" 'p["schema"]')" = '"write-proposal.v1"'
 check grep -qF "could not delete this run's conversation" "$TMP/out-prune-fails.stderr"
+rm -rf "$agy_data/brain/$CONV"
+
+# A cleanup that crashes outright still leaves the run its proposal.
+write deep out-prune-crash
+check test "$status" -eq 0
+check test "$(field "$TMP/out-prune-crash" '[c["path"] for c in p["changes"]]')" = '["docs/intro.md"]'
+check grep -qF 'the conversation cleanup failed; the run continues' "$TMP/out-prune-crash.stderr"
 rm -rf "$agy_data/brain/$CONV"
 
 RUN_TIMEOUT=1 write hang out-hang
