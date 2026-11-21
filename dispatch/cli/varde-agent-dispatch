@@ -18,8 +18,8 @@ usage() {
 Usage: varde-agent-dispatch (--model ID --routes FILE | --harness NAME) --kind KIND --task TEXT --workdir DIR [options]
 
 Options:
-  --harness NAME   A registered backend name, such as codex, opencode, or gemini
-  --kind KIND      Work contract, review or implement (passthrough is legacy spelling; behavior is harness-specific)
+  --harness NAME   A registered backend name, such as codex, opencode, or agy
+  --kind KIND      Work contract, review, implement, or write (passthrough is legacy spelling; behavior is harness-specific)
   --task TEXT      Bounded task prompt
   --workdir DIR    Existing absolute directory (use a Git worktree for isolated review)
   --diff FILE      Review input, required for review kind
@@ -31,7 +31,7 @@ Options:
   --base-sha SHA     Review base commit SHA
   --head-sha SHA     Review head commit SHA
   --correlation-id ID  Request correlation identifier
-  --path PATH       Changed path, repeat for remote reviews
+  --path PATH       Changed path, repeat for remote reviews; for write, a file the writer may change
   --help           Show this help
 EOF
 }
@@ -152,6 +152,13 @@ fi
 case "$kind" in
   implement|passthrough) [[ -z "$diff" ]] || fail '--diff is only valid with --kind review' ;;
   review) [[ -n "$diff" && -f "$diff" ]] || fail '--diff must name a regular file for review' ;;
+  write)
+    [[ "$review_args_supplied" -eq 0 ]] || fail 'write rejects PR, SHA and diff arguments'
+    ((${#paths[@]} > 0)) || fail 'write requires at least one --path naming a file the writer may change'
+    for path in "${paths[@]}"; do
+      [[ -n "$path" && "$path" != /* && "$path" != *$'\n'* && "$path" != *$'\r'* ]] || fail "--path must be a relative path on one line"
+    done
+    ;;
   *) fail "unsupported kind: $kind" 3 ;;
 esac
 
@@ -159,7 +166,7 @@ backend="$BACKENDS_DIR/$harness.sh"
 if [[ "$route_target" != "remote" ]]; then
   [[ "$harness" != */* && -f "$backend" && -x "$backend" ]] || fail "unsupported harness: $harness" 3
   role=implement
-  [[ "$kind" == review ]] && role=review
+  [[ "$kind" == review || "$kind" == write ]] && role="$kind"
   adapter_registry role "$role" "$harness" || fail "harness $harness cannot serve kind $kind" 3
 fi
 
@@ -288,6 +295,9 @@ backend_env=(
   "DISPATCH_KIND=$DISPATCH_KIND"
 )
 [[ -n "${DISPATCH_DIFF:-}" ]] && backend_env+=("DISPATCH_DIFF=$DISPATCH_DIFF")
+if [[ "$kind" == write ]]; then
+  backend_env+=("DISPATCH_WRITE_PATHS=$(printf '%s\n' "${paths[@]}")")
+fi
 [[ -n "${DISPATCH_MODEL:-}" ]] && backend_env+=("DISPATCH_MODEL=$DISPATCH_MODEL")
 if ((${#route_target_arg[@]})); then backend_env+=("${route_target_arg[@]}"); fi
 if ((${#route_metadata_args[@]})); then backend_env+=("${route_metadata_args[@]}"); fi
