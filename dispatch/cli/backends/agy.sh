@@ -71,6 +71,10 @@ run_cli "$scratch/prompt" "$scratch/stdout" "$scratch/stderr" agy --output-forma
   --print-timeout "${timeout_s}s" --log-file "$scratch/agy.log"
 timed_out=0
 ! stopped_by_watchdog || timed_out=1
+# Still under the home lock, so no other run is writing the home while this run's
+# conversation goes. A cleanup that crashes costs disk, never the run's proposal.
+python3 "$backends/agy_write.py" prune "$dedicated_home_real" "$scratch/stdout" ||
+  printf 'agy: the conversation cleanup failed; the run continues\n' >&2
 result_status=0
 python3 "$backends/agy_write.py" result "$scratch/stdout" "$status" "$timed_out" "$scratch/manifest.json" \
   "$job" "$model" "$DISPATCH_OUTPUT" || result_status=$?

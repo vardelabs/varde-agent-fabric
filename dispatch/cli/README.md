@@ -302,8 +302,12 @@ such as one `agy models` lists. It uses the shared isolation in
   it refreshes saves in place. The backend holds a lock on that folder for the
   run, so two runs never refresh at once. The CLI gets only `PATH`, `HOME`,
   `TMPDIR` (in the private scratch), and `AGY_CLI_DISABLE_AUTO_UPDATE=1`, so a
-  provider key such as `GEMINI_API_KEY` never reaches it. agy keeps each run's
-  conversation in the home, so give that user a disk quota.
+  provider key such as `GEMINI_API_KEY` never reaches it.
+- **Conversations:** agy keeps each run's conversation in the home. After the
+  run, still under the lock, the backend deletes that one conversation, found by
+  the `conversation_id` in the report, and no other. A run that ends with no
+  report, such as one stopped at its time limit, leaves its conversation behind,
+  so still give that user a disk quota.
 
 To sign in, run agy once, interactively, as the worker user, with the
 dedicated home, and finish the Google sign-in. A one-prompt headless answer
