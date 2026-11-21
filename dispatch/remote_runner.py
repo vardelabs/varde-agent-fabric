@@ -10,6 +10,7 @@ import ssl
 
 from contracts.review_contracts import ReviewArtifact, ReviewRequest
 from contracts.implement_contracts import ImplementRequest, ImplementArtifact, collect_files
+from contracts.write_contracts import WriteProposal, WriteRequest, collect_write_files, snapshot_sha256
 from dispatch import adapters
 from dispatch.fallback_policy import run_with_remote_fallback
 from dispatch.gateway_client import BrokeredGatewayClient, GatewayClient, GatewayError
@@ -116,6 +117,32 @@ def run_remote_implement(metadata: RemoteImplementMetadata, *, fallback_policy: 
     return artifact
 
 
+@dataclass(frozen=True)
+class RemoteWriteMetadata:
+    repository: str
+    correlation_id: str
+    paths: tuple[str, ...]
+    task: str
+    workdir: str
+    harness: str
+    model: str
+    target: str = "remote"
+    timeout_seconds: int = 300
+
+
+def run_remote_write(metadata: RemoteWriteMetadata, *, fallback_policy: str) -> WriteProposal:
+    if metadata.target != "remote" or fallback_policy != "none":
+        raise GatewayError("remote write requires a remote target and no fallback")
+    request = WriteRequest(metadata.repository, metadata.harness, metadata.model, metadata.correlation_id,
+                           metadata.task, metadata.paths, collect_write_files(metadata.workdir, metadata.paths),
+                           metadata.timeout_seconds)
+    artifact = _gateway_client().submit_write(request)
+    # The proposal is built against the text sent; a caller file that changed since would be overwritten.
+    if snapshot_sha256(collect_write_files(metadata.workdir, metadata.paths)) != request.snapshot_sha256:
+        raise GatewayError("a named file changed during the run; the proposal is discarded")
+    return artifact.proposal
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser()
@@ -134,15 +161,20 @@ def main() -> int:
     parser.add_argument("--correlation-id", required=True)
     parser.add_argument("--path", action="append", required=True)
     parser.add_argument("--task", required=True)
-    parser.add_argument("--kind", choices=("review", "implement"), default="review")
+    parser.add_argument("--kind", choices=("review", "implement", "write"), default="review")
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args()
     if args.kind == "review" and (args.pull_request is None or not args.base_sha or not args.head_sha):
         parser.error("review requires pull request, base SHA and head SHA")
-    if args.kind == "implement" and any(v is not None for v in (args.pull_request, args.base_sha, args.head_sha, args.diff)):
-        parser.error("implement rejects review metadata")
+    if args.kind in ("implement", "write") and any(v is not None for v in (args.pull_request, args.base_sha, args.head_sha, args.diff)):
+        parser.error(f"{args.kind} rejects review metadata")
     try:
-        if args.kind == "implement":
+        if args.kind == "write":
+            metadata = RemoteWriteMetadata(args.repository, args.correlation_id, tuple(args.path), args.task,
+                                           args.workdir, args.harness, args.model, args.target,
+                                           args.timeout_seconds)
+            artifact = run_remote_write(metadata, fallback_policy=args.fallback_policy)
+        elif args.kind == "implement":
             metadata = RemoteImplementMetadata(args.repository, args.correlation_id, tuple(args.path),
                                                args.task, args.workdir, args.output, args.harness,
                                                args.target, args.timeout_seconds, args.model)

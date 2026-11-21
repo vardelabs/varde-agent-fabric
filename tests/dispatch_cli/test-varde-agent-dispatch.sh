@@ -515,6 +515,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
         assert self.headers["Authorization"] == "Bearer cli-test-token"
+        if self.path == "/v1/writes":
+            self.write_reply(request)
+            return
         if request["worker_kind"] == "opencode" and self.path == "/v1/reviews":
             assert request["model"] == "opencode-go/qwen3.8-flash"
             self.send_response(503)
@@ -568,6 +571,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "correlation_id": request["correlation_id"], "findings": [],
             "finish_reason": "completed", "fallback": None, "latency_ms": 1,
             }).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+    def write_reply(self, request):
+        # Stands in for a remote worker that ran the local write backend on the sent files.
+        assert request["schema"] == "write-request.v1" and request["worker_kind"] == "agy"
+        assert request["repository"] == "example-org/example" and request["model"] == "remote/writer"
+        sent = {item["path"]: item["content"] for item in request["files"]}
+        assert sent == {"selected.txt": "before"} and request["paths"] == ["selected.txt", "new.md"]
+        files = sorted(request["files"], key=lambda item: item["path"])
+        digest = hashlib.sha256(json.dumps(files, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        before = hashlib.sha256(b"before").hexdigest()
+        if request["correlation_id"] == "cli-write-forged":
+            before = "0" * 64
+        changes = [] if request["task"] == "no-op" else [
+            {"path": "selected.txt", "before_sha256": before, "after_text": "after"},
+            {"path": "new.md", "before_sha256": None, "after_text": "fresh"}]
+        proposal = {"schema": "write-proposal.v1", "worker_kind": "agy", "model": request["model"],
+                    "paths": request["paths"], "changes": changes, "response": "wrote it"}
+        body = json.dumps({"schema": "write-artifact.v1", "repository": request["repository"],
+            "worker_kind": "agy", "model": request["model"], "correlation_id": request["correlation_id"],
+            "snapshot_sha256": digest, "execution_location": "remote", "latency_ms": 1,
+            "proposal": proposal}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
     def log_message(self, *_): pass
@@ -675,6 +700,40 @@ for scenario in change no-op; do
   check grep -qF before "$TMP/work/selected.txt"
 done
 check grep -qF '"changes":[]' "$TMP/out-implement-no-op"
+
+# A remote write sends the named files and returns the same proposal a local write does.
+cat > "$TMP/write-routes.json" <<'EOF'
+{"schema":"dispatch-routes.v1","routes":{
+  "remote/writer":{"default_harness":"agy","harnesses":["agy","codex"],"target":"remote","kinds":["write"],"fallback":{"policy":"none"}}}}
+EOF
+remote_write() {  # remote_write <name> <task> <correlation-id> [extra args...]
+  local name="$1" task="$2" correlation="$3"; shift 3
+  status=0
+  DISPATCH_GATEWAY_URL="https://localhost:$remote_port" DISPATCH_GATEWAY_TOKEN=cli-test-token DISPATCH_GATEWAY_CA_FILE="$TMP/cert.pem" \
+    PATH="$TMP/bin:/usr/bin:/bin" "$CLI" --routes "$TMP/write-routes.json" --kind write \
+    --repository example-org/example --correlation-id "$correlation" --path selected.txt --path new.md --task "$task" \
+    --workdir "$TMP/work" --output "$TMP/out-$name" "$@" >"$TMP/stdout-$name" 2>"$TMP/err-$name" || status=$?
+}
+field() { python3 -c 'import json,sys; print(json.dumps(eval(sys.argv[2], {}, {"p": json.load(open(sys.argv[1]))})))' "$@"; }
+remote_write write-change change cli-write --model remote/writer
+check test "$status" -eq 0
+check test "$(field "$TMP/out-write-change" 'p["schema"]')" = '"write-proposal.v1"'
+check test "$(field "$TMP/out-write-change" '[c["after_text"] for c in p["changes"]]')" = '["after", "fresh"]'
+check grep -qxF before "$TMP/work/selected.txt"
+check test ! -e "$TMP/work/new.md"
+remote_write write-noop no-op cli-write-noop --model remote/writer
+check test "$status" -eq 0
+check test "$(field "$TMP/out-write-noop" 'p["changes"]')" = '[]'
+remote_write write-forged change cli-write-forged --model remote/writer
+check test "$status" -eq 4
+check grep -qF 'does not match the sent text' "$TMP/err-write-forged"
+check test ! -e "$TMP/out-write-forged"
+remote_write write-codex change cli-write --model remote/writer --harness codex
+check test "$status" -eq 3
+check grep -qF 'harness codex cannot serve kind write' "$TMP/err-write-codex"
+remote_write write-pr change cli-write --model remote/writer --pull-request 7
+check test "$status" -ne 0
+check grep -qF 'write rejects PR, SHA and diff arguments' "$TMP/err-write-pr"
 
 cat > "$TMP/kimi-implement-routes.json" <<'EOF'
 {"schema":"dispatch-routes.v1","routes":{

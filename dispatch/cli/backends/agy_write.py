@@ -20,14 +20,13 @@ import json
 import os
 from pathlib import Path
 import re
-import stat
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from contracts.implement_contracts import MAX_BYTES, ContractError
-from contracts.write_contracts import MAX_RESPONSE_BYTES, WriteProposal, write_paths
+from contracts.implement_contracts import ContractError
+from contracts.write_contracts import MAX_RESPONSE_BYTES, WriteProposal, open_parent, read_named, write_paths
 
 LIMIT_REACHED = 75
 OUT_OF_TIME = 124
@@ -61,58 +60,6 @@ def _token(value: object) -> str:
 def named_paths() -> tuple[str, ...]:
     lines = [line for line in os.environ.get("DISPATCH_WRITE_PATHS", "").split("\n") if line]
     return write_paths(lines)
-
-
-def _open_parent(root_fd: int, path: str) -> int | None:
-    """A no-follow descriptor for the path's parent folder, or None when a parent does not exist."""
-    fd = os.dup(root_fd)
-    for part in path.split("/")[:-1]:
-        try:
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-        except FileNotFoundError:
-            os.close(fd)
-            return None
-        os.close(fd)
-        fd = next_fd
-    return fd
-
-
-def _read_bounded(parent_fd: int, name: str) -> bytes | None:
-    """The file's bytes, or None when it does not exist. Links, specials and oversize files are refused."""
-    try:
-        file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise ContractError("a named path is a link") from exc
-        raise
-    try:
-        info = os.fstat(file_fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_BYTES:
-            raise ContractError("a named path is not a bounded regular file")
-        with os.fdopen(os.dup(file_fd), "rb") as stream:
-            data = stream.read(MAX_BYTES + 1)
-    finally:
-        os.close(file_fd)
-    if len(data) > MAX_BYTES:
-        raise ContractError("a named path is not a bounded regular file")
-    data.decode("utf-8")
-    return data
-
-
-def read_named(root: str, path: str) -> bytes | None:
-    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        parent_fd = _open_parent(root_fd, path)
-        if parent_fd is None:
-            return None
-        try:
-            return _read_bounded(parent_fd, path.split("/")[-1])
-        finally:
-            os.close(parent_fd)
-    finally:
-        os.close(root_fd)
 
 
 def stage(workdir: str, job: str, manifest: str) -> None:
@@ -254,7 +201,7 @@ def prune(home: str, stdout_path: str) -> None:
         return
     home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        data_fd = _open_parent(home_fd, AGY_DATA_DIR + "/")
+        data_fd = open_parent(home_fd, AGY_DATA_DIR + "/")
         if data_fd is None:
             return
         try:

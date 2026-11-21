@@ -77,3 +77,16 @@ path), and `response`, the writer's final reply. A change outside `paths`, a
 duplicate path, or a change that neither creates, modifies, nor deletes is
 refused, and the whole proposal is bounded at 320 KiB. Nothing applies a
 proposal; the caller decides what to do with it.
+
+A remote write carries two more contracts. `write-request.v1` holds exactly
+`schema`, `repository`, `worker_kind`, `model`, `correlation_id`, `task` (at
+most 16 KiB), `paths` (as above), `files` (0 to 50 objects with `path` and
+`content`, one per named file that exists, each inside `paths`), and
+`timeout_seconds` (1 to 900). Its snapshot digest is computed as for an
+implement request. `write-artifact.v1` holds exactly `schema`, `repository`,
+`worker_kind`, `model`, `correlation_id`, `snapshot_sha256`,
+`execution_location`, `latency_ms`, and `proposal`, the unchanged
+`write-proposal.v1`, whose worker and model must match. `verify_write_artifact`
+refuses an artifact whose identity, named paths, or any `before_sha256`
+differs from the request. Both are bounded at 320 KiB. The module imports only
+`implement_contracts.py`, so an executing side can load the two files by path.
