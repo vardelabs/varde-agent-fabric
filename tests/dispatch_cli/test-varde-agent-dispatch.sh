@@ -734,6 +734,9 @@ check grep -qF 'harness codex cannot serve kind write' "$TMP/err-write-codex"
 remote_write write-pr change cli-write --model remote/writer --pull-request 7
 check test "$status" -ne 0
 check grep -qF 'write rejects PR, SHA and diff arguments' "$TMP/err-write-pr"
+remote_write write-big "$(head -c 16385 /dev/zero | tr '\0' x)" cli-write --model remote/writer
+check test "$status" -ne 0
+check grep -qF 'write task exceeds 16384 bytes' "$TMP/err-write-big"
 
 cat > "$TMP/kimi-implement-routes.json" <<'EOF'
 {"schema":"dispatch-routes.v1","routes":{

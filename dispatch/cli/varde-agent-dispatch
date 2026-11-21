@@ -183,6 +183,8 @@ if [[ "$route_target" == "remote" ]]; then
   elif [[ "$kind" == "write" ]]; then
     [[ "${route_fallback_policy:-none}" == "none" ]] || fail 'remote write requires fallback policy none' 3
     [[ -n "$model" ]] || fail 'remote write requires a model' 2
+    write_task_bytes="$(LC_ALL=C printf '%s' "$task" | wc -c)"
+    (( write_task_bytes <= MAX_IMPLEMENT_TASK_BYTES )) || fail "write task exceeds ${MAX_IMPLEMENT_TASK_BYTES} bytes"
   else
     [[ "${route_fallback_policy:-none}" == "none" ]] || fail 'remote implement requires fallback policy none' 3
     [[ "$review_args_supplied" -eq 0 ]] || fail 'remote implement rejects PR, SHA and diff arguments' 2

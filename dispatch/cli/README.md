@@ -368,7 +368,8 @@ Remote reviews retain their existing route.
 A route with `target: remote`, `kinds: ["write"]`, and fallback policy `none`
 runs a content writer on the remote side, for a writer that runs only under
 another account's sign-in. The harness must hold the `write` role, the same as
-a local write, and a model is required. The CLI sends a `write-request.v1`
+a local write. A model is required, and the task is at most 16 KiB, both
+checked before any gateway connection. The CLI sends a `write-request.v1`
 (`contracts/write_contracts.py`) to `/v1/writes`: every `--path`, and the text
 of each named file that exists. A missing path is one the writer may create.
 The files are read the way the local backend stages them, so a link, a special
