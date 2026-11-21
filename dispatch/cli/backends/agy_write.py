@@ -3,11 +3,14 @@
 Usage:
   agy_write.py stage WORKDIR JOB MANIFEST
   agy_write.py result STDOUT CLI_STATUS TIMED_OUT MANIFEST JOB MODEL OUTPUT
+  agy_write.py prune HOME STDOUT
 
 The named paths come from DISPATCH_WRITE_PATHS, one a line. `stage` copies each
 named file that exists into JOB and records its sha256 in MANIFEST. `result`
 reads agy's JSON report and JOB, and writes a write-proposal.v1 to OUTPUT. A
 usage limit exits 75, a run stopped at its time limit 124, any other failure 1.
+`prune` deletes the conversation the run left in the sign-in HOME, named by the
+conversation id in agy's report, and only warns when it cannot.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -34,6 +38,12 @@ MAX_REPORT_BYTES = 1024 * 1024
 LIMIT_MARKERS = ("quota", "rate limit", "rate-limit", "resource_exhausted", "429", "spend cap", "spend-cap",
                  "prepaid balance")
 _TOKEN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+# agy names each run's entries in its data folder by the run's conversation id.
+AGY_DATA_DIR = ".gemini/antigravity-cli"
+RUN_ENTRIES = (("brain", ("",)),
+               ("conversations", (".db", ".db-wal", ".db-shm", ".db-journal")),
+               ("presence", (".lock",)))
+CONVERSATION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 class RunFailed(Exception):
@@ -196,6 +206,73 @@ def result(stdout_path: str, cli_status: int, timed_out: bool, manifest: str, jo
     return proposal.to_dict()
 
 
+def _run_conversation_id(stdout_path: str) -> str | None:
+    """The run's conversation id from agy's report, or None when the report names no well-formed one."""
+    try:
+        report = _report(stdout_path)
+    except (OSError, RunFailed):
+        return None
+    conversation_id = report.get("conversation_id")
+    if isinstance(conversation_id, str) and CONVERSATION_ID.fullmatch(conversation_id):
+        return conversation_id
+    return None
+
+
+def _open_folder(parent_fd: int, name: str) -> int | None:
+    try:
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return None
+
+
+def _remove_entry(parent_fd: int, name: str) -> None:
+    """Remove a file, a link, or a whole folder without following any link inside it."""
+    try:
+        folder_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+            raise
+        os.unlink(name, dir_fd=parent_fd)
+        return
+    try:
+        for child in list(os.scandir(folder_fd)):
+            _remove_entry(folder_fd, child.name)
+    finally:
+        os.close(folder_fd)
+    os.rmdir(name, dir_fd=parent_fd)
+
+
+def prune(home: str, stdout_path: str) -> None:
+    """Delete only this run's conversation from the sign-in home, so repeated runs do not fill it.
+
+    Other conversations are never touched: the entries are named by the id the run's own report gives.
+    """
+    conversation_id = _run_conversation_id(stdout_path)
+    if conversation_id is None:
+        return
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        data_fd = _open_parent(home_fd, AGY_DATA_DIR + "/")
+        if data_fd is None:
+            return
+        try:
+            for folder, suffixes in RUN_ENTRIES:
+                folder_fd = _open_folder(data_fd, folder)
+                if folder_fd is None:
+                    continue
+                try:
+                    for suffix in suffixes:
+                        _remove_entry(folder_fd, conversation_id + suffix)
+                finally:
+                    os.close(folder_fd)
+        finally:
+            os.close(data_fd)
+    finally:
+        os.close(home_fd)
+
+
 def write_private(output: str, text: str) -> None:
     """The proposal holds private file text, so it is owner-only whatever the caller's umask."""
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -213,6 +290,13 @@ def main(argv: list[str]) -> int:
             stdout_path, status, timed_out, manifest, job, model, output = argv[1:]
             proposal = result(stdout_path, int(status), timed_out == "1", manifest, job, model)
             write_private(output, json.dumps(proposal, ensure_ascii=False))
+            return 0
+        if argv[:1] == ["prune"] and len(argv) == 3:
+            try:
+                prune(*argv[1:])
+            except OSError as exc:
+                # The proposal stands either way; a leftover conversation costs only disk.
+                print(f"agy: could not delete this run's conversation: {exc.strerror}", file=sys.stderr)
             return 0
     except RunFailed as exc:
         print(f"agy: {exc}", file=sys.stderr)

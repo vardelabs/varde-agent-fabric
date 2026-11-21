@@ -36,7 +36,13 @@ while (($#)); do case "$1" in --settings) settings="$2"; shift 2 ;; *) shift ;; 
   printf 'settings=%s\n' "$(tr -d ' \n' < "$settings")"
   printf 'staged=%s\n' "$(find . -type f | sort | tr '\n' ' ')"
 } > "$state/record"
-report() { printf '{"conversation_id":"c1","status":"%s","response":"%s","error":%s,"num_turns":1,"finished_reason":"%s"%s}\n' "$@"; }
+# Like the real CLI, every run leaves its conversation in the home, named by its id.
+conv="$(cat "$state/conv")"
+data="$HOME/.gemini/antigravity-cli"
+mkdir -p "$data/brain/$conv/.system_generated/logs" "$data/conversations" "$data/presence"
+printf 'log\n' > "$data/brain/$conv/.system_generated/logs/transcript"
+: > "$data/conversations/$conv.db"; : > "$data/conversations/$conv.db-wal"; : > "$data/presence/$conv.lock"
+report() { printf '{"conversation_id":"%s","status":"%s","response":"%s","error":%s,"num_turns":1,"finished_reason":"%s"%s}\n' "$conv" "$@"; }
 done_ok() { report SUCCESS 'wrote the copy' null stop ''; }
 case "$(cat "$state/scenario")" in
   edit) printf 'new intro\n' > docs/intro.md; mkdir -p docs/new; printf 'fresh\n' > docs/new/page.md; done_ok ;;
@@ -62,8 +68,18 @@ reset_work() {
   printf 'old intro\n' > "$TMP/work/docs/intro.md"
   printf 'unnamed\n' > "$TMP/work/secret.md"
 }
+CONV=0b5e7c1a-2f4d-4e6a-9c3b-8d1f2a3b4c5d
+OTHER_CONV=7e2d9f10-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+agy_data="$TMP/agy-home/.gemini/antigravity-cli"
+run_entries() {  # run_entries <conversation-id>: what one run leaves in the home
+  printf '%s\n' "$agy_data/brain/$1" "$agy_data/conversations/$1.db" "$agy_data/conversations/$1.db-wal" \
+    "$agy_data/presence/$1.lock"
+}
+none_exist() { local entry; while IFS= read -r entry; do [[ ! -e "$entry" && ! -L "$entry" ]] || return 1; done; }
+all_exist() { local entry; while IFS= read -r entry; do [[ -e "$entry" ]] || return 1; done; }
 run() {  # run <scenario> <out-name> [extra dispatcher args...]
   printf '%s' "$1" > "$state/scenario"
+  printf '%s' "${RUN_CONV:-$CONV}" > "$state/conv"
   local name="$2"; shift 2
   reset_work
   rm -f "$state/record"
@@ -102,7 +118,18 @@ check grep -qF '"deny":["command(*)","mcp(*)","read_url(*)","execute_url(*)"]' "
 check grep -qF '"agentMode":"accept-edits","toolPermission":"request-review","allowNonWorkspaceAccess":false' "$record"
 check_not grep -qF 'must-not-forward' "$record"
 check_not compgen -G "${TMPDIR:-/tmp}/agy-dispatch.*" >/dev/null
-check test -z "$(ls -A "$TMP/agy-home")"
+check none_exist < <(run_entries "$CONV")
+check test -z "$(find "$agy_data" -mindepth 2)"
+
+# A run deletes only its own conversation: another one in the home stays.
+mkdir -p "$agy_data/brain/$OTHER_CONV"
+run_entries "$OTHER_CONV" | tail -n +2 | xargs touch
+printf 'keep\n' > "$agy_data/brain/$OTHER_CONV/notes"
+write edit out-neighbor
+check test "$status" -eq 0
+check none_exist < <(run_entries "$CONV")
+check all_exist < <(run_entries "$OTHER_CONV")
+check grep -qxF keep "$agy_data/brain/$OTHER_CONV/notes"
 
 write unchanged out-unchanged
 check test "$status" -eq 0
@@ -139,10 +166,39 @@ write failed out-failed
 check test "$status" -eq 1
 check grep -qF 'status=error finished_reason=error' "$TMP/out-failed.stderr"
 check_not grep -qF 'secret-sentinel-3c1e' "$TMP/out-failed.stderr"
+check none_exist < <(run_entries "$CONV")
 
 write not-json out-notjson
 check test "$status" -eq 1
 check grep -qF 'agy wrote no JSON report' "$TMP/out-notjson.stderr"
+# With no report there is no id to go by, so nothing is deleted rather than guessed at.
+check all_exist < <(run_entries "$CONV")
+rm -rf "$agy_data/brain/$CONV"; run_entries "$CONV" | tail -n +2 | xargs rm -f
+
+# An id that is not a conversation id is never used as a path.
+RUN_CONV=../../../escape write edit out-bad-id
+check test "$status" -eq 0
+check test -e "$TMP/agy-home/escape/.system_generated/logs/transcript"
+check test -e "$TMP/agy-home/escape.db"
+rm -rf "$TMP/agy-home/escape" "$TMP/agy-home/escape".*
+
+# A conversation folder that is a link loses only the link, never what it points at.
+mkdir -p "$TMP/outside"
+ln -s "$TMP/outside" "$agy_data/brain/$CONV"
+write edit out-brain-link
+check test "$status" -eq 0
+check none_exist < <(run_entries "$CONV")
+check test -e "$TMP/outside/.system_generated/logs/transcript"
+
+# A conversation that cannot be deleted leaves a warning, and the proposal still stands.
+mkdir -p "$agy_data/brain/$CONV"
+chmod 0500 "$agy_data/brain"
+write edit out-prune-fails
+chmod 0700 "$agy_data/brain"
+check test "$status" -eq 0
+check test "$(field "$TMP/out-prune-fails" 'p["schema"]')" = '"write-proposal.v1"'
+check grep -qF "could not delete this run's conversation" "$TMP/out-prune-fails.stderr"
+rm -rf "$agy_data/brain/$CONV"
 
 RUN_TIMEOUT=1 write hang out-hang
 check test "$status" -eq 124
